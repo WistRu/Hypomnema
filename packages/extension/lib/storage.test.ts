@@ -1,3 +1,4 @@
+import { snapshotTabFaviconUrlMaxLength } from "@tabhub/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const storage = vi.hoisted(() => ({
@@ -18,7 +19,7 @@ import { createPendingSnapshot } from "./queue";
 import {
   BROWSER_CONFIG_VERSION,
   getBrowserIdentifier,
-  getStoredBrowserIdentifier,
+  readQueueState,
   writeIdentityAndQueueState,
 } from "./storage";
 
@@ -32,12 +33,6 @@ describe("browser identity storage", () => {
     storage.get.mockResolvedValue({ [STORAGE_KEYS.browser]: "chrome" });
 
     await expect(getBrowserIdentifier()).resolves.toBeUndefined();
-  });
-
-  it("retains a legacy identity only for closing its stale server rows", async () => {
-    storage.get.mockResolvedValue({ [STORAGE_KEYS.browser]: "chrome" });
-
-    await expect(getStoredBrowserIdentifier()).resolves.toBe("chrome");
   });
 
   it("returns an identity only when the explicit-choice marker is current", async () => {
@@ -84,5 +79,43 @@ describe("browser identity storage", () => {
         [STORAGE_KEYS.pendingSnapshots]: [closeOld, openNew],
       }),
     );
+  });
+
+  it("turns legacy queue records rejected by the current schema into dead letters", async () => {
+    const legacyOversizedSnapshot = {
+      attempts: 0,
+      createdAt: "2026-08-07T12:00:00.000Z",
+      id: "legacy-oversized",
+      kind: "snapshot",
+      payload: {
+        browser: "chrome",
+        tabs: [
+          {
+            faviconUrl: "f".repeat(snapshotTabFaviconUrlMaxLength + 1),
+            index: 0,
+            url: "https://example.com",
+            windowId: 1,
+          },
+        ],
+      },
+    };
+    storage.get.mockResolvedValue({
+      [STORAGE_KEYS.deadLetters]: [],
+      [STORAGE_KEYS.pendingSnapshots]: [legacyOversizedSnapshot],
+    });
+
+    const state = await readQueueState();
+
+    expect(state.pending).toEqual([]);
+    expect(state.deadLetters).toEqual([
+      expect.objectContaining({
+        attempts: 1,
+        browser: "chrome",
+        createdAt: "2026-08-07T12:00:00.000Z",
+        error: expect.stringContaining("queue migration"),
+        id: "legacy-oversized",
+        kind: "snapshot",
+      }),
+    ]);
   });
 });

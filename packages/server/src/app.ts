@@ -28,6 +28,7 @@ import type { EmbeddingProvider } from "./embedding-provider.js";
 import { registerEmbeddingRoutes } from "./embedding-routes.js";
 import { createGraphCatalog } from "./graph-catalog.js";
 import { registerGraphRoutes } from "./graph-routes.js";
+import { registerRequestSecurity } from "./request-security.js";
 
 export interface CreateAppOptions {
   databasePath: string;
@@ -69,6 +70,7 @@ export function createApp(options: CreateAppOptions): TabHubApp {
     logger: options.logger ?? false,
     bodyLimit: tabHubHttpBodyLimitBytes,
   });
+  registerRequestSecurity(app);
   const tabCatalog = createTabCatalog(database.connection, options.clock);
   const tagCatalog = createTagCatalog(database.connection);
   const statsCatalog = createStatsCatalog(database.connection);

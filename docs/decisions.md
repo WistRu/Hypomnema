@@ -20,3 +20,4 @@
 - 2026-08-08: Keep schema-valid snapshots below the Fastify body limit, compact superseded offline work, cap local queue storage, and dead-letter permanent HTTP failures so one bad payload cannot block later captures.
 - 2026-08-08: Require a versioned explicit browser choice in each extension install; automatic capture waits for it, and a later change durably closes the old identity before opening the new one.
 - 2026-08-08: Virtualize dynamically measured table rows with TanStack Virtual while retaining server pagination, native table semantics, and expandable summaries.
+- 2026-08-08: Treat loopback as a browser security boundary: reject non-local Host and Origin values, block non-extension cross-site Fetch Metadata requests, and deny framing to prevent DNS rebinding, request-triggered provider work, and clickjacking.

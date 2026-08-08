@@ -1,3 +1,4 @@
+import { tabUrlMaxLength } from "@tabhub/shared/limits";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -71,6 +72,30 @@ describe("captureEligibleTabs", () => {
     );
 
     expect(result.captured).toHaveLength(1);
+    expect(result.skipped).toBe(1);
+  });
+
+  it("skips an extracted URL outside the shared ingest contract without poisoning siblings", async () => {
+    const oversizedUrl = `https://example.com/${"x".repeat(tabUrlMaxLength)}`;
+    expect(oversizedUrl.length).toBeGreaterThan(tabUrlMaxLength);
+
+    const result = await captureEligibleTabs(
+      [
+        { id: 1, index: 0, url: "https://one.example", windowId: 1 },
+        { id: 2, index: 1, url: "https://two.example", windowId: 1 },
+      ],
+      async (tabId) => ({
+        htmlExcerpt: `<p>${tabId}</p>`,
+        text: String(tabId),
+        url: tabId === 1 ? oversizedUrl : "https://two.example",
+      }),
+    );
+
+    expect(result.captured).toEqual([
+      expect.objectContaining({
+        page: expect.objectContaining({ url: "https://two.example" }),
+      }),
+    ]);
     expect(result.skipped).toBe(1);
   });
 });

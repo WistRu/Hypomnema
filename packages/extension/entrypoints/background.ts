@@ -33,7 +33,6 @@ import {
 } from "../lib/queue";
 import {
   getBrowserIdentifier,
-  getStoredBrowserIdentifier,
   readQueueState,
   writeIdentityAndQueueState,
   writeQueueState,
@@ -129,7 +128,7 @@ function changeBrowserIdentity(
 ): Promise<DrainQueueResult> {
   return serializeSync(async () => {
     const [previousBrowser, tabs, state] = await Promise.all([
-      getStoredBrowserIdentifier(),
+      getBrowserIdentifier(),
       browser.tabs.query({}),
       readQueueState(),
     ]);

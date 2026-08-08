@@ -1,3 +1,7 @@
+import {
+  snapshotTabFaviconUrlMaxLength,
+  snapshotTabTitleMaxLength,
+} from "@tabhub/shared";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -43,6 +47,53 @@ describe("toSnapshotTab", () => {
           index: 1,
           title: "Available",
           url: "https://example.com",
+          windowId: 1,
+        },
+      ],
+    });
+  });
+
+  it("normalizes browser-owned metadata without losing valid sibling tabs", () => {
+    const oversizedFavicon = `data:image/png;base64,${"a".repeat(
+      snapshotTabFaviconUrlMaxLength,
+    )}`;
+    const oversizedTitle = "t".repeat(snapshotTabTitleMaxLength + 100);
+
+    expect(
+      buildSnapshot("chrome", [
+        {
+          favIconUrl: oversizedFavicon,
+          index: 0,
+          title: oversizedTitle,
+          url: "https://example.com/large-metadata",
+          windowId: 1,
+        },
+        {
+          index: 1,
+          title: "Good sibling",
+          url: "https://example.com/good",
+          windowId: 1,
+        },
+        {
+          index: 2,
+          title: "Bad URL",
+          url: "not a url",
+          windowId: 1,
+        },
+      ]),
+    ).toEqual({
+      browser: "chrome",
+      tabs: [
+        {
+          index: 0,
+          title: "t".repeat(snapshotTabTitleMaxLength),
+          url: "https://example.com/large-metadata",
+          windowId: 1,
+        },
+        {
+          index: 1,
+          title: "Good sibling",
+          url: "https://example.com/good",
           windowId: 1,
         },
       ],

@@ -51,14 +51,6 @@ export async function getBrowserIdentifier(): Promise<
     : undefined;
 }
 
-export async function getStoredBrowserIdentifier(): Promise<
-  KnownBrowser | undefined
-> {
-  const stored = await browser.storage.local.get(STORAGE_KEYS.browser);
-  const storedBrowser = stored[STORAGE_KEYS.browser];
-  return isKnownBrowser(storedBrowser) ? storedBrowser : undefined;
-}
-
 function parsePendingItem(value: unknown): PendingItem | undefined {
   if (
     !isRecord(value) ||
@@ -152,6 +144,48 @@ function parseDeadLetter(value: unknown): DeadLetter | undefined {
   return deadLetter;
 }
 
+function rejectedPendingToDeadLetter(
+  value: unknown,
+  index: number,
+  failedAt: string,
+): DeadLetter | undefined {
+  if (
+    !isRecord(value) ||
+    (value.kind !== "snapshot" && value.kind !== "content")
+  ) {
+    return undefined;
+  }
+
+  const payload = isRecord(value.payload) ? value.payload : undefined;
+  const attempts =
+    Number.isInteger(value.attempts) && (value.attempts as number) >= 0
+      ? (value.attempts as number) + 1
+      : 1;
+  const deadLetter: DeadLetter = {
+    attempts,
+    browser:
+      typeof payload?.browser === "string" && payload.browser.length > 0
+        ? payload.browser
+        : "unknown",
+    createdAt:
+      typeof value.createdAt === "string" ? value.createdAt : failedAt,
+    error:
+      "Stored operation was rejected during queue migration because its payload or metadata no longer satisfies the current schema.",
+    failedAt,
+    id:
+      typeof value.id === "string" && value.id.length > 0
+        ? value.id
+        : `legacy-${value.kind}-${index}`,
+    kind: value.kind,
+  };
+
+  if (value.kind === "content" && typeof payload?.url === "string") {
+    deadLetter.url = payload.url;
+  }
+
+  return deadLetter;
+}
+
 export async function readQueueState(): Promise<StoredQueueState> {
   const stored = await browser.storage.local.get([
     STORAGE_KEYS.pendingSnapshots,
@@ -159,21 +193,38 @@ export async function readQueueState(): Promise<StoredQueueState> {
   ]);
   const pendingValue = stored[STORAGE_KEYS.pendingSnapshots];
   const deadLetterValue = stored[STORAGE_KEYS.deadLetters];
+  const failedAt = new Date().toISOString();
+  const rejectedPending: DeadLetter[] = [];
 
   const pending = Array.isArray(pendingValue)
-    ? pendingValue.flatMap((item) => {
+    ? pendingValue.flatMap((item, index) => {
         const parsed = parsePendingItem(item);
+
+        if (parsed === undefined) {
+          const deadLetter = rejectedPendingToDeadLetter(
+            item,
+            index,
+            failedAt,
+          );
+
+          if (deadLetter !== undefined) {
+            rejectedPending.push(deadLetter);
+          }
+        }
+
         return parsed === undefined ? [] : [parsed];
       })
     : [];
-  const deadLetters = Array.isArray(deadLetterValue)
+  const storedDeadLetters = Array.isArray(deadLetterValue)
     ? deadLetterValue
         .flatMap((item) => {
           const parsed = parseDeadLetter(item);
           return parsed === undefined ? [] : [parsed];
         })
-        .slice(-MAX_DEAD_LETTERS)
     : [];
+  const deadLetters = [...storedDeadLetters, ...rejectedPending].slice(
+    -MAX_DEAD_LETTERS,
+  );
 
   return { deadLetters, pending };
 }

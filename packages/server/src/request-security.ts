@@ -1,0 +1,58 @@
+import type { FastifyInstance } from "fastify";
+
+const localAuthorityPattern = /^(?:127\.0\.0\.1|localhost)(?::([1-9]\d{0,4}))?$/i;
+const extensionOriginPattern = /^chrome-extension:\/\/[a-z0-9_-]+$/i;
+
+function hasValidOptionalPort(match: RegExpExecArray): boolean {
+  const port = match[1];
+  return port === undefined || Number(port) <= 65_535;
+}
+
+export function isAllowedLocalHostHeader(value: unknown): boolean {
+  if (typeof value !== "string") {
+    return false;
+  }
+
+  const match = localAuthorityPattern.exec(value);
+  return match !== null && hasValidOptionalPort(match);
+}
+
+export function isAllowedBrowserOrigin(value: string): boolean {
+  if (extensionOriginPattern.test(value)) {
+    return true;
+  }
+
+  const prefix = "http://";
+  if (!value.toLowerCase().startsWith(prefix)) {
+    return false;
+  }
+
+  return isAllowedLocalHostHeader(value.slice(prefix.length));
+}
+
+export function isExtensionOrigin(value: string | undefined): boolean {
+  return value !== undefined && extensionOriginPattern.test(value);
+}
+
+export function registerRequestSecurity(app: FastifyInstance): void {
+  app.addHook("onRequest", async (request, reply) => {
+    reply.header("Content-Security-Policy", "frame-ancestors 'none'");
+    reply.header("X-Frame-Options", "DENY");
+
+    if (!isAllowedLocalHostHeader(request.headers.host)) {
+      return reply.code(421).send({ error: "UNTRUSTED_HOST" });
+    }
+
+    const origin = request.headers.origin;
+    if (origin !== undefined && !isAllowedBrowserOrigin(origin)) {
+      return reply.code(403).send({ error: "UNTRUSTED_ORIGIN" });
+    }
+
+    if (
+      request.headers["sec-fetch-site"] === "cross-site" &&
+      !isExtensionOrigin(origin)
+    ) {
+      return reply.code(403).send({ error: "CROSS_SITE_REQUEST_BLOCKED" });
+    }
+  });
+}

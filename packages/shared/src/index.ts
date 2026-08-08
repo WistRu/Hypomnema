@@ -1,7 +1,13 @@
 import { z } from "zod";
 
-export const tabHubHttpBodyLimitBytes = 16 * 1024 * 1024;
-export const ingestSnapshotBodyLimitBytes = 15 * 1024 * 1024;
+import {
+  ingestSnapshotBodyLimitBytes,
+  snapshotTabFaviconUrlMaxLength,
+  snapshotTabTitleMaxLength,
+  tabUrlMaxLength,
+} from "@tabhub/shared/limits";
+
+export * from "@tabhub/shared/limits";
 
 export const knownBrowserOptions = [
   "chrome",
@@ -24,15 +30,15 @@ export const tabUrlSchema = z
   .string()
   .trim()
   .min(1)
-  .max(16_384)
+  .max(tabUrlMaxLength)
   .refine((value) => URL.canParse(value), "Invalid URL");
 
 export const snapshotTabSchema = z.object({
   url: tabUrlSchema,
-  title: z.string().max(2_048).optional(),
+  title: z.string().max(snapshotTabTitleMaxLength).optional(),
   windowId: z.number().int(),
   index: z.number().int().nonnegative(),
-  faviconUrl: z.string().max(16_384).optional(),
+  faviconUrl: z.string().max(snapshotTabFaviconUrlMaxLength).optional(),
 });
 
 export type SnapshotTab = z.infer<typeof snapshotTabSchema>;

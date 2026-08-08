@@ -8,6 +8,7 @@ import { createApp } from "./app.js";
 import { createAnthropicSummaryProvider } from "./summary-provider.js";
 import { createEmbeddingProviderFromEnv } from "./embedding-provider.js";
 import { resolveServerHost } from "./runtime-config.js";
+import { listenWithCleanup } from "./server-lifecycle.js";
 
 const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
 loadEnvironment({ path: resolve(workspaceRoot, ".env") });
@@ -96,7 +97,9 @@ const app = createApp({
 });
 
 try {
-  await app.listen({ host, port });
+  await listenWithCleanup(app, { host, port }, (closeError) => {
+    app.log.error(closeError, "Failed to close TabHub after startup failure");
+  });
 } catch (error) {
   app.log.error(error);
   process.exitCode = 1;

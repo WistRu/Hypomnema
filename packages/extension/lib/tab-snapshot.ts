@@ -3,6 +3,11 @@ import type {
   IngestSnapshot,
   SnapshotTab,
 } from "@tabhub/shared";
+import {
+  snapshotTabFaviconUrlMaxLength,
+  snapshotTabSchema,
+  snapshotTabTitleMaxLength,
+} from "@tabhub/shared";
 
 export interface BrowserTabLike {
   favIconUrl?: string | undefined;
@@ -26,14 +31,18 @@ export function toSnapshotTab(tab: BrowserTabLike): SnapshotTab | undefined {
   };
 
   if (tab.title !== undefined) {
-    snapshotTab.title = tab.title;
+    snapshotTab.title = tab.title.slice(0, snapshotTabTitleMaxLength);
   }
 
-  if (tab.favIconUrl !== undefined) {
+  if (
+    tab.favIconUrl !== undefined &&
+    tab.favIconUrl.length <= snapshotTabFaviconUrlMaxLength
+  ) {
     snapshotTab.faviconUrl = tab.favIconUrl;
   }
 
-  return snapshotTab;
+  const parsed = snapshotTabSchema.safeParse(snapshotTab);
+  return parsed.success ? parsed.data : undefined;
 }
 
 export function buildSnapshot(

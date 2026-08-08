@@ -1,3 +1,5 @@
+import { tabUrlMaxLength } from "@tabhub/shared/limits";
+
 export const MAX_TEXT_LENGTH = 2_000_000;
 export const MAX_HTML_EXCERPT_LENGTH = 250_000;
 const DEFAULT_CAPTURE_CONCURRENCY = 4;
@@ -42,23 +44,39 @@ export interface ExtractionParts {
 
 export type TabExtractor = (tabId: number) => Promise<unknown>;
 
-function isHttpUrl(value: string): boolean {
-  try {
-    const protocol = new URL(value).protocol;
-    return protocol === "http:" || protocol === "https:";
-  } catch {
-    return false;
+function parseHttpUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
   }
+
+  const normalized = value.trim();
+
+  if (normalized.length === 0 || normalized.length > tabUrlMaxLength) {
+    return undefined;
+  }
+
+  let protocol: string;
+
+  try {
+    protocol = new URL(normalized).protocol;
+  } catch {
+    return undefined;
+  }
+
+  return protocol === "http:" || protocol === "https:"
+    ? normalized
+    : undefined;
 }
 
 export function toEligibleCaptureTab(
   tab: CapturableTab,
 ): EligibleCaptureTab | undefined {
+  const url = parseHttpUrl(tab.url);
+
   if (
     tab.discarded === true ||
     !Number.isInteger(tab.id) ||
-    typeof tab.url !== "string" ||
-    !isHttpUrl(tab.url)
+    url === undefined
   ) {
     return undefined;
   }
@@ -67,7 +85,7 @@ export function toEligibleCaptureTab(
     discarded: tab.discarded,
     id: tab.id as number,
     index: tab.index,
-    url: tab.url,
+    url,
     windowId: tab.windowId,
   };
 }
@@ -102,10 +120,10 @@ function parseExtractedPage(value: unknown): ExtractedPage | undefined {
   }
 
   const candidate = value as Partial<ExtractedPage>;
+  const url = parseHttpUrl(candidate.url);
 
   if (
-    typeof candidate.url !== "string" ||
-    !isHttpUrl(candidate.url) ||
+    url === undefined ||
     typeof candidate.text !== "string" ||
     typeof candidate.htmlExcerpt !== "string"
   ) {
@@ -117,7 +135,7 @@ function parseExtractedPage(value: unknown): ExtractedPage | undefined {
     fallbackText: "",
     readabilityHtml: candidate.htmlExcerpt,
     readabilityText: candidate.text,
-    url: candidate.url,
+    url,
   });
 }
 
