@@ -5,7 +5,7 @@ import {
   tableFeatures,
   useTable,
 } from "@tanstack/react-table";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useId, useState } from "react";
 
 import { fetchTabs, type OpenFilter } from "./api";
 
@@ -76,6 +76,17 @@ function fullDate(value: string) {
       }).format(date);
 }
 
+function useDebouncedValue(value: string, delay: number) {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedValue(value), delay);
+    return () => window.clearTimeout(timer);
+  }, [delay, value]);
+
+  return debouncedValue;
+}
+
 function BrowserBadge({ browser }: { browser: string }) {
   const normalized = browser.toLowerCase();
   return (
@@ -100,6 +111,25 @@ function Importance({ level }: { level: number }) {
   );
 }
 
+function SummaryDisclosure({ summary }: { summary: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const summaryId = useId();
+
+  return (
+    <div className={expanded ? "summary-disclosure is-expanded" : "summary-disclosure"}>
+      <p id={summaryId}>{summary}</p>
+      <button
+        aria-controls={summaryId}
+        aria-expanded={expanded}
+        type="button"
+        onClick={() => setExpanded((current) => !current)}
+      >
+        {expanded ? "Collapse" : "Expand"}
+      </button>
+    </div>
+  );
+}
+
 const columns = columnHelper.columns([
   columnHelper.accessor("title", {
     header: "Tab",
@@ -114,6 +144,7 @@ const columns = columnHelper.columns([
             </svg>
           </a>
           <span>{hostname(tab.url)}</span>
+          {tab.summary?.trim() ? <SummaryDisclosure summary={tab.summary.trim()} /> : null}
         </div>
       );
     },
@@ -167,11 +198,23 @@ function FilterIcon() {
   );
 }
 
+function SearchIcon() {
+  return (
+    <svg className="search-icon" viewBox="0 0 20 20" aria-hidden="true">
+      <circle cx="8.75" cy="8.75" r="4.75" />
+      <path d="m12.25 12.25 3.75 3.75" />
+    </svg>
+  );
+}
+
 export function App() {
   const [browser, setBrowser] = useState("all");
   const [openState, setOpenState] = useState<OpenFilter>("all");
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
   const [currentTime, setCurrentTime] = useState(Date.now());
+  const debouncedSearch = useDebouncedValue(search, 300);
+  const q = debouncedSearch.trim();
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(Date.now()), 60_000);
@@ -179,8 +222,8 @@ export function App() {
   }, []);
 
   const tabsQuery = useQuery({
-    queryKey: ["tabs", { browser, openState, page }],
-    queryFn: ({ signal }) => fetchTabs({ browser, openState, page }, signal),
+    queryKey: ["tabs", { browser, openState, page, q }],
+    queryFn: ({ signal }) => fetchTabs({ browser, openState, page, q }, signal),
   });
 
   const tabs = tabsQuery.data?.items ?? EMPTY_TABS;
@@ -191,11 +234,13 @@ export function App() {
     getRowId: (row) => String(row.id),
   });
 
-  const hasFilters = browser !== "all" || openState !== "all";
+  const hasFilters = browser !== "all" || openState !== "all" || search.length > 0;
+  const hasAppliedFilters = browser !== "all" || openState !== "all" || q.length > 0;
   const clearFilters = () => {
     setBrowser("all");
     setOpenState("all");
     setPage(1);
+    setSearch("");
   };
   const totalPages = tabsQuery.data
     ? Math.max(1, Math.ceil(tabsQuery.data.total / tabsQuery.data.pageSize))
@@ -257,6 +302,21 @@ export function App() {
               <FilterIcon />
               <span>Filters</span>
             </div>
+            <label className="search-field">
+              <span>Search tab titles and content</span>
+              <SearchIcon />
+              <input
+                type="search"
+                value={search}
+                autoComplete="off"
+                maxLength={500}
+                placeholder="Search titles and content"
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setPage(1);
+                }}
+              />
+            </label>
             <label>
               <span>Browser</span>
               <select
@@ -363,10 +423,12 @@ export function App() {
                   <span />
                 </div>
                 <div>
-                  <strong>{hasFilters ? "No tabs match these filters" : "No tabs yet"}</strong>
+                  <strong>
+                    {hasAppliedFilters ? "No tabs match your search or filters" : "No tabs yet"}
+                  </strong>
                   <span>
-                    {hasFilters
-                      ? "Try another browser or tab state."
+                    {hasAppliedFilters
+                      ? "Try another search, browser, or tab state."
                       : "Connect a browser extension to fill this workspace."}
                   </span>
                 </div>

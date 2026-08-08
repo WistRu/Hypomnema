@@ -11,7 +11,7 @@
       <header>
         <div>
           <p class="eyebrow">TabHub</p>
-          <h1>Tab sync</h1>
+          <h1>Tab capture</h1>
         </div>
         <span id="status-dot" class="status-dot pending" aria-hidden="true"></span>
       </header>
@@ -22,14 +22,20 @@
           <strong id="server-status">Checking…</strong>
         </div>
         <div>
-          <span class="label">Unsynced snapshots</span>
+          <span class="label">Unsynced items</span>
           <strong id="pending-count">—</strong>
         </div>
       </section>
 
       <p id="detail" class="detail" role="status" aria-live="polite"></p>
 
-      <button id="snapshot-button" class="primary" type="button">
+      <button id="capture-current-button" class="primary" type="button">
+        Capture current tab
+      </button>
+      <button id="capture-all-button" class="secondary" type="button">
+        Capture all eligible tabs
+      </button>
+      <button id="snapshot-button" class="secondary" type="button">
         Snapshot now
       </button>
       <button id="options-button" class="secondary" type="button">

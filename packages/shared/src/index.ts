@@ -50,6 +50,24 @@ export type IngestSnapshotResponse = z.infer<
   typeof ingestSnapshotResponseSchema
 >;
 
+export const ingestContentSchema = z.object({
+  browser: browserIdentifierSchema,
+  url: tabUrlSchema,
+  text: z.string().max(2_000_000),
+  htmlExcerpt: z.string().max(250_000),
+});
+
+export type IngestContent = z.infer<typeof ingestContentSchema>;
+
+export const ingestContentResponseSchema = z.object({
+  tabId: z.number().int().positive(),
+  extractedAt: z.string().datetime(),
+});
+
+export type IngestContentResponse = z.infer<
+  typeof ingestContentResponseSchema
+>;
+
 export const tabStatusSchema = z.enum([
   "inbox",
   "in_progress",
@@ -103,6 +121,7 @@ const queryBooleanSchema = z.preprocess((value) => {
 export const tabListQuerySchema = z.object({
   browser: browserIdentifierSchema.optional(),
   is_open: queryBooleanSchema.optional(),
+  q: z.string().trim().min(1).max(500).optional(),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(200).default(50),
 });

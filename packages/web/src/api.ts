@@ -6,6 +6,7 @@ export interface TabListFilters {
   browser: string;
   openState: OpenFilter;
   page: number;
+  q: string;
 }
 
 export async function fetchTabs(
@@ -23,6 +24,10 @@ export async function fetchTabs(
 
   if (filters.openState !== "all") {
     searchParams.set("is_open", String(filters.openState === "open"));
+  }
+
+  if (filters.q) {
+    searchParams.set("q", filters.q);
   }
 
   const response = await fetch(`/api/tabs?${searchParams.toString()}`, {

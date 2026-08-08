@@ -1,6 +1,7 @@
 import { browser } from "wxt/browser";
 
 import type {
+  CaptureSummary,
   ExtensionRequest,
   ExtensionResponse,
   ExtensionStatus,
@@ -20,6 +21,12 @@ const serverStatus = requiredElement<HTMLElement>("#server-status");
 const pendingCount = requiredElement<HTMLElement>("#pending-count");
 const statusDot = requiredElement<HTMLElement>("#status-dot");
 const detail = requiredElement<HTMLElement>("#detail");
+const captureCurrentButton = requiredElement<HTMLButtonElement>(
+  "#capture-current-button",
+);
+const captureAllButton = requiredElement<HTMLButtonElement>(
+  "#capture-all-button",
+);
 const snapshotButton =
   requiredElement<HTMLButtonElement>("#snapshot-button");
 const optionsButton = requiredElement<HTMLButtonElement>("#options-button");
@@ -39,8 +46,21 @@ function renderStatus(status: ExtensionStatus): void {
   } else if (status.pendingCount > 0) {
     detail.textContent = "Saved locally and waiting to retry.";
   } else {
-    detail.textContent = "All snapshots are synchronized.";
+    detail.textContent = "All queued items are synchronized.";
   }
+}
+
+function formatCaptureSummary(summary: CaptureSummary): string {
+  if (summary.captured === 0) {
+    return `Captured 0 of ${summary.requested}; skipped ${summary.skipped}. No content was sent.`;
+  }
+
+  const queued =
+    summary.queued > 0
+      ? ` ${summary.queued} saved locally for automatic retry.`
+      : " Content synchronized.";
+
+  return `Captured ${summary.captured} of ${summary.requested}; skipped ${summary.skipped}.${queued}`;
 }
 
 async function sendRequest(
@@ -58,29 +78,77 @@ async function refreshStatus(): Promise<void> {
   }
 }
 
-snapshotButton.addEventListener("click", () => {
+const actionButtons = [
+  captureCurrentButton,
+  captureAllButton,
+  snapshotButton,
+];
+
+function setActionsDisabled(disabled: boolean): void {
+  for (const button of actionButtons) {
+    button.disabled = disabled;
+  }
+}
+
+function runAction(
+  button: HTMLButtonElement,
+  busyLabel: string,
+  request: ExtensionRequest,
+  doneLabel: string,
+): void {
+  const originalLabel = button.textContent;
+
   void (async () => {
-    snapshotButton.disabled = true;
-    snapshotButton.textContent = "Taking snapshot…";
-    const response = await sendRequest({ type: "tabhub:snapshot-now" });
+    setActionsDisabled(true);
+    button.textContent = busyLabel;
+    const response = await sendRequest(request);
     renderStatus(response.status);
 
     if (!response.ok) {
       detail.textContent = response.error;
+    } else if (response.capture !== undefined) {
+      detail.textContent = formatCaptureSummary(response.capture);
     } else if (response.status.pendingCount > 0) {
       detail.textContent = "Snapshot saved locally; retry is automatic.";
     } else {
-      detail.textContent = "Snapshot synchronized.";
+      detail.textContent = doneLabel;
     }
   })()
     .catch((error: unknown) => {
       detail.textContent =
-        error instanceof Error ? error.message : "Snapshot failed.";
+        error instanceof Error ? error.message : "Extension action failed.";
     })
     .finally(() => {
-      snapshotButton.disabled = false;
-      snapshotButton.textContent = "Snapshot now";
+      setActionsDisabled(false);
+      button.textContent = originalLabel;
     });
+}
+
+captureCurrentButton.addEventListener("click", () => {
+  runAction(
+    captureCurrentButton,
+    "Capturing current tab…",
+    { type: "tabhub:capture-current" },
+    "Current tab captured.",
+  );
+});
+
+captureAllButton.addEventListener("click", () => {
+  runAction(
+    captureAllButton,
+    "Capturing eligible tabs…",
+    { type: "tabhub:capture-all" },
+    "Eligible tabs captured.",
+  );
+});
+
+snapshotButton.addEventListener("click", () => {
+  runAction(
+    snapshotButton,
+    "Taking snapshot…",
+    { type: "tabhub:snapshot-now" },
+    "Snapshot synchronized.",
+  );
 });
 
 optionsButton.addEventListener("click", () => {

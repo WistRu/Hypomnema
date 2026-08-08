@@ -24,18 +24,21 @@ body {
 }
 
 button,
+input,
 select {
   font: inherit;
 }
 
 button,
 a,
+input,
 select {
   -webkit-tap-highlight-color: transparent;
 }
 
 button:focus-visible,
 a:focus-visible,
+input:focus-visible,
 select:focus-visible {
   outline: 2px solid #728dff;
   outline-offset: 2px;
@@ -317,6 +320,19 @@ main {
   stroke-width: 1.35;
 }
 
+.search-icon {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: #737c89;
+  stroke-linecap: round;
+  stroke-width: 1.4;
+  pointer-events: none;
+}
+
 .filter-bar label {
   position: relative;
 }
@@ -328,6 +344,36 @@ main {
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
+}
+
+.search-field {
+  flex: 1 1 220px;
+  max-width: 340px;
+}
+
+.search-field input {
+  width: 100%;
+  height: 32px;
+  border: 1px solid #292f3a;
+  border-radius: 6px;
+  padding: 0 10px 0 32px;
+  color: #d2d7df;
+  background: #171b23;
+  font-size: 11px;
+}
+
+.search-field input::placeholder {
+  color: #737c89;
+}
+
+.search-field input:hover {
+  border-color: #384150;
+  background: #1a1f28;
+}
+
+.search-field input:focus {
+  border-color: #526696;
+  background: #1a1f28;
 }
 
 select {
@@ -500,6 +546,47 @@ tbody tr:hover {
   font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.summary-disclosure {
+  display: flex;
+  max-width: 100%;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 5px;
+}
+
+.summary-disclosure p {
+  display: -webkit-box;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #929ba8;
+  font-size: 10px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+
+.summary-disclosure.is-expanded p {
+  display: block;
+  overflow: visible;
+}
+
+.summary-disclosure button {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 0;
+  color: #8ca0ff;
+  background: transparent;
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.summary-disclosure button:hover {
+  color: #b2bfff;
 }
 
 .browser-badge {
@@ -734,6 +821,11 @@ time {
 
   .filter-bar label {
     flex: 1 1 calc(50% - 6px);
+  }
+
+  .filter-bar .search-field {
+    flex-basis: 100%;
+    max-width: none;
   }
 
   select {

@@ -1,5 +1,6 @@
 import {
   browserIdentifierSchema,
+  ingestContentSchema,
   ingestSnapshotSchema,
   knownBrowserOptions,
   type BrowserIdentifier,
@@ -7,7 +8,7 @@ import {
 import { browser } from "wxt/browser";
 
 import { STORAGE_KEYS } from "./constants";
-import type { PendingSnapshot } from "./queue";
+import type { PendingItem } from "./queue";
 
 export type KnownBrowser = (typeof knownBrowserOptions)[number];
 
@@ -47,15 +48,14 @@ export async function setBrowserIdentifier(value: KnownBrowser): Promise<void> {
   await browser.storage.local.set({ [STORAGE_KEYS.browser]: value });
 }
 
-function parsePendingSnapshot(value: unknown): PendingSnapshot | undefined {
+function parsePendingItem(value: unknown): PendingItem | undefined {
   if (!isRecord(value)) {
     return undefined;
   }
 
-  const payload = ingestSnapshotSchema.safeParse(value.payload);
+  const kind = value.kind === "content" ? "content" : "snapshot";
 
   if (
-    !payload.success ||
     typeof value.id !== "string" ||
     value.id.length === 0 ||
     typeof value.createdAt !== "string" ||
@@ -65,12 +65,30 @@ function parsePendingSnapshot(value: unknown): PendingSnapshot | undefined {
     return undefined;
   }
 
-  const pending: PendingSnapshot = {
+  const metadata = {
     attempts: value.attempts as number,
     createdAt: value.createdAt,
     id: value.id,
-    payload: payload.data,
   };
+  let pending: PendingItem;
+
+  if (kind === "content") {
+    const payload = ingestContentSchema.safeParse(value.payload);
+
+    if (!payload.success) {
+      return undefined;
+    }
+
+    pending = { ...metadata, kind, payload: payload.data };
+  } else {
+    const payload = ingestSnapshotSchema.safeParse(value.payload);
+
+    if (!payload.success) {
+      return undefined;
+    }
+
+    pending = { ...metadata, kind, payload: payload.data };
+  }
 
   if (typeof value.lastAttemptAt === "string") {
     pending.lastAttemptAt = value.lastAttemptAt;
@@ -83,7 +101,7 @@ function parsePendingSnapshot(value: unknown): PendingSnapshot | undefined {
   return pending;
 }
 
-export async function readPendingSnapshots(): Promise<PendingSnapshot[]> {
+export async function readPendingItems(): Promise<PendingItem[]> {
   const stored = await browser.storage.local.get(STORAGE_KEYS.pendingSnapshots);
   const value = stored[STORAGE_KEYS.pendingSnapshots];
 
@@ -92,13 +110,13 @@ export async function readPendingSnapshots(): Promise<PendingSnapshot[]> {
   }
 
   return value.flatMap((item) => {
-    const parsed = parsePendingSnapshot(item);
+    const parsed = parsePendingItem(item);
     return parsed === undefined ? [] : [parsed];
   });
 }
 
-export async function writePendingSnapshots(
-  queue: readonly PendingSnapshot[],
+export async function writePendingItems(
+  queue: readonly PendingItem[],
 ): Promise<void> {
   await browser.storage.local.set({
     [STORAGE_KEYS.pendingSnapshots]: queue,

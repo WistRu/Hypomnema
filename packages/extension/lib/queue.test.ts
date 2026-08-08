@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createPendingContent,
   createPendingSnapshot,
-  drainSnapshotQueue,
-  type PendingSnapshot,
+  drainPendingQueue,
+  type PendingItem,
 } from "./queue";
 
 const firstSnapshot = createPendingSnapshot(
@@ -17,15 +18,15 @@ const secondSnapshot = createPendingSnapshot(
   "2026-08-08T00:01:00.000Z",
 );
 
-describe("drainSnapshotQueue", () => {
-  it("sends snapshots in order and persists every acknowledgement", async () => {
+describe("drainPendingQueue", () => {
+  it("sends queued items in order and persists every acknowledgement", async () => {
     const sent: string[] = [];
-    const persisted: PendingSnapshot[][] = [];
+    const persisted: PendingItem[][] = [];
 
-    const result = await drainSnapshotQueue(
+    const result = await drainPendingQueue(
       [firstSnapshot, secondSnapshot],
-      async (_snapshot) => {
-        sent.push(sent.length === 0 ? "first" : "second");
+      async (item) => {
+        sent.push(item.id);
       },
       async (queue) => {
         persisted.push([...queue]);
@@ -41,11 +42,11 @@ describe("drainSnapshotQueue", () => {
   });
 
   it("keeps the failed snapshot and every successor for retry", async () => {
-    const persist = vi.fn<
-      (queue: readonly PendingSnapshot[]) => Promise<void>
-    >(async () => undefined);
+    const persist = vi.fn<(queue: readonly PendingItem[]) => Promise<void>>(
+      async () => undefined,
+    );
 
-    const result = await drainSnapshotQueue(
+    const result = await drainPendingQueue(
       [firstSnapshot, secondSnapshot],
       async () => {
         throw new Error("server offline");
@@ -67,14 +68,14 @@ describe("drainSnapshotQueue", () => {
   });
 
   it("does not mutate later entries when persisting an acknowledgement fails", async () => {
-    const persist = vi.fn<
-      (queue: readonly PendingSnapshot[]) => Promise<void>
-    >(async () => {
-      throw new Error("storage unavailable");
-    });
+    const persist = vi.fn<(queue: readonly PendingItem[]) => Promise<void>>(
+      async () => {
+        throw new Error("storage unavailable");
+      },
+    );
 
     await expect(
-      drainSnapshotQueue(
+      drainPendingQueue(
         [firstSnapshot, secondSnapshot],
         async () => undefined,
         persist,
@@ -84,5 +85,33 @@ describe("drainSnapshotQueue", () => {
     expect(persist).toHaveBeenCalledWith([secondSnapshot]);
     expect(secondSnapshot.id).toBe("second");
     expect(secondSnapshot.attempts).toBe(0);
+  });
+
+  it("keeps content payloads durable behind an unavailable server", async () => {
+    const content = createPendingContent(
+      {
+        browser: "chrome",
+        htmlExcerpt: "<p>Saved</p>",
+        text: "Saved",
+        url: "https://example.com",
+      },
+      "content",
+      "2026-08-08T00:03:00.000Z",
+    );
+
+    const result = await drainPendingQueue(
+      [content],
+      async () => {
+        throw new Error("server offline");
+      },
+      async () => undefined,
+    );
+
+    expect(result.remaining[0]).toMatchObject({
+      id: "content",
+      kind: "content",
+      attempts: 1,
+      payload: { text: "Saved" },
+    });
   });
 });

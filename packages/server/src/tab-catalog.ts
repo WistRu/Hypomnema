@@ -1,6 +1,8 @@
 import type Database from "better-sqlite3";
 
 import type {
+  IngestContent,
+  IngestContentResponse,
   IngestSnapshot,
   IngestSnapshotResponse,
   TabListItem,
@@ -14,11 +16,22 @@ export interface ListTabsInput {
   isOpen: boolean | undefined;
   page: number;
   pageSize: number;
+  q: string | undefined;
 }
 
 export interface TabCatalog {
   ingestSnapshot(snapshot: IngestSnapshot): IngestSnapshotResponse;
+  ingestContent(content: IngestContent): IngestContentResponse;
   listTabs(input: ListTabsInput): TabListResponse;
+}
+
+export class TabNotFoundError extends Error {
+  readonly code = "TAB_NOT_FOUND";
+
+  constructor(browser: string, url: string) {
+    super(`No captured tab exists for ${browser}: ${url}`);
+    this.name = "TabNotFoundError";
+  }
 }
 
 interface OpenTabRow {
@@ -45,6 +58,20 @@ interface TabRow {
 
 interface CountRow {
   total: number;
+}
+
+interface TabIdRow {
+  id: number;
+}
+
+function toFtsQuery(query: string): string {
+  const tokens = query.match(/[\p{L}\p{N}_]+/gu) ?? [];
+
+  if (tokens.length === 0) {
+    return '"__tabhub_no_search_tokens__"';
+  }
+
+  return tokens.map((token) => `"${token}"`).join(" AND ");
 }
 
 function mapTabRow(row: TabRow): TabListItem {
@@ -113,6 +140,21 @@ export function createTabCatalog(
       last_seen_at = excluded.last_seen_at,
       closed_at = NULL
   `);
+  const selectTabId = connection.prepare(
+    `SELECT id
+       FROM tabs
+      WHERE browser = ? AND url_normalized = ?`,
+  );
+  const upsertContent = connection.prepare(`
+    INSERT INTO contents (tab_id, text, html_excerpt, extracted_at)
+    VALUES (@tabId, @text, @htmlExcerpt, @extractedAt)
+    ON CONFLICT (tab_id) DO UPDATE SET
+      text = excluded.text,
+      html_excerpt = excluded.html_excerpt,
+      summary = NULL,
+      summary_model = NULL,
+      extracted_at = excluded.extracted_at
+  `);
 
   const ingestTransaction = connection.transaction(
     (snapshot: IngestSnapshot): IngestSnapshotResponse => {
@@ -157,6 +199,27 @@ export function createTabCatalog(
       return ingestTransaction(snapshot);
     },
 
+    ingestContent(content) {
+      const tab = selectTabId.get(
+        content.browser,
+        normalizeUrl(content.url),
+      ) as TabIdRow | undefined;
+
+      if (tab === undefined) {
+        throw new TabNotFoundError(content.browser, content.url);
+      }
+
+      const extractedAt = clock().toISOString();
+      upsertContent.run({
+        tabId: tab.id,
+        text: content.text,
+        htmlExcerpt: content.htmlExcerpt,
+        extractedAt,
+      });
+
+      return { tabId: tab.id, extractedAt };
+    },
+
     listTabs(input) {
       const predicates: string[] = [];
       const parameters: Array<string | number> = [];
@@ -169,6 +232,13 @@ export function createTabCatalog(
       if (input.isOpen !== undefined) {
         predicates.push("tabs.is_open = ?");
         parameters.push(input.isOpen ? 1 : 0);
+      }
+
+      if (input.q !== undefined) {
+        predicates.push(
+          "tabs.id IN (SELECT rowid FROM contents_fts WHERE contents_fts MATCH ?)",
+        );
+        parameters.push(toFtsQuery(input.q));
       }
 
       const whereClause =

@@ -1,4 +1,6 @@
 import {
+  ingestContentResponseSchema,
+  ingestContentSchema,
   ingestSnapshotResponseSchema,
   ingestSnapshotSchema,
   tabListQuerySchema,
@@ -6,7 +8,7 @@ import {
 } from "@tabhub/shared";
 import type { FastifyInstance, FastifyReply } from "fastify";
 
-import type { TabCatalog } from "./tab-catalog.js";
+import { TabNotFoundError, type TabCatalog } from "./tab-catalog.js";
 
 function sendValidationError(reply: FastifyReply, issues: unknown) {
   return reply.code(400).send({
@@ -19,6 +21,29 @@ export function registerTabRoutes(
   app: FastifyInstance,
   tabCatalog: TabCatalog,
 ): void {
+  app.post("/api/ingest/content", async (request, reply) => {
+    const parsed = ingestContentSchema.safeParse(request.body);
+
+    if (!parsed.success) {
+      return sendValidationError(reply, parsed.error.issues);
+    }
+
+    try {
+      return ingestContentResponseSchema.parse(
+        tabCatalog.ingestContent(parsed.data),
+      );
+    } catch (error) {
+      if (error instanceof TabNotFoundError) {
+        return reply.code(404).send({
+          error: error.code,
+          message: error.message,
+        });
+      }
+
+      throw error;
+    }
+  });
+
   app.post("/api/ingest/snapshot", async (request, reply) => {
     const parsed = ingestSnapshotSchema.safeParse(request.body);
 
@@ -44,6 +69,7 @@ export function registerTabRoutes(
         isOpen: parsed.data.is_open,
         page: parsed.data.page,
         pageSize: parsed.data.pageSize,
+        q: parsed.data.q,
       }),
     );
   });

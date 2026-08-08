@@ -1,6 +1,13 @@
 export const SERVER_ORIGIN = "http://127.0.0.1:7717";
 export const SNAPSHOT_ENDPOINT = `${SERVER_ORIGIN}/api/ingest/snapshot`;
+export const CONTENT_ENDPOINT = `${SERVER_ORIGIN}/api/ingest/content`;
 export const HEALTH_ENDPOINT = `${SERVER_ORIGIN}/api/health`;
+
+// Chrome requires executeScript file paths relative to the extension root.
+// WXT's generated PublicPath type includes a leading slash, so this assertion
+// keeps WXT's build-time path checking while preserving Chrome's runtime form.
+export const EXTRACT_CONTENT_SCRIPT_FILE =
+  "extract-content.js" as "/extract-content.js";
 
 export const STORAGE_KEYS = {
   browser: "tabhub.browser",

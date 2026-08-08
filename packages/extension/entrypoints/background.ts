@@ -1,8 +1,9 @@
 import { browser } from "wxt/browser";
 import { defineBackground } from "wxt/utils/define-background";
 
-import { isServerReachable, postSnapshot } from "../lib/api";
+import { isServerReachable, postContent, postSnapshot } from "../lib/api";
 import {
+  EXTRACT_CONTENT_SCRIPT_FILE,
   RETRY_ALARM_NAME,
   RETRY_INTERVAL_MINUTES,
   SNAPSHOT_ALARM_NAME,
@@ -10,21 +11,28 @@ import {
   TAB_EVENT_DEBOUNCE_MS,
 } from "../lib/constants";
 import {
+  captureEligibleTabs,
+  type CaptureBatchResult,
+} from "../lib/content-capture";
+import {
   isExtensionRequest,
+  type CaptureSummary,
   type ExtensionResponse,
   type ExtensionStatus,
 } from "../lib/messages";
 import {
+  createPendingContent,
   createPendingSnapshot,
-  drainSnapshotQueue,
+  drainPendingQueue,
   errorMessage,
   type DrainQueueResult,
+  type PendingItem,
 } from "../lib/queue";
 import {
   ensureBrowserIdentifier,
   getBrowserIdentifier,
-  readPendingSnapshots,
-  writePendingSnapshots,
+  readPendingItems,
+  writePendingItems,
 } from "../lib/storage";
 import { buildSnapshot } from "../lib/tab-snapshot";
 
@@ -41,12 +49,35 @@ function serializeSync<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 async function flushPendingUnlocked(): Promise<DrainQueueResult> {
-  const pending = await readPendingSnapshots();
-  return drainSnapshotQueue(pending, postSnapshot, writePendingSnapshots);
+  const pending = await readPendingItems();
+  return drainPendingQueue(pending, sendPendingItem, writePendingItems);
 }
 
 function flushPending(): Promise<DrainQueueResult> {
   return serializeSync(flushPendingUnlocked);
+}
+
+async function sendPendingItem(item: PendingItem): Promise<void> {
+  if (item.kind === "snapshot") {
+    await postSnapshot(item.payload);
+  } else {
+    await postContent(item.payload);
+  }
+}
+
+async function appendAndFlushUnlocked(
+  items: readonly PendingItem[],
+): Promise<DrainQueueResult> {
+  const pending = await readPendingItems();
+  pending.push(...items);
+
+  // Write before attempting HTTP so a terminated MV3 worker cannot lose work.
+  await writePendingItems(pending);
+  return drainPendingQueue(pending, sendPendingItem, writePendingItems);
+}
+
+function appendAndFlush(items: readonly PendingItem[]): Promise<DrainQueueResult> {
+  return serializeSync(() => appendAndFlushUnlocked(items));
 }
 
 function captureAndSync(): Promise<DrainQueueResult> {
@@ -56,13 +87,90 @@ function captureAndSync(): Promise<DrainQueueResult> {
       browser.tabs.query({}),
     ]);
     const snapshot = buildSnapshot(browserIdentifier, tabs);
-    const pending = await readPendingSnapshots();
-    pending.push(createPendingSnapshot(snapshot));
-
-    // Write before attempting HTTP so a terminated MV3 worker cannot lose work.
-    await writePendingSnapshots(pending);
-    return drainSnapshotQueue(pending, postSnapshot, writePendingSnapshots);
+    return appendAndFlushUnlocked([createPendingSnapshot(snapshot)]);
   });
+}
+
+async function extractTabContent(tabId: number): Promise<unknown> {
+  const results = await browser.scripting.executeScript({
+    target: { tabId },
+    files: [EXTRACT_CONTENT_SCRIPT_FILE],
+  });
+
+  return results[0]?.result;
+}
+
+function addCapturedUrlsToSnapshot(
+  snapshot: ReturnType<typeof buildSnapshot>,
+  capture: CaptureBatchResult,
+): void {
+  const urls = new Set(snapshot.tabs.map(({ url }) => url));
+
+  for (const { page, tab } of capture.captured) {
+    if (urls.has(page.url)) {
+      continue;
+    }
+
+    snapshot.tabs.push({
+      index: tab.index,
+      url: page.url,
+      windowId: tab.windowId,
+    });
+    urls.add(page.url);
+  }
+}
+
+async function captureContent(
+  mode: "current" | "all",
+): Promise<ExtensionResponse> {
+  const selectedTabs = await browser.tabs.query(
+    mode === "current" ? { active: true, currentWindow: true } : {},
+  );
+  const capture = await captureEligibleTabs(selectedTabs, extractTabContent);
+  const baseSummary: CaptureSummary = {
+    captured: capture.captured.length,
+    queued: 0,
+    requested: capture.requested,
+    skipped: capture.skipped,
+  };
+
+  if (capture.captured.length === 0) {
+    return {
+      capture: baseSummary,
+      ok: true,
+      status: await getStatus(),
+    };
+  }
+
+  const [browserIdentifier, currentTabs] = await Promise.all([
+    getBrowserIdentifier(),
+    browser.tabs.query({}),
+  ]);
+  const snapshot = buildSnapshot(browserIdentifier, currentTabs);
+  addCapturedUrlsToSnapshot(snapshot, capture);
+  const contentItems = capture.captured.map(({ page }) =>
+    createPendingContent({
+      browser: browserIdentifier,
+      htmlExcerpt: page.htmlExcerpt,
+      text: page.text,
+      url: page.url,
+    }),
+  );
+  const contentIds = new Set(contentItems.map(({ id }) => id));
+  const drainResult = await appendAndFlush([
+    createPendingSnapshot(snapshot),
+    ...contentItems,
+  ]);
+  const summary: CaptureSummary = {
+    ...baseSummary,
+    queued: drainResult.remaining.filter(({ id }) => contentIds.has(id)).length,
+  };
+
+  return {
+    capture: summary,
+    ok: true,
+    status: await getStatus(),
+  };
 }
 
 async function ensureAlarm(
@@ -108,7 +216,7 @@ async function getStatus(retryPending = false): Promise<ExtensionStatus> {
 
   const [serverReachable, pending] = await Promise.all([
     isServerReachable(),
-    readPendingSnapshots(),
+    readPendingItems(),
   ]);
   const lastError = pending[0]?.lastError;
   const status: ExtensionStatus = {
@@ -147,6 +255,10 @@ async function handleMessage(message: unknown): Promise<ExtensionResponse | void
         return { ok: true, status: await getStatus(true) };
       case "tabhub:snapshot-now":
         return handleSnapshotNow();
+      case "tabhub:capture-current":
+        return captureContent("current");
+      case "tabhub:capture-all":
+        return captureContent("all");
       case "tabhub:browser-changed":
         scheduleTabEventSnapshot();
         return { ok: true, status: await getStatus() };
@@ -203,7 +315,7 @@ export default defineBackground(() => {
       });
     } else if (alarm.name === RETRY_ALARM_NAME) {
       void flushPending().catch((error: unknown) => {
-        console.error("TabHub pending snapshot retry failed", error);
+        console.error("TabHub pending item retry failed", error);
       });
     }
   });

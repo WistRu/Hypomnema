@@ -1,21 +1,32 @@
-import type { IngestSnapshot } from "@tabhub/shared";
+import type { IngestContent, IngestSnapshot } from "@tabhub/shared";
 
-export interface PendingSnapshot {
+interface PendingItemMetadata {
   attempts: number;
   createdAt: string;
   id: string;
   lastAttemptAt?: string;
   lastError?: string;
+}
+
+export interface PendingSnapshot extends PendingItemMetadata {
+  kind: "snapshot";
   payload: IngestSnapshot;
 }
 
+export interface PendingContent extends PendingItemMetadata {
+  kind: "content";
+  payload: IngestContent;
+}
+
+export type PendingItem = PendingSnapshot | PendingContent;
+
 export interface DrainQueueResult {
-  remaining: PendingSnapshot[];
+  remaining: PendingItem[];
   serverReachable: boolean | null;
 }
 
-export type SnapshotSender = (snapshot: IngestSnapshot) => Promise<void>;
-export type QueuePersister = (queue: readonly PendingSnapshot[]) => Promise<void>;
+export type PendingItemSender = (item: PendingItem) => Promise<void>;
+export type QueuePersister = (queue: readonly PendingItem[]) => Promise<void>;
 
 export function createPendingSnapshot(
   payload: IngestSnapshot,
@@ -26,6 +37,21 @@ export function createPendingSnapshot(
     attempts: 0,
     createdAt,
     id,
+    kind: "snapshot",
+    payload,
+  };
+}
+
+export function createPendingContent(
+  payload: IngestContent,
+  id: string = crypto.randomUUID(),
+  createdAt: string = new Date().toISOString(),
+): PendingContent {
+  return {
+    attempts: 0,
+    createdAt,
+    id,
+    kind: "content",
     payload,
   };
 }
@@ -34,9 +60,9 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export async function drainSnapshotQueue(
-  initialQueue: readonly PendingSnapshot[],
-  send: SnapshotSender,
+export async function drainPendingQueue(
+  initialQueue: readonly PendingItem[],
+  send: PendingItemSender,
   persist: QueuePersister,
   now: () => string = () => new Date().toISOString(),
 ): Promise<DrainQueueResult> {
@@ -51,7 +77,7 @@ export async function drainSnapshotQueue(
     }
 
     try {
-      await send(next.payload);
+      await send(next);
     } catch (error) {
       serverReachable = false;
       remaining[0] = {
