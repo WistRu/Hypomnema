@@ -2,5 +2,19 @@
   "name": "@tabhub/extension",
   "version": "0.1.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "build": "wxt build",
+    "typecheck": "wxt prepare && tsc --noEmit",
+    "test": "wxt prepare && vitest run"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "@tabhub/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/mozilla-readability": "^0.2.1",
+    "wxt": "^0.21.3"
+  }
 }

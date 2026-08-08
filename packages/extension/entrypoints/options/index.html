@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TabHub settings</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <p class="eyebrow">TabHub</p>
+      <h1>Browser identity</h1>
+      <p class="description">
+        Choose the browser where this copy of TabHub is installed. This label
+        keeps tabs from different browsers separate.
+      </p>
+
+      <label for="browser-select">Browser</label>
+      <select id="browser-select">
+        <option value="chrome">Chrome</option>
+        <option value="yandex">Yandex Browser</option>
+        <option value="edge">Microsoft Edge</option>
+        <option value="other">Other Chromium browser</option>
+      </select>
+      <p id="save-status" class="save-status" role="status" aria-live="polite"></p>
+    </main>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

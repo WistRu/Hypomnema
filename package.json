@@ -8,7 +8,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "pnpm --filter @tabhub/server dev",
+    "dev": "pnpm --filter @tabhub/web build && pnpm --filter @tabhub/server dev",
+    "dev:web": "pnpm --parallel --filter @tabhub/server --filter @tabhub/web dev",
+    "dev:extension": "pnpm --filter @tabhub/extension dev",
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",

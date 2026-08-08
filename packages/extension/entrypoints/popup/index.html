@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TabHub</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">TabHub</p>
+          <h1>Tab sync</h1>
+        </div>
+        <span id="status-dot" class="status-dot pending" aria-hidden="true"></span>
+      </header>
+
+      <section class="status-card" aria-live="polite">
+        <div>
+          <span class="label">Server</span>
+          <strong id="server-status">Checking…</strong>
+        </div>
+        <div>
+          <span class="label">Unsynced snapshots</span>
+          <strong id="pending-count">—</strong>
+        </div>
+      </section>
+
+      <p id="detail" class="detail" role="status" aria-live="polite"></p>
+
+      <button id="snapshot-button" class="primary" type="button">
+        Snapshot now
+      </button>
+      <button id="options-button" class="secondary" type="button">
+        Browser settings
+      </button>
+    </main>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

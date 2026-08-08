@@ -2,23 +2,48 @@ import {
   healthResponseSchema,
   type HealthResponse,
 } from "@tabhub/shared";
+import cors from "@fastify/cors";
+import fastifyStatic from "@fastify/static";
 import Fastify, {
   type FastifyBaseLogger,
   type FastifyInstance,
 } from "fastify";
 
 import { openDatabase } from "./database.js";
+import { createTabCatalog } from "./tab-catalog.js";
+import { registerTabRoutes } from "./tab-routes.js";
 
 export interface CreateAppOptions {
   databasePath: string;
   logger?: boolean | FastifyBaseLogger;
+  clock?: () => Date;
+  webRoot?: string | false;
 }
 
 export type TabHubApp = FastifyInstance;
 
 export function createApp(options: CreateAppOptions): TabHubApp {
   const database = openDatabase(options.databasePath);
-  const app = Fastify({ logger: options.logger ?? false });
+  const app = Fastify({
+    logger: options.logger ?? false,
+    bodyLimit: 16 * 1024 * 1024,
+  });
+  const tabCatalog = createTabCatalog(database.connection, options.clock);
+
+  void app.register(cors, {
+    origin: [
+      /^chrome-extension:\/\//,
+      /^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/,
+    ],
+  });
+
+  if (options.webRoot) {
+    void app.register(fastifyStatic, {
+      root: options.webRoot,
+      prefix: "/app/",
+    });
+    app.get("/app", async (_request, reply) => reply.redirect("/app/"));
+  }
 
   app.addHook("onClose", async () => {
     database.close();
@@ -31,6 +56,8 @@ export function createApp(options: CreateAppOptions): TabHubApp {
       schemaVersion: database.schemaVersion,
     }),
   );
+
+  registerTabRoutes(app, tabCatalog);
 
   return app;
 }

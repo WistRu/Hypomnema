@@ -75,6 +75,7 @@ export function openDatabase(databasePath: string): TabHubDatabase {
   }
 
   connection.pragma("foreign_keys = ON");
+  connection.pragma("busy_timeout = 5000");
 
   if (databasePath !== ":memory:") {
     connection.pragma("journal_mode = WAL");

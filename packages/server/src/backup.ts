@@ -1,15 +1,17 @@
-import "dotenv/config";
-
 import { mkdir } from "node:fs/promises";
 import { basename, dirname, extname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import Database from "better-sqlite3";
+import { config as loadEnvironment } from "dotenv";
 
+const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
+loadEnvironment({ path: resolve(workspaceRoot, ".env") });
 const databasePath = resolve(
-  process.cwd(),
+  workspaceRoot,
   process.env.TABHUB_DB_PATH ?? "./data/tabhub.sqlite",
 );
-const backupDirectory = resolve(process.cwd(), "./backups");
+const backupDirectory = resolve(workspaceRoot, "./backups");
 const extension = extname(databasePath) || ".sqlite";
 const stem = basename(databasePath, extension);
 const timestamp = new Date().toISOString().replaceAll(":", "-");
