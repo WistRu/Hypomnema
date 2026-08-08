@@ -1,0 +1,342 @@
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
+import type { TabDetailResponse, TabListResponse } from "@tabhub/shared";
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  createMcpServer,
+  type ListTabsInput,
+  type TabHubApi,
+} from "../src/server.js";
+
+const tabList: TabListResponse = {
+  items: [
+    {
+      id: 1,
+      url: "https://example.com/agent-notes",
+      urlNormalized: "https://example.com/agent-notes",
+      title: "Agent notes",
+      browser: "chrome",
+      windowId: 3,
+      index: 0,
+      faviconUrl: null,
+      status: "inbox",
+      importance: 2,
+      isOpen: true,
+      firstSeenAt: "2026-08-08T12:00:00.000Z",
+      lastSeenAt: "2026-08-08T12:30:00.000Z",
+      closedAt: null,
+      summary: null,
+    },
+  ],
+  total: 1,
+  page: 2,
+  pageSize: 25,
+};
+
+const tabDetail: TabDetailResponse = {
+  ...tabList.items[0]!,
+  content: {
+    text: "Captured agent notes",
+    htmlExcerpt: "<main>Captured agent notes</main>",
+    summary: "A concise summary",
+    summaryModel: "test-model",
+    extractedAt: "2026-08-08T12:31:00.000Z",
+  },
+  tags: [
+    {
+      id: 7,
+      name: "Research",
+      path: "Work/Research",
+      color: null,
+      assignedBy: "agent",
+    },
+  ],
+  links: [],
+  customFields: {},
+};
+
+const toolNames = [
+  "list_tabs",
+  "get_tab",
+  "search_tabs",
+  "set_status",
+  "tag_tabs",
+  "list_tags",
+  "get_stats",
+];
+
+function createApi(overrides: Partial<TabHubApi> = {}): TabHubApi {
+  return {
+    listTabs: async () => tabList,
+    getTab: async () => {
+      throw new Error("not implemented in this test");
+    },
+    setStatus: async () => {
+      throw new Error("not implemented in this test");
+    },
+    tagTabs: async () => {
+      throw new Error("not implemented in this test");
+    },
+    listTags: async () => ({ items: [] }),
+    getStats: async () => ({
+      total: 0,
+      open: 0,
+      byStatus: [],
+      byBrowser: [],
+      byTag: [],
+    }),
+    ...overrides,
+  };
+}
+
+async function connectClient(api: TabHubApi) {
+  const server = createMcpServer(api);
+  const client = new Client({ name: "tabhub-test", version: "0.1.0" });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+
+  return {
+    client,
+    async close() {
+      await client.close();
+      await server.close();
+    },
+  };
+}
+
+function textResult(result: Awaited<ReturnType<Client["callTool"]>>): string {
+  const block = result.content[0];
+  expect(block?.type).toBe("text");
+
+  if (block?.type !== "text") {
+    throw new Error("Expected a text MCP result");
+  }
+
+  return block.text;
+}
+
+describe("TabHub MCP server", () => {
+  it("lists filtered tabs through the MCP interface", async () => {
+    const listTabs = vi.fn(async (_input: ListTabsInput) => tabList);
+    const connection = await connectClient(createApi({ listTabs }));
+
+    try {
+      const listed = await connection.client.listTools();
+      expect(listed.tools.map((tool) => tool.name).sort()).toEqual(
+        [...toolNames].sort(),
+      );
+
+      const result = await connection.client.callTool({
+        name: "list_tabs",
+        arguments: {
+          browser: "chrome",
+          status: "inbox",
+          importance: 2,
+          is_open: true,
+          page: 2,
+          page_size: 25,
+        },
+      });
+
+      expect(listTabs).toHaveBeenCalledWith({
+        browser: "chrome",
+        status: "inbox",
+        importance: 2,
+        isOpen: true,
+        page: 2,
+        pageSize: 25,
+      });
+      expect(JSON.parse(textResult(result))).toEqual(tabList);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("gets a tab with captured text only when requested", async () => {
+    const getTab = vi.fn(async (_id: number) => tabDetail);
+    const connection = await connectClient(createApi({ getTab }));
+
+    try {
+      const compact = await connection.client.callTool({
+        name: "get_tab",
+        arguments: { id: 1 },
+      });
+      const compactTab = JSON.parse(textResult(compact)) as TabDetailResponse;
+      expect(compactTab.content).toEqual({
+        summary: "A concise summary",
+        summaryModel: "test-model",
+        extractedAt: "2026-08-08T12:31:00.000Z",
+      });
+
+      const withContent = await connection.client.callTool({
+        name: "get_tab",
+        arguments: { id: 1, include_content: true },
+      });
+      const contentTab = JSON.parse(textResult(withContent)) as TabDetailResponse;
+      expect(contentTab.content?.text).toBe("Captured agent notes");
+      expect(contentTab.content).not.toHaveProperty("htmlExcerpt");
+      expect(getTab).toHaveBeenNthCalledWith(1, 1);
+      expect(getTab).toHaveBeenNthCalledWith(2, 1);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("searches full text through the tab list endpoint", async () => {
+    const listTabs = vi.fn(async (_input: ListTabsInput) => tabList);
+    const connection = await connectClient(createApi({ listTabs }));
+
+    try {
+      const result = await connection.client.callTool({
+        name: "search_tabs",
+        arguments: {
+          query: "agent notes",
+          mode: "fulltext",
+          status: "inbox",
+          page_size: 10,
+        },
+      });
+
+      expect(listTabs).toHaveBeenCalledWith({
+        q: "agent notes",
+        status: "inbox",
+        page: 1,
+        pageSize: 10,
+      });
+      expect(JSON.parse(textResult(result))).toEqual(tabList);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("sets status and tags tabs through atomic REST adapter operations", async () => {
+    const setStatus = vi.fn(async () => ({ updated: 2, status: "done" as const }));
+    const tagTabs = vi.fn(async () => ({ tagId: 7, assigned: 2 }));
+    const connection = await connectClient(createApi({ setStatus, tagTabs }));
+
+    try {
+      const statusResult = await connection.client.callTool({
+        name: "set_status",
+        arguments: { ids: [1, 2], status: "done" },
+      });
+      const tagResult = await connection.client.callTool({
+        name: "tag_tabs",
+        arguments: { ids: [1, 2], tag_path: "Work/Research" },
+      });
+
+      expect(setStatus).toHaveBeenCalledWith({ ids: [1, 2], status: "done" });
+      expect(tagTabs).toHaveBeenCalledWith({
+        ids: [1, 2],
+        tagPath: "Work/Research",
+      });
+      expect(JSON.parse(textResult(statusResult))).toEqual({
+        updated: 2,
+        status: "done",
+      });
+      expect(JSON.parse(textResult(tagResult))).toEqual({
+        tagId: 7,
+        assigned: 2,
+      });
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("lists the tag tree and aggregate stats", async () => {
+    const tagTree = {
+      items: [
+        {
+          id: 7,
+          name: "Work",
+          path: "Work",
+          color: null,
+          tabCount: 2,
+          children: [],
+        },
+      ],
+    };
+    const stats = {
+      total: 2,
+      open: 1,
+      byStatus: [{ status: "inbox" as const, count: 2 }],
+      byBrowser: [],
+      byTag: [],
+    };
+    const listTags = vi.fn(async () => tagTree);
+    const getStats = vi.fn(async () => stats);
+    const connection = await connectClient(createApi({ listTags, getStats }));
+
+    try {
+      const tagsResult = await connection.client.callTool({
+        name: "list_tags",
+        arguments: {},
+      });
+      const statsResult = await connection.client.callTool({
+        name: "get_stats",
+        arguments: {},
+      });
+
+      expect(listTags).toHaveBeenCalledOnce();
+      expect(getStats).toHaveBeenCalledOnce();
+      expect(JSON.parse(textResult(tagsResult))).toEqual(tagTree);
+      expect(JSON.parse(textResult(statsResult))).toEqual(stats);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("publishes tab details as a markdown resource", async () => {
+    const getTab = vi.fn(async (_id: number) => tabDetail);
+    const connection = await connectClient(createApi({ getTab }));
+
+    try {
+      const templates = await connection.client.listResourceTemplates();
+      expect(templates.resourceTemplates).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ uriTemplate: "tabhub://tab/{id}" }),
+        ]),
+      );
+
+      const result = await connection.client.readResource({
+        uri: "tabhub://tab/1",
+      });
+      const resource = result.contents[0];
+      expect(resource?.uri).toBe("tabhub://tab/1");
+      expect(resource?.mimeType).toBe("text/markdown");
+      expect(resource).toHaveProperty("text");
+      if (resource && "text" in resource) {
+        expect(resource.text).toContain("# Agent notes");
+        expect(resource.text).toContain("https://example.com/agent-notes");
+        expect(resource.text).toContain("Work/Research");
+        expect(resource.text).toContain("Captured agent notes");
+      }
+      expect(getTab).toHaveBeenCalledWith(1);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("returns adapter failures as MCP tool errors without stack traces", async () => {
+    const listTabs = vi.fn(async () => {
+      throw new Error("TabHub API returned HTTP 503");
+    });
+    const connection = await connectClient(createApi({ listTabs }));
+
+    try {
+      const result = await connection.client.callTool({
+        name: "list_tabs",
+        arguments: {},
+      });
+
+      expect(result.isError).toBe(true);
+      expect(textResult(result)).toBe("TabHub API returned HTTP 503");
+      expect(textResult(result)).not.toContain("at ");
+    } finally {
+      await connection.close();
+    }
+  });
+});

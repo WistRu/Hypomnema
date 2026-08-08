@@ -24,10 +24,10 @@ corepack pnpm dev
 Invoke-RestMethod http://127.0.0.1:7717/api/health
 ```
 
-Ожидаемый ответ на этапе 0:
+Текущий ожидаемый ответ:
 
 ```json
-{"status":"ok","database":"ok","schemaVersion":2}
+{"status":"ok","database":"ok","schemaVersion":3}
 ```
 
 База по умолчанию создаётся в `data/tabhub.sqlite` относительно корня репозитория. Путь можно изменить через `TABHUB_DB_PATH` в корневом `.env`.
@@ -85,6 +85,62 @@ Invoke-RestMethod 'http://127.0.0.1:7717/api/tabs?q=local-first'
 
 В веб-интерфейсе тот же параметр доступен в строке поиска над таблицей.
 
+## MCP для Claude Desktop и Codex
+
+Сначала соберите stdio-сервер MCP и оставьте основной TabHub-сервер запущенным на `127.0.0.1:7717`:
+
+```powershell
+corepack pnpm --filter @tabhub/mcp build
+corepack pnpm dev
+```
+
+MCP-процесс использует `TABHUB_API_URL` и остаётся тонким адаптером над REST API. Он предоставляет инструменты `list_tabs`, `get_tab`, `search_tabs`, `set_status`, `tag_tabs`, `list_tags`, `get_stats` и ресурс `tabhub://tab/{id}`. На этом этапе `search_tabs` выполняет полнотекстовый поиск; семантический режим добавляется на этапе 6. Контент в ответах MCP ограничен примерно 20 000 символами.
+
+### Claude Desktop
+
+Откройте **Settings → Developer → Edit Config**, добавьте сервер в `%APPDATA%\Claude\claude_desktop_config.json` и полностью перезапустите Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "tabhub": {
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": ["D:\\VibeCoding\\TabHub\\packages\\mcp\\dist\\main.js"],
+      "env": {
+        "TABHUB_API_URL": "http://127.0.0.1:7717"
+      }
+    }
+  }
+}
+```
+
+Если Node.js или репозиторий находятся в другом месте, получите абсолютные пути командами `(Get-Command node).Source` и `(Resolve-Path packages/mcp/dist/main.js).Path` и замените значения выше.
+
+### Codex
+
+Добавьте сервер через CLI:
+
+```powershell
+codex mcp add tabhub --env TABHUB_API_URL=http://127.0.0.1:7717 -- 'C:\Program Files\nodejs\node.exe' 'D:\VibeCoding\TabHub\packages\mcp\dist\main.js'
+codex mcp list
+```
+
+Эквивалентная ручная настройка в `%USERPROFILE%\.codex\config.toml`:
+
+```toml
+[mcp_servers.tabhub]
+command = 'C:\Program Files\nodejs\node.exe'
+args = ['D:\VibeCoding\TabHub\packages\mcp\dist\main.js']
+cwd = 'D:\VibeCoding\TabHub'
+startup_timeout_sec = 10
+tool_timeout_sec = 60
+
+[mcp_servers.tabhub.env]
+TABHUB_API_URL = "http://127.0.0.1:7717"
+```
+
+После подключения откройте `/mcp` в Codex и убедитесь, что `tabhub` и семь инструментов доступны.
+
 ## Проверки
 
 ```powershell
@@ -108,6 +164,5 @@ corepack pnpm backup
 - Этап 0: каркас монорепозитория, общие схемы, миграция SQLite и healthcheck — готово.
 - Этап 1: снимки из Chromium-браузеров, надёжная очередь расширения, REST ingest, дедупликация и общая таблица — готово.
 - Этап 2: ручной захват Readability-контента, FTS5 и поиск в UI — готово.
-- Этапы 3–7: см. [план реализации](./tab-manager-plan.md).
-
-Инструкции по установке расширения и подключению MCP будут добавлены в соответствующих этапах.
+- Этап 3: REST-операции управления, иерархические теги, статистика и MCP-инструменты для Claude Desktop/Codex — готово.
+- Этапы 4–7: см. [план реализации](./tab-manager-plan.md).

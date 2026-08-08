@@ -6,3 +6,5 @@
 - 2026-08-08: URL normalization removes fragments and case-insensitive `utm_*` parameters while preserving every retained parameter and its order; no other tracking parameters or path forms are changed in v1.
 - 2026-08-08: Use a contentless-delete FTS5 table synchronized by SQLite triggers; canonical text stays in `contents`, while title/content/summary indexing remains atomic across REST, worker, and future MCP writes.
 - 2026-08-08: Convert user search text into quoted Unicode tokens joined with `AND`, preventing raw FTS syntax errors while retaining predictable keyword semantics.
+- 2026-08-08: Keep MCP as a stateless REST adapter using the split MCP TypeScript v2 stdio packages; all MCP tag mutations are recorded with `assigned_by = 'agent'`.
+- 2026-08-08: Rename ambiguous duplicate root tags during the v3 migration, then enforce root-name uniqueness in SQLite so concurrent local server processes cannot fork a tag path.

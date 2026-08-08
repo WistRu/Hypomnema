@@ -12,6 +12,10 @@ import Fastify, {
 import { openDatabase } from "./database.js";
 import { createTabCatalog } from "./tab-catalog.js";
 import { registerTabRoutes } from "./tab-routes.js";
+import { createTagCatalog } from "./tag-catalog.js";
+import { registerTagRoutes } from "./tag-routes.js";
+import { createStatsCatalog } from "./stats-catalog.js";
+import { registerStatsRoutes } from "./stats-routes.js";
 
 export interface CreateAppOptions {
   databasePath: string;
@@ -29,6 +33,8 @@ export function createApp(options: CreateAppOptions): TabHubApp {
     bodyLimit: 16 * 1024 * 1024,
   });
   const tabCatalog = createTabCatalog(database.connection, options.clock);
+  const tagCatalog = createTagCatalog(database.connection);
+  const statsCatalog = createStatsCatalog(database.connection);
 
   void app.register(cors, {
     origin: [
@@ -58,6 +64,8 @@ export function createApp(options: CreateAppOptions): TabHubApp {
   );
 
   registerTabRoutes(app, tabCatalog);
+  registerTagRoutes(app, tagCatalog);
+  registerStatsRoutes(app, statsCatalog);
 
   return app;
 }

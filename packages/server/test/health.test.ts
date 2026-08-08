@@ -27,7 +27,7 @@ describe("GET /api/health", () => {
       expect(healthResponseSchema.parse(response.json())).toEqual({
         status: "ok",
         database: "ok",
-        schemaVersion: 2,
+        schemaVersion: 3,
       });
     } finally {
       await app.close();
@@ -54,7 +54,7 @@ describe("GET /api/health", () => {
 
         expect(response.statusCode).toBe(200);
         expect(healthResponseSchema.parse(response.json()).schemaVersion).toBe(
-          2,
+          3,
         );
       } finally {
         await reopenedApp.close();
@@ -109,7 +109,7 @@ describe("GET /api/health", () => {
         method: "GET",
         url: "/api/health",
       });
-      expect(healthResponse.json().schemaVersion).toBe(2);
+      expect(healthResponse.json().schemaVersion).toBe(3);
 
       const searchResponse = await app.inject({
         method: "GET",
@@ -119,6 +119,59 @@ describe("GET /api/health", () => {
         total: 1,
         items: [{ title: "Legacy tab" }],
       });
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("upgrades a schema-valid version 2 database with duplicate root tags", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-v2-upgrade-"));
+    const databasePath = join(directory, "tabhub.sqlite");
+    const initialSql = await readFile(
+      new URL("../migrations/001_initial.sql", import.meta.url),
+      "utf8",
+    );
+    const searchSql = await readFile(
+      new URL("../migrations/002_full_text_search.sql", import.meta.url),
+      "utf8",
+    );
+    const legacyDatabase = new Database(databasePath);
+
+    legacyDatabase.exec(initialSql);
+    legacyDatabase.exec(searchSql);
+    legacyDatabase
+      .prepare("INSERT INTO tags (name, parent_id) VALUES ('AI', NULL)")
+      .run();
+    legacyDatabase
+      .prepare("INSERT INTO tags (name, parent_id) VALUES ('AI', NULL)")
+      .run();
+    legacyDatabase
+      .prepare(
+        "INSERT INTO tags (name, parent_id) VALUES ('AI [legacy duplicate #2]', NULL)",
+      )
+      .run();
+    legacyDatabase.pragma("user_version = 2");
+    legacyDatabase.close();
+
+    const app = createApp({ databasePath, logger: false });
+
+    try {
+      const response = await app.inject({ method: "GET", url: "/api/health" });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().schemaVersion).toBe(3);
+
+      const tags = await app.inject({ method: "GET", url: "/api/tags" });
+      const paths = tags
+        .json()
+        .items.map((tag: { path: string }) => tag.path) as string[];
+      expect(paths).toHaveLength(3);
+      expect(new Set(paths).size).toBe(3);
+      expect(paths).toContain("AI");
+      expect(paths).toContain("AI [legacy duplicate #2]");
+      expect(
+        paths.some((path) => path.startsWith("AI [legacy duplicate #2;")),
+      ).toBe(true);
     } finally {
       await app.close();
       await rm(directory, { recursive: true, force: true });

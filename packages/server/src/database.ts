@@ -63,39 +63,43 @@ export function openDatabase(databasePath: string): TabHubDatabase {
   prepareDirectory(databasePath);
 
   const connection = new Database(databasePath);
-  const migrations = loadMigrations();
-  const supportedVersion = migrations.at(-1)?.version ?? 0;
-  const currentVersion = connection.pragma("user_version", {
-    simple: true,
-  }) as number;
+  try {
+    const migrations = loadMigrations();
+    const supportedVersion = migrations.at(-1)?.version ?? 0;
+    const currentVersion = connection.pragma("user_version", {
+      simple: true,
+    }) as number;
 
-  if (currentVersion > supportedVersion) {
-    connection.close();
-    throw new DatabaseSchemaTooNewError(currentVersion, supportedVersion);
-  }
-
-  connection.pragma("foreign_keys = ON");
-  connection.pragma("busy_timeout = 5000");
-
-  if (databasePath !== ":memory:") {
-    connection.pragma("journal_mode = WAL");
-    connection.pragma("synchronous = NORMAL");
-  }
-
-  for (const migration of migrations) {
-    if (migration.version <= currentVersion) {
-      continue;
+    if (currentVersion > supportedVersion) {
+      throw new DatabaseSchemaTooNewError(currentVersion, supportedVersion);
     }
 
-    connection.transaction(() => {
-      connection.exec(migration.sql);
-      connection.pragma(`user_version = ${migration.version}`);
-    })();
-  }
+    connection.pragma("foreign_keys = ON");
+    connection.pragma("busy_timeout = 5000");
 
-  return {
-    connection,
-    schemaVersion: supportedVersion,
-    close: () => connection.close(),
-  };
+    if (databasePath !== ":memory:") {
+      connection.pragma("journal_mode = WAL");
+      connection.pragma("synchronous = NORMAL");
+    }
+
+    for (const migration of migrations) {
+      if (migration.version <= currentVersion) {
+        continue;
+      }
+
+      connection.transaction(() => {
+        connection.exec(migration.sql);
+        connection.pragma(`user_version = ${migration.version}`);
+      })();
+    }
+
+    return {
+      connection,
+      schemaVersion: supportedVersion,
+      close: () => connection.close(),
+    };
+  } catch (error) {
+    connection.close();
+    throw error;
+  }
 }
