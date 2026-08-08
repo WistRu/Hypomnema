@@ -1,12 +1,17 @@
 import {
   assignTagsResponseSchema,
   setStatusResponseSchema,
+  summaryEnqueueResponseSchema,
+  summaryJobSchema,
   statsResponseSchema,
   tabDetailResponseSchema,
   tabListResponseSchema,
   tagTreeResponseSchema,
   type AssignTagsResponse,
   type SetStatusResponse,
+  type SummaryDepth,
+  type SummaryEnqueueResponse,
+  type SummaryJob,
   type StatsResponse,
   type TabDetailResponse,
   type TabImportance,
@@ -36,6 +41,8 @@ export interface TabHubApi {
     ids: number[];
     tagPath: string;
   }): Promise<AssignTagsResponse>;
+  summarizeTab(id: number, depth: SummaryDepth): Promise<SummaryEnqueueResponse>;
+  getSummaryJob(id: number): Promise<SummaryJob>;
   listTags(): Promise<TagTreeResponse>;
   getStats(): Promise<StatsResponse>;
 }
@@ -152,6 +159,22 @@ export function createTabHubApi(
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...input, assignedBy: "agent" }),
       });
+    },
+
+    async summarizeTab(id, depth) {
+      return request(
+        `/api/tabs/${id}/summarize`,
+        summaryEnqueueResponseSchema,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ depth, requestedBy: "agent" }),
+        },
+      );
+    },
+
+    async getSummaryJob(id) {
+      return request(`/api/jobs/${id}`, summaryJobSchema, { method: "GET" });
     },
 
     async listTags() {

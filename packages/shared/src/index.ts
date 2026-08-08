@@ -256,6 +256,76 @@ export const tabDetailResponseSchema = tabListItemSchema.extend({
 
 export type TabDetailResponse = z.infer<typeof tabDetailResponseSchema>;
 
+export const summaryDepthSchema = z.enum(["short", "deep"]);
+
+export type SummaryDepth = z.infer<typeof summaryDepthSchema>;
+
+export const summarizeTabSchema = z.object({
+  depth: summaryDepthSchema,
+  requestedBy: assignedBySchema.default("user"),
+});
+
+export type SummarizeTab = z.infer<typeof summarizeTabSchema>;
+
+export const summaryJobStatusSchema = z.enum([
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+]);
+
+export type SummaryJobStatus = z.infer<typeof summaryJobStatusSchema>;
+
+export const summaryUsageSchema = z.object({
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  costUsd: z.number().finite().nonnegative(),
+});
+
+export type SummaryUsage = z.infer<typeof summaryUsageSchema>;
+
+export const summaryJobResultSchema = z.object({
+  summary: z.string(),
+  model: z.string(),
+  usage: summaryUsageSchema,
+});
+
+export type SummaryJobResult = z.infer<typeof summaryJobResultSchema>;
+
+export const jobIdSchema = z.number().int().positive();
+
+export const jobIdParamSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export type JobIdParam = z.infer<typeof jobIdParamSchema>;
+
+export const summaryEnqueueResponseSchema = z.object({
+  jobId: jobIdSchema,
+  status: summaryJobStatusSchema,
+});
+
+export type SummaryEnqueueResponse = z.infer<
+  typeof summaryEnqueueResponseSchema
+>;
+
+export const summaryJobSchema = z.object({
+  id: jobIdSchema,
+  tabId: tabIdSchema,
+  depth: summaryDepthSchema,
+  status: summaryJobStatusSchema,
+  attempts: z.number().int().nonnegative(),
+  maxAttempts: z.number().int().positive(),
+  createdAt: z.string().datetime(),
+  startedAt: z.string().datetime().nullable(),
+  completedAt: z.string().datetime().nullable(),
+  nextAttemptAt: z.string().datetime().nullable(),
+  error: z.string().nullable(),
+  result: summaryJobResultSchema.nullable(),
+});
+
+export type SummaryJob = z.infer<typeof summaryJobSchema>;
+
 type TagTreeNodeShape = {
   id: number;
   name: string;

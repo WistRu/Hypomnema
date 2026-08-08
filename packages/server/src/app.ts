@@ -16,17 +16,45 @@ import { createTagCatalog } from "./tag-catalog.js";
 import { registerTagRoutes } from "./tag-routes.js";
 import { createStatsCatalog } from "./stats-catalog.js";
 import { registerStatsRoutes } from "./stats-routes.js";
+import { createSummaryCatalog } from "./summary-catalog.js";
+import type { SummaryProvider } from "./summary-provider.js";
+import { registerSummaryRoutes } from "./summary-routes.js";
+import { createSummaryWorker } from "./summary-worker.js";
 
 export interface CreateAppOptions {
   databasePath: string;
   logger?: boolean | FastifyBaseLogger;
   clock?: () => Date;
   webRoot?: string | false;
+  summaryProvider?: SummaryProvider;
+  summaryDailyLimit?: number;
+  summaryMaxAttempts?: number;
+  summaryWorkerPollMs?: number;
 }
 
 export type TabHubApp = FastifyInstance;
 
+function positiveIntegerOption(name: string, value: number): number {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+
+  return value;
+}
+
 export function createApp(options: CreateAppOptions): TabHubApp {
+  const summaryDailyLimit = positiveIntegerOption(
+    "summaryDailyLimit",
+    options.summaryDailyLimit ?? 100,
+  );
+  const summaryMaxAttempts = positiveIntegerOption(
+    "summaryMaxAttempts",
+    options.summaryMaxAttempts ?? 5,
+  );
+  if (options.summaryWorkerPollMs !== undefined) {
+    positiveIntegerOption("summaryWorkerPollMs", options.summaryWorkerPollMs);
+  }
+
   const database = openDatabase(options.databasePath);
   const app = Fastify({
     logger: options.logger ?? false,
@@ -35,6 +63,39 @@ export function createApp(options: CreateAppOptions): TabHubApp {
   const tabCatalog = createTabCatalog(database.connection, options.clock);
   const tagCatalog = createTagCatalog(database.connection);
   const statsCatalog = createStatsCatalog(database.connection);
+  const summaryCatalog = createSummaryCatalog(database.connection, options.clock);
+  const summaryWorker =
+    options.summaryProvider === undefined
+      ? undefined
+      : createSummaryWorker(summaryCatalog, options.summaryProvider, {
+          dailyLimit: summaryDailyLimit,
+          ...(options.summaryWorkerPollMs === undefined
+            ? {}
+            : { pollMs: options.summaryWorkerPollMs }),
+          ...(options.clock === undefined ? {} : { clock: options.clock }),
+          onCompleted(job) {
+            app.log.info(
+              {
+                jobId: job.id,
+                tabId: job.tabId,
+                model: job.result?.model,
+                inputTokens: job.result?.usage.inputTokens,
+                outputTokens: job.result?.usage.outputTokens,
+                costUsd: job.result?.usage.costUsd,
+              },
+              "summary job completed",
+            );
+          },
+          onFailed(job) {
+            app.log.warn(
+              { jobId: job.id, tabId: job.tabId, error: job.error },
+              "summary job failed",
+            );
+          },
+          onError(error) {
+            app.log.error(error, "summary worker loop failed");
+          },
+        });
 
   void app.register(cors, {
     origin: [
@@ -51,7 +112,12 @@ export function createApp(options: CreateAppOptions): TabHubApp {
     app.get("/app", async (_request, reply) => reply.redirect("/app/"));
   }
 
+  app.addHook("onReady", async () => {
+    summaryWorker?.start();
+  });
+
   app.addHook("onClose", async () => {
+    await summaryWorker?.stop();
     database.close();
   });
 
@@ -66,6 +132,12 @@ export function createApp(options: CreateAppOptions): TabHubApp {
   registerTabRoutes(app, tabCatalog);
   registerTagRoutes(app, tagCatalog);
   registerStatsRoutes(app, statsCatalog);
+  registerSummaryRoutes(app, {
+    catalog: summaryCatalog,
+    provider: options.summaryProvider,
+    worker: summaryWorker,
+    maxAttempts: summaryMaxAttempts,
+  });
 
   return app;
 }

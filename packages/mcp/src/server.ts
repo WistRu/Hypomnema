@@ -1,5 +1,5 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
-import type { TabDetailResponse } from "@tabhub/shared";
+import type { SummaryJob, TabDetailResponse } from "@tabhub/shared";
 import * as z from "zod/v4";
 
 import type { ListTabsInput, TabHubApi } from "./tabhub-api.js";
@@ -57,6 +57,11 @@ const tagTabsInputSchema = z.object({
   tag_path: z.string().trim().min(1).max(2_048),
 });
 
+const summarizeTabInputSchema = z.object({
+  id: z.number().int().positive(),
+  depth: z.enum(["short", "deep"]),
+});
+
 const emptyInputSchema = z.object({});
 
 const readOnlyAnnotations = {
@@ -71,7 +76,21 @@ const mutationAnnotations = {
   openWorldHint: false,
 } as const;
 
+const summaryMutationAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: true,
+} as const;
+
 const capturedTextLimit = 20_000;
+const defaultSummaryPollIntervalMs = 250;
+const defaultSummaryPollTimeoutMs = 55_000;
+
+export interface McpServerOptions {
+  summaryPollIntervalMs?: number;
+  summaryPollTimeoutMs?: number;
+}
 
 function jsonResult(value: unknown) {
   return {
@@ -100,6 +119,70 @@ async function runTool(operation: () => Promise<unknown>) {
   } catch (error) {
     return errorResult(error);
   }
+}
+
+function isPendingSummaryJob(job: SummaryJob): boolean {
+  return job.status === "queued" || job.status === "running";
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+type TimedResult<T> =
+  | { timedOut: false; value: T }
+  | { timedOut: true };
+
+function settleWithin<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+): Promise<TimedResult<T>> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => resolve({ timedOut: true }), timeoutMs);
+
+    void operation.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve({ timedOut: false, value });
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function pollSummaryJob(
+  api: TabHubApi,
+  jobId: number,
+  intervalMs: number,
+  timeoutMs: number,
+): Promise<SummaryJob> {
+  const deadline = Date.now() + timeoutMs;
+  let job = await api.getSummaryJob(jobId);
+
+  while (isPendingSummaryJob(job)) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      return job;
+    }
+
+    await delay(Math.min(intervalMs, remainingMs));
+    const requestTimeMs = deadline - Date.now();
+    if (requestTimeMs <= 0) {
+      return job;
+    }
+
+    const next = await settleWithin(api.getSummaryJob(jobId), requestTimeMs);
+    if (next.timedOut) {
+      return job;
+    }
+
+    job = next.value;
+  }
+
+  return job;
 }
 
 function truncateCapturedText(text: string): string {
@@ -173,8 +256,15 @@ function toListTabsInput(
   };
 }
 
-export function createMcpServer(api: TabHubApi): McpServer {
+export function createMcpServer(
+  api: TabHubApi,
+  options: McpServerOptions = {},
+): McpServer {
   const server = new McpServer({ name: "tabhub", version: "0.1.0" });
+  const summaryPollIntervalMs =
+    options.summaryPollIntervalMs ?? defaultSummaryPollIntervalMs;
+  const summaryPollTimeoutMs =
+    options.summaryPollTimeoutMs ?? defaultSummaryPollTimeoutMs;
 
   server.registerTool(
     "list_tabs",
@@ -221,6 +311,26 @@ export function createMcpServer(api: TabHubApi): McpServer {
           }),
         ),
       ),
+  );
+
+  server.registerTool(
+    "summarize_tab",
+    {
+      description:
+        "Start a short or deep summary for one tab and briefly wait for its result.",
+      inputSchema: summarizeTabInputSchema,
+      annotations: summaryMutationAnnotations,
+    },
+    async ({ id, depth }) =>
+      runTool(async () => {
+        const enqueued = await api.summarizeTab(id, depth);
+        return pollSummaryJob(
+          api,
+          enqueued.jobId,
+          summaryPollIntervalMs,
+          summaryPollTimeoutMs,
+        );
+      }),
   );
 
   server.registerTool(

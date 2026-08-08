@@ -1,5 +1,5 @@
 import { knownBrowserOptions, type TabListItem } from "@tabhub/shared";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createColumnHelper,
   tableFeatures,
@@ -7,7 +7,12 @@ import {
 } from "@tanstack/react-table";
 import { createContext, useContext, useEffect, useId, useState } from "react";
 
-import { fetchTabs, type OpenFilter } from "./api";
+import {
+  enqueueShortSummary,
+  fetchSummaryJob,
+  fetchTabs,
+  type OpenFilter,
+} from "./api";
 
 const EMPTY_TABS: TabListItem[] = [];
 const tableFeatureSet = tableFeatures({});
@@ -130,6 +135,91 @@ function SummaryDisclosure({ summary }: { summary: string }) {
   );
 }
 
+function SummaryAction({ tab }: { tab: TabListItem }) {
+  const queryClient = useQueryClient();
+  const [jobId, setJobId] = useState<number | null>(null);
+  const feedbackId = useId();
+  const tabLabel = tab.title?.trim() || hostname(tab.url);
+  const hasSummary = Boolean(tab.summary?.trim());
+  const enqueueMutation = useMutation({
+    mutationFn: () => enqueueShortSummary(tab.id),
+    onMutate: () => setJobId(null),
+    onSuccess: (result) => setJobId(result.jobId),
+  });
+  const jobQuery = useQuery({
+    queryKey: ["summary-job", jobId],
+    queryFn: ({ signal }) => fetchSummaryJob(jobId!, signal),
+    enabled: jobId !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "queued" || status === "running" ? 1_500 : false;
+    },
+  });
+  const job = jobQuery.data;
+  const jobStatus = job?.status ?? enqueueMutation.data?.status;
+
+  useEffect(() => {
+    if (job?.status === "succeeded") {
+      void queryClient.invalidateQueries({ queryKey: ["tabs"] });
+    }
+  }, [job?.id, job?.status, queryClient]);
+
+  const pollingError = jobQuery.isError ? jobQuery.error.message : null;
+  const errorMessage = enqueueMutation.isError
+    ? enqueueMutation.error.message
+    : job?.status === "failed"
+      ? job.error ?? "TabHub could not create this summary."
+      : pollingError;
+  const statusMessage = enqueueMutation.isPending
+    ? "Requesting summary"
+    : jobStatus === "queued"
+      ? "Summary queued"
+      : jobStatus === "running"
+        ? "Creating summary"
+        : jobStatus === "succeeded"
+          ? "Summary ready"
+          : null;
+  const isActive = jobStatus === "queued" || jobStatus === "running";
+  const isStatusRetry = pollingError !== null && jobId !== null;
+  const defaultLabel = hasSummary ? "Refresh short summary" : "Create short summary";
+  const buttonLabel = isStatusRetry
+    ? "Check summary status"
+    : errorMessage
+      ? "Retry short summary"
+      : defaultLabel;
+  const feedback = errorMessage ?? statusMessage;
+
+  return (
+    <div className="summary-action">
+      <button
+        aria-describedby={feedback ? feedbackId : undefined}
+        aria-label={`${buttonLabel} for ${tabLabel}`}
+        disabled={enqueueMutation.isPending || (isActive && !isStatusRetry)}
+        type="button"
+        onClick={() => {
+          if (isStatusRetry) {
+            void jobQuery.refetch();
+          } else {
+            enqueueMutation.mutate();
+          }
+        }}
+      >
+        {buttonLabel}
+      </button>
+      {errorMessage ? (
+        <span className="summary-feedback is-error" id={feedbackId} role="alert">
+          {errorMessage}
+        </span>
+      ) : statusMessage ? (
+        <span className="summary-feedback" id={feedbackId} role="status">
+          {isActive ? <span aria-hidden="true" /> : null}
+          {statusMessage}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 const columns = columnHelper.columns([
   columnHelper.accessor("title", {
     header: "Tab",
@@ -144,6 +234,7 @@ const columns = columnHelper.columns([
             </svg>
           </a>
           <span>{hostname(tab.url)}</span>
+          <SummaryAction tab={tab} />
           {tab.summary?.trim() ? <SummaryDisclosure summary={tab.summary.trim()} /> : null}
         </div>
       );

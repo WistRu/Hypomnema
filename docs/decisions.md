@@ -8,3 +8,5 @@
 - 2026-08-08: Convert user search text into quoted Unicode tokens joined with `AND`, preventing raw FTS syntax errors while retaining predictable keyword semantics.
 - 2026-08-08: Keep MCP as a stateless REST adapter using the split MCP TypeScript v2 stdio packages; all MCP tag mutations are recorded with `assigned_by = 'agent'`.
 - 2026-08-08: Rename ambiguous duplicate root tags during the v3 migration, then enforce root-name uniqueness in SQLite so concurrent local server processes cannot fork a tag path.
+- 2026-08-08: Persist summary jobs and every provider attempt in SQLite, process one request at a time, and bind each job to a content revision so retries and restarts cannot attach stale output.
+- 2026-08-08: Call Anthropic's Messages API directly with pinned configurable model IDs; resolve configurable token prices at request time so stored cost estimates follow the dated Sonnet 5 pricing transition without hidden SDK retries.

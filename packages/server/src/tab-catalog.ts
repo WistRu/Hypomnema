@@ -206,7 +206,10 @@ export function createTabCatalog(
       html_excerpt = excluded.html_excerpt,
       summary = NULL,
       summary_model = NULL,
-      extracted_at = excluded.extracted_at
+      extracted_at = excluded.extracted_at,
+      content_revision = contents.content_revision + 1,
+      summary_job_id = NULL,
+      summary_generated_at = NULL
   `);
   const selectTabDetail = connection.prepare(`
     SELECT

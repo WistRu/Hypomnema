@@ -1,4 +1,6 @@
 import type {
+  SummaryEnqueueResponse,
+  SummaryJob,
   StatsResponse,
   TabDetailResponse,
   TabListResponse,
@@ -44,6 +46,34 @@ const stats: StatsResponse = {
   byStatus: [],
   byBrowser: [],
   byTag: [],
+};
+
+const summaryEnqueueResponse: SummaryEnqueueResponse = {
+  jobId: 12,
+  status: "queued",
+};
+
+const summaryJob: SummaryJob = {
+  id: 12,
+  tabId: 3,
+  depth: "deep",
+  status: "succeeded",
+  attempts: 1,
+  maxAttempts: 3,
+  createdAt: "2026-08-08T12:31:00.000Z",
+  startedAt: "2026-08-08T12:31:01.000Z",
+  completedAt: "2026-08-08T12:31:02.000Z",
+  nextAttemptAt: null,
+  error: null,
+  result: {
+    summary: "A generated summary",
+    model: "test-model",
+    usage: {
+      inputTokens: 120,
+      outputTokens: 24,
+      costUsd: 0.001,
+    },
+  },
 };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -150,6 +180,59 @@ describe("TabHub REST adapter", () => {
         body: undefined,
       },
     ]);
+  });
+
+  it("enqueues agent summaries and fetches validated summary jobs", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl
+      .mockResolvedValueOnce(jsonResponse(summaryEnqueueResponse))
+      .mockResolvedValueOnce(jsonResponse(summaryJob));
+    const api = createTabHubApi({
+      baseUrl: "http://127.0.0.1:7717",
+      fetchImpl,
+    });
+
+    await expect(api.summarizeTab(3, "deep")).resolves.toEqual(
+      summaryEnqueueResponse,
+    );
+    await expect(api.getSummaryJob(12)).resolves.toEqual(summaryJob);
+
+    const calls = fetchImpl.mock.calls.map(([url, init]) => ({
+      url: String(url),
+      method: init?.method,
+      body: init?.body,
+    }));
+    expect(calls).toEqual([
+      {
+        url: "http://127.0.0.1:7717/api/tabs/3/summarize",
+        method: "POST",
+        body: JSON.stringify({ depth: "deep", requestedBy: "agent" }),
+      },
+      {
+        url: "http://127.0.0.1:7717/api/jobs/12",
+        method: "GET",
+        body: undefined,
+      },
+    ]);
+  });
+
+  it("rejects malformed summary enqueue and job responses", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl
+      .mockResolvedValueOnce(
+        jsonResponse({ ...summaryEnqueueResponse, jobId: "12" }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ ...summaryJob, status: "complete" }),
+      );
+    const api = createTabHubApi({ fetchImpl });
+
+    await expect(api.summarizeTab(3, "deep")).rejects.toThrow(
+      "TabHub API POST /api/tabs/3/summarize returned an invalid response",
+    );
+    await expect(api.getSummaryJob(12)).rejects.toThrow(
+      "TabHub API GET /api/jobs/12 returned an invalid response",
+    );
   });
 
   it("reports HTTP failures with the server message", async () => {

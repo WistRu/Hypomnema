@@ -1,11 +1,16 @@
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
-import type { TabDetailResponse, TabListResponse } from "@tabhub/shared";
+import type {
+  SummaryJob,
+  TabDetailResponse,
+  TabListResponse,
+} from "@tabhub/shared";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   createMcpServer,
   type ListTabsInput,
+  type McpServerOptions,
   type TabHubApi,
 } from "../src/server.js";
 
@@ -56,12 +61,50 @@ const tabDetail: TabDetailResponse = {
   customFields: {},
 };
 
+const queuedSummaryJob: SummaryJob = {
+  id: 12,
+  tabId: 1,
+  depth: "deep",
+  status: "queued",
+  attempts: 0,
+  maxAttempts: 3,
+  createdAt: "2026-08-08T12:31:00.000Z",
+  startedAt: null,
+  completedAt: null,
+  nextAttemptAt: null,
+  error: null,
+  result: null,
+};
+
+const runningSummaryJob: SummaryJob = {
+  ...queuedSummaryJob,
+  status: "running",
+  attempts: 1,
+  startedAt: "2026-08-08T12:31:01.000Z",
+};
+
+const succeededSummaryJob: SummaryJob = {
+  ...runningSummaryJob,
+  status: "succeeded",
+  completedAt: "2026-08-08T12:31:02.000Z",
+  result: {
+    summary: "A generated summary",
+    model: "test-model",
+    usage: {
+      inputTokens: 120,
+      outputTokens: 24,
+      costUsd: 0.001,
+    },
+  },
+};
+
 const toolNames = [
   "list_tabs",
   "get_tab",
   "search_tabs",
   "set_status",
   "tag_tabs",
+  "summarize_tab",
   "list_tags",
   "get_stats",
 ];
@@ -78,6 +121,12 @@ function createApi(overrides: Partial<TabHubApi> = {}): TabHubApi {
     tagTabs: async () => {
       throw new Error("not implemented in this test");
     },
+    summarizeTab: async () => {
+      throw new Error("not implemented in this test");
+    },
+    getSummaryJob: async () => {
+      throw new Error("not implemented in this test");
+    },
     listTags: async () => ({ items: [] }),
     getStats: async () => ({
       total: 0,
@@ -90,8 +139,8 @@ function createApi(overrides: Partial<TabHubApi> = {}): TabHubApi {
   };
 }
 
-async function connectClient(api: TabHubApi) {
-  const server = createMcpServer(api);
+async function connectClient(api: TabHubApi, options?: McpServerOptions) {
+  const server = createMcpServer(api, options);
   const client = new Client({ name: "tabhub-test", version: "0.1.0" });
   const [clientTransport, serverTransport] =
     InMemoryTransport.createLinkedPair();
@@ -241,6 +290,79 @@ describe("TabHub MCP server", () => {
         tagId: 7,
         assigned: 2,
       });
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("enqueues an agent summary and polls until the job is terminal", async () => {
+    const summarizeTab = vi.fn(async () => ({
+      jobId: 12,
+      status: "queued" as const,
+    }));
+    const getSummaryJob = vi
+      .fn(async (_id: number): Promise<SummaryJob> => queuedSummaryJob)
+      .mockResolvedValueOnce(queuedSummaryJob)
+      .mockResolvedValueOnce(runningSummaryJob)
+      .mockResolvedValueOnce(succeededSummaryJob);
+    const connection = await connectClient(
+      createApi({ summarizeTab, getSummaryJob }),
+      { summaryPollIntervalMs: 1, summaryPollTimeoutMs: 100 },
+    );
+
+    try {
+      const listed = await connection.client.listTools();
+      const tool = listed.tools.find(({ name }) => name === "summarize_tab");
+      expect(tool?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      });
+
+      const result = await connection.client.callTool({
+        name: "summarize_tab",
+        arguments: { id: 1, depth: "deep" },
+      });
+
+      expect(summarizeTab).toHaveBeenCalledWith(1, "deep");
+      expect(getSummaryJob).toHaveBeenCalledTimes(3);
+      expect(getSummaryJob).toHaveBeenNthCalledWith(1, 12);
+      expect(JSON.parse(textResult(result))).toEqual(succeededSummaryJob);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("returns the current summary job when the polling window expires", async () => {
+    const summarizeTab = vi.fn(async () => ({
+      jobId: 12,
+      status: "queued" as const,
+    }));
+    const getSummaryJob = vi
+      .fn(async (_id: number): Promise<SummaryJob> => queuedSummaryJob)
+      .mockResolvedValueOnce(queuedSummaryJob)
+      .mockReturnValueOnce(new Promise<SummaryJob>(() => undefined));
+    const connection = await connectClient(
+      createApi({ summarizeTab, getSummaryJob }),
+      { summaryPollIntervalMs: 1, summaryPollTimeoutMs: 20 },
+    );
+
+    try {
+      const result = await Promise.race([
+        connection.client.callTool({
+          name: "summarize_tab",
+          arguments: { id: 1, depth: "deep" },
+        }),
+        new Promise<never>((_resolve, reject) =>
+          setTimeout(
+            () => reject(new Error("Summary polling exceeded its timeout")),
+            250,
+          ),
+        ),
+      ]);
+
+      expect(getSummaryJob).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(textResult(result))).toEqual(queuedSummaryJob);
     } finally {
       await connection.close();
     }

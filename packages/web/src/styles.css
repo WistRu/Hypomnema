@@ -548,6 +548,58 @@ tbody tr:hover {
   white-space: nowrap;
 }
 
+.summary-action {
+  display: flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 7px;
+  margin-top: 5px;
+}
+
+.summary-action button {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 0;
+  color: #8ca0ff;
+  background: transparent;
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.summary-action button:hover:not(:disabled) {
+  color: #b2bfff;
+}
+
+.summary-action button:disabled {
+  color: #66728e;
+  cursor: wait;
+}
+
+.summary-feedback {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  color: #838c99;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.summary-feedback > span {
+  width: 6px;
+  height: 6px;
+  border: 1px solid #687eff;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
+.summary-feedback.is-error {
+  color: #d68189;
+}
+
 .summary-disclosure {
   display: flex;
   max-width: 100%;

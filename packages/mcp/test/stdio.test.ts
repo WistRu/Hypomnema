@@ -97,6 +97,7 @@ describe("TabHub built stdio server", () => {
           "list_tags",
           "search_tabs",
           "set_status",
+          "summarize_tab",
           "tag_tabs",
         ]);
 
