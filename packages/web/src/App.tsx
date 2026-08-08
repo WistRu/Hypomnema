@@ -11,6 +11,7 @@ import {
   tableFeatures,
   useTable,
 } from "@tanstack/react-table";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   createContext,
   type KeyboardEvent,
@@ -543,6 +544,19 @@ export function App() {
     features: tableFeatureSet,
     getRowId: (row) => String(row.id),
   });
+  const tableRows = table.getRowModel().rows;
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: tableRows.length,
+    estimateSize: () => 82,
+    getItemKey: (index) => tableRows[index]?.id ?? index,
+    getScrollElement: () => tableScrollRef.current,
+    overscan: 8,
+  });
+
+  useEffect(() => {
+    rowVirtualizer.scrollToOffset(0);
+  }, [browser, importance, openState, page, q, rowVirtualizer, status, tag]);
 
   const hasFilters =
     browser !== "all" ||
@@ -880,8 +894,8 @@ export function App() {
                 </div>
               ) : null}
 
-              <div className="table-scroll">
-                <table>
+              <div className="table-scroll" ref={tableScrollRef}>
+                <table aria-rowcount={tableRows.length + 1} className="virtual-table">
                   <caption className="sr-only">Tabs collected from connected browsers</caption>
                   <thead>
                     {table.getHeaderGroups().map((headerGroup) => (
@@ -894,24 +908,40 @@ export function App() {
                       </tr>
                     ))}
                   </thead>
-                  <tbody>
+                  <tbody
+                    className="virtual-table-body"
+                    style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+                  >
                     {!tabsQuery.isPending && !tabsQuery.isError
-                      ? table.getRowModel().rows.map((row) => (
-                          <tr
-                            aria-selected={selectedIds.has(row.original.id)}
-                            className={selectedIds.has(row.original.id) ? "is-selected" : undefined}
-                            key={row.id}
-                            tabIndex={0}
-                            onClick={(event) => openRow(row.original.id, event)}
-                            onKeyDown={(event) => openRowFromKeyboard(row.original.id, event)}
-                          >
-                            {row.getAllCells().map((cell) => (
-                              <td data-column={cell.column.id} key={cell.id}>
-                                <table.FlexRender cell={cell} />
-                              </td>
-                            ))}
-                          </tr>
-                        ))
+                      ? rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                          const row = tableRows[virtualRow.index];
+                          if (!row) return null;
+
+                          return (
+                            <tr
+                              aria-rowindex={virtualRow.index + 2}
+                              aria-selected={selectedIds.has(row.original.id)}
+                              className={
+                                selectedIds.has(row.original.id) ? "is-selected" : undefined
+                              }
+                              data-index={virtualRow.index}
+                              key={row.id}
+                              ref={(element) => rowVirtualizer.measureElement(element)}
+                              style={{ transform: `translateY(${virtualRow.start}px)` }}
+                              tabIndex={0}
+                              onClick={(event) => openRow(row.original.id, event)}
+                              onKeyDown={(event) =>
+                                openRowFromKeyboard(row.original.id, event)
+                              }
+                            >
+                              {row.getAllCells().map((cell) => (
+                                <td data-column={cell.column.id} key={cell.id}>
+                                  <table.FlexRender cell={cell} />
+                                </td>
+                              ))}
+                            </tr>
+                          );
+                        })
                       : null}
                   </tbody>
                 </table>

@@ -48,3 +48,18 @@ export function buildSnapshot(
     }),
   };
 }
+
+export function buildIdentityTransitionSnapshots(
+  previousBrowser: BrowserIdentifier | undefined,
+  nextBrowser: BrowserIdentifier,
+  tabs: readonly BrowserTabLike[],
+): IngestSnapshot[] {
+  const snapshots: IngestSnapshot[] = [];
+
+  if (previousBrowser !== undefined && previousBrowser !== nextBrowser) {
+    snapshots.push({ browser: previousBrowser, tabs: [] });
+  }
+
+  snapshots.push(buildSnapshot(nextBrowser, tabs));
+  return snapshots;
+}

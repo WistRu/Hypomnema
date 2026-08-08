@@ -10,6 +10,33 @@ import {
   REQUEST_TIMEOUT_MS,
   SNAPSHOT_ENDPOINT,
 } from "./constants";
+import { PendingRequestError } from "./queue";
+
+const TRANSIENT_CLIENT_STATUSES = new Set([408, 425, 429]);
+
+function isRetryableStatus(status: number): boolean {
+  return (
+    status < 400 ||
+    status >= 500 ||
+    TRANSIENT_CLIENT_STATUSES.has(status)
+  );
+}
+
+async function responseError(
+  operation: "Content" | "Snapshot",
+  response: Response,
+): Promise<PendingRequestError> {
+  const detail = (await response.text()).slice(0, 200).trim();
+  const suffix = detail.length > 0 ? `: ${detail}` : "";
+
+  return new PendingRequestError(
+    `${operation} upload failed (HTTP ${response.status})${suffix}`,
+    {
+      retryable: isRetryableStatus(response.status),
+      statusCode: response.status,
+    },
+  );
+}
 
 async function withRequestTimeout<T>(
   request: (signal: AbortSignal) => Promise<T>,
@@ -34,9 +61,7 @@ export async function postSnapshot(snapshot: IngestSnapshot): Promise<void> {
     });
 
     if (!response.ok) {
-      const detail = (await response.text()).slice(0, 200).trim();
-      const suffix = detail.length > 0 ? `: ${detail}` : "";
-      throw new Error(`Snapshot upload failed (HTTP ${response.status})${suffix}`);
+      throw await responseError("Snapshot", response);
     }
   });
 }
@@ -51,9 +76,7 @@ export async function postContent(content: IngestContent): Promise<void> {
     });
 
     if (!response.ok) {
-      const detail = (await response.text()).slice(0, 200).trim();
-      const suffix = detail.length > 0 ? `: ${detail}` : "";
-      throw new Error(`Content upload failed (HTTP ${response.status})${suffix}`);
+      throw await responseError("Content", response);
     }
   });
 }

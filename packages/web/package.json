@@ -14,6 +14,7 @@
     "@tabhub/shared": "workspace:*",
     "@tanstack/react-query": "^5.101.4",
     "@tanstack/react-table": "^9.1.0",
+    "@tanstack/react-virtual": "3.14.9",
     "@xyflow/react": "12.11.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"

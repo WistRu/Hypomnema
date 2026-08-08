@@ -11,6 +11,7 @@
     "dev": "pnpm --filter @tabhub/web build && pnpm --filter @tabhub/server dev",
     "dev:web": "pnpm --parallel --filter @tabhub/server --filter @tabhub/web dev",
     "dev:extension": "pnpm --filter @tabhub/extension dev",
+    "start": "pnpm --filter @tabhub/server start",
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",

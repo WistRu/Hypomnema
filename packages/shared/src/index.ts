@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export const tabHubHttpBodyLimitBytes = 16 * 1024 * 1024;
+export const ingestSnapshotBodyLimitBytes = 15 * 1024 * 1024;
+
 export const knownBrowserOptions = [
   "chrome",
   "yandex",
@@ -34,10 +37,22 @@ export const snapshotTabSchema = z.object({
 
 export type SnapshotTab = z.infer<typeof snapshotTabSchema>;
 
-export const ingestSnapshotSchema = z.object({
-  browser: browserIdentifierSchema,
-  tabs: z.array(snapshotTabSchema).max(10_000),
-});
+export const ingestSnapshotSchema = z
+  .object({
+    browser: browserIdentifierSchema,
+    tabs: z.array(snapshotTabSchema).max(10_000),
+  })
+  .superRefine((snapshot, context) => {
+    const serialized = JSON.stringify(snapshot);
+    const byteLength = new TextEncoder().encode(serialized).byteLength;
+
+    if (byteLength > ingestSnapshotBodyLimitBytes) {
+      context.addIssue({
+        code: "custom",
+        message: `Snapshot JSON cannot exceed ${ingestSnapshotBodyLimitBytes} bytes`,
+      });
+    }
+  });
 
 export type IngestSnapshot = z.infer<typeof ingestSnapshotSchema>;
 

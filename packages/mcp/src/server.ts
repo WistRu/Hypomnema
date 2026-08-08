@@ -1,5 +1,9 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/server";
-import type { SummaryJob, TabDetailResponse } from "@tabhub/shared";
+import {
+  tagPathSchema,
+  type SummaryJob,
+  type TabDetailResponse,
+} from "@tabhub/shared";
 import * as z from "zod/v4";
 
 import type { ListTabsInput, TabHubApi } from "./tabhub-api.js";
@@ -18,17 +22,57 @@ const tabImportanceInputSchema = z.union([
   z.literal(2),
   z.literal(3),
 ]);
+const searchModeInputSchema = z.enum(["fulltext", "semantic"]);
 
-const listTabsInputSchema = z.object({
-  browser: z.string().trim().min(1).max(64).optional(),
-  status: tabStatusInputSchema.optional(),
-  importance: tabImportanceInputSchema.optional(),
-  is_open: z.boolean().optional(),
-  tag: z.string().trim().min(1).max(2_048).optional(),
-  q: z.string().trim().min(1).max(500).optional(),
-  page: z.number().int().positive().default(1),
-  page_size: z.number().int().positive().max(200).default(50),
-});
+const listTabsInputSchema = z
+  .object({
+    browser: z.string().trim().min(1).max(64).optional(),
+    status: tabStatusInputSchema.optional(),
+    importance: tabImportanceInputSchema.optional(),
+    is_open: z.boolean().optional(),
+    tag: tagPathSchema.optional(),
+    q: z
+      .string()
+      .trim()
+      .min(1)
+      .max(500)
+      .describe("A full-text or semantic query; cannot be combined with similar_to.")
+      .optional(),
+    search_mode: searchModeInputSchema
+      .describe(
+        "How to interpret q; semantic mode requires either q or similar_to.",
+      )
+      .optional(),
+    similar_to: z
+      .number()
+      .int()
+      .positive()
+      .describe(
+        "Find tabs similar to this positive TabHub tab ID; cannot be combined with q.",
+      )
+      .optional(),
+    page: z.number().int().positive().default(1),
+    page_size: z.number().int().positive().max(200).default(50),
+  })
+  .superRefine((input, context) => {
+    if (input.q !== undefined && input.similar_to !== undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "q and similar_to cannot be combined",
+      });
+    }
+
+    if (
+      input.search_mode === "semantic" &&
+      input.q === undefined &&
+      input.similar_to === undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Semantic search requires q or similar_to",
+      });
+    }
+  });
 
 const getTabInputSchema = z.object({
   id: z.number().int().positive(),
@@ -37,7 +81,7 @@ const getTabInputSchema = z.object({
 
 const searchTabsInputSchema = z.object({
   query: z.string().trim().min(1).max(500),
-  mode: z.enum(["fulltext", "semantic"]).default("fulltext"),
+  mode: searchModeInputSchema.default("fulltext"),
   browser: z.string().trim().min(1).max(64).optional(),
   status: tabStatusInputSchema.optional(),
   importance: tabImportanceInputSchema.optional(),
@@ -60,7 +104,7 @@ const setImportanceInputSchema = z.object({
 
 const tagTabsInputSchema = z.object({
   ids: tabIdsInputSchema,
-  tag_path: z.string().trim().min(1).max(2_048),
+  tag_path: tagPathSchema,
 });
 
 const linkTabsInputSchema = z.object({
@@ -281,6 +325,12 @@ function toListTabsInput(
     ...(input.is_open === undefined ? {} : { isOpen: input.is_open }),
     ...(input.tag === undefined ? {} : { tag: input.tag }),
     ...(input.q === undefined ? {} : { q: input.q }),
+    ...(input.search_mode === undefined
+      ? {}
+      : { searchMode: input.search_mode }),
+    ...(input.similar_to === undefined
+      ? {}
+      : { similarTo: input.similar_to }),
     page: input.page,
     pageSize: input.page_size,
   };
@@ -299,9 +349,10 @@ export function createMcpServer(
   server.registerTool(
     "list_tabs",
     {
-      description: "List TabHub tabs with optional filters and pagination.",
+      description:
+        "List TabHub tabs with REST-compatible filters, including text search or tabs similar to a positive tab ID, and pagination.",
       inputSchema: listTabsInputSchema,
-      annotations: readOnlyAnnotations,
+      annotations: openWorldReadOnlyAnnotations,
     },
     async (input) => runTool(() => api.listTabs(toListTabsInput(input))),
   );

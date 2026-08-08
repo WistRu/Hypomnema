@@ -150,6 +150,37 @@ describe("TabHub REST adapter", () => {
     expect(init?.method).toBe("GET");
   });
 
+  it("maps a similar-tab filter to the exact REST query parameter", async () => {
+    const fetchImpl: typeof fetch = vi.fn(async () => jsonResponse(listResponse));
+    const api = createTabHubApi({
+      baseUrl: "http://127.0.0.1:7717/",
+      fetchImpl,
+    });
+
+    await expect(
+      api.listTabs({
+        similarTo: 37,
+        searchMode: "semantic",
+        page: 1,
+        pageSize: 10,
+      }),
+    ).resolves.toEqual(listResponse);
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const [requestUrl, init] = vi.mocked(fetchImpl).mock.calls[0]!;
+    const url = new URL(String(requestUrl));
+    expect(`${url.origin}${url.pathname}`).toBe(
+      "http://127.0.0.1:7717/api/tabs",
+    );
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      similar_to: "37",
+      search_mode: "semantic",
+      page: "1",
+      pageSize: "10",
+    });
+    expect(init?.method).toBe("GET");
+  });
+
   it("uses the exact detail, mutation, tag, and stats endpoints", async () => {
     const fetchImpl = vi.fn<typeof fetch>();
     fetchImpl

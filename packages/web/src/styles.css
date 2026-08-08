@@ -426,8 +426,11 @@ select:hover {
 
 .table-scroll {
   position: relative;
+  height: clamp(250px, 62vh, 680px);
   min-height: 250px;
-  overflow-x: auto;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 table {
@@ -439,6 +442,59 @@ table {
 
 thead {
   background: #0d1016;
+}
+
+.virtual-table {
+  display: grid;
+}
+
+.virtual-table thead {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: grid;
+}
+
+.virtual-table thead tr,
+.virtual-table-body tr {
+  display: grid;
+  width: 100%;
+  grid-template-columns:
+    42px
+    minmax(250px, 34fr)
+    minmax(120px, 17fr)
+    minmax(90px, 11fr)
+    minmax(90px, 11fr)
+    minmax(90px, 10fr)
+    minmax(75px, 8fr)
+    minmax(75px, 8fr);
+}
+
+.virtual-table-body {
+  position: relative;
+  display: grid;
+}
+
+.virtual-table-body tr {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+.virtual-table th,
+.virtual-table td {
+  min-width: 0;
+}
+
+.virtual-table th[data-column],
+.virtual-table td[data-column] {
+  width: auto;
+}
+
+.virtual-table td {
+  height: auto;
+  min-height: 55px;
+  align-content: center;
 }
 
 th {

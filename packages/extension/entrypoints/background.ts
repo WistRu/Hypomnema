@@ -21,20 +21,31 @@ import {
   type ExtensionStatus,
 } from "../lib/messages";
 import {
+  appendPendingItems,
+  compactPendingQueue,
   createPendingContent,
   createPendingSnapshot,
   drainPendingQueue,
   errorMessage,
+  summarizePendingItems,
   type DrainQueueResult,
   type PendingItem,
 } from "../lib/queue";
 import {
-  ensureBrowserIdentifier,
   getBrowserIdentifier,
-  readPendingItems,
-  writePendingItems,
+  getStoredBrowserIdentifier,
+  readQueueState,
+  writeIdentityAndQueueState,
+  writeQueueState,
+  type KnownBrowser,
 } from "../lib/storage";
-import { buildSnapshot } from "../lib/tab-snapshot";
+import {
+  buildIdentityTransitionSnapshots,
+  buildSnapshot,
+} from "../lib/tab-snapshot";
+
+const IDENTITY_REQUIRED_ERROR =
+  "Choose this extension's browser identity in Browser settings before synchronizing tabs.";
 
 let syncTail: Promise<void> = Promise.resolve();
 let tabEventTimer: ReturnType<typeof setTimeout> | undefined;
@@ -49,8 +60,19 @@ function serializeSync<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 async function flushPendingUnlocked(): Promise<DrainQueueResult> {
-  const pending = await readPendingItems();
-  return drainPendingQueue(pending, sendPendingItem, writePendingItems);
+  const state = await readQueueState();
+  const pending = compactPendingQueue(state.pending);
+
+  // Rewrite parsed/compacted state first so invalid legacy records and
+  // duplicate snapshots do not survive indefinitely while the server is down.
+  await writeQueueState(pending, state.deadLetters);
+  return drainPendingQueue(
+    pending,
+    sendPendingItem,
+    writeQueueState,
+    undefined,
+    state.deadLetters,
+  );
 }
 
 function flushPending(): Promise<DrainQueueResult> {
@@ -68,26 +90,69 @@ async function sendPendingItem(item: PendingItem): Promise<void> {
 async function appendAndFlushUnlocked(
   items: readonly PendingItem[],
 ): Promise<DrainQueueResult> {
-  const pending = await readPendingItems();
-  pending.push(...items);
+  const state = await readQueueState();
+  const pending = appendPendingItems(state.pending, items);
 
   // Write before attempting HTTP so a terminated MV3 worker cannot lose work.
-  await writePendingItems(pending);
-  return drainPendingQueue(pending, sendPendingItem, writePendingItems);
+  await writeQueueState(pending, state.deadLetters);
+  return drainPendingQueue(
+    pending,
+    sendPendingItem,
+    writeQueueState,
+    undefined,
+    state.deadLetters,
+  );
 }
 
-function appendAndFlush(items: readonly PendingItem[]): Promise<DrainQueueResult> {
-  return serializeSync(() => appendAndFlushUnlocked(items));
-}
-
-function captureAndSync(): Promise<DrainQueueResult> {
+function captureAndSync(
+  requireConfigured = false,
+): Promise<DrainQueueResult | undefined> {
   return serializeSync(async () => {
-    const [browserIdentifier, tabs] = await Promise.all([
-      getBrowserIdentifier(),
-      browser.tabs.query({}),
-    ]);
+    const browserIdentifier = await getBrowserIdentifier();
+
+    if (browserIdentifier === undefined) {
+      if (requireConfigured) {
+        throw new Error(IDENTITY_REQUIRED_ERROR);
+      }
+
+      return undefined;
+    }
+
+    const tabs = await browser.tabs.query({});
     const snapshot = buildSnapshot(browserIdentifier, tabs);
     return appendAndFlushUnlocked([createPendingSnapshot(snapshot)]);
+  });
+}
+
+function changeBrowserIdentity(
+  nextBrowser: KnownBrowser,
+): Promise<DrainQueueResult> {
+  return serializeSync(async () => {
+    const [previousBrowser, tabs, state] = await Promise.all([
+      getStoredBrowserIdentifier(),
+      browser.tabs.query({}),
+      readQueueState(),
+    ]);
+    const transition = buildIdentityTransitionSnapshots(
+      previousBrowser,
+      nextBrowser,
+      tabs,
+    ).map((snapshot) => createPendingSnapshot(snapshot));
+    const pending = appendPendingItems(state.pending, transition);
+
+    // Browser identity and both ordered snapshots become durable atomically.
+    await writeIdentityAndQueueState(
+      nextBrowser,
+      pending,
+      state.deadLetters,
+    );
+    return drainPendingQueue(
+      pending,
+      sendPendingItem,
+      writeQueueState,
+      undefined,
+      state.deadLetters,
+    );
   });
 }
 
@@ -120,9 +185,15 @@ function addCapturedUrlsToSnapshot(
   }
 }
 
-async function captureContent(
+async function captureContentUnlocked(
   mode: "current" | "all",
 ): Promise<ExtensionResponse> {
+  const browserIdentifier = await getBrowserIdentifier();
+
+  if (browserIdentifier === undefined) {
+    throw new Error(IDENTITY_REQUIRED_ERROR);
+  }
+
   const selectedTabs = await browser.tabs.query(
     mode === "current" ? { active: true, currentWindow: true } : {},
   );
@@ -142,10 +213,7 @@ async function captureContent(
     };
   }
 
-  const [browserIdentifier, currentTabs] = await Promise.all([
-    getBrowserIdentifier(),
-    browser.tabs.query({}),
-  ]);
+  const currentTabs = await browser.tabs.query({});
   const snapshot = buildSnapshot(browserIdentifier, currentTabs);
   addCapturedUrlsToSnapshot(snapshot, capture);
   const contentItems = capture.captured.map(({ page }) =>
@@ -157,7 +225,7 @@ async function captureContent(
     }),
   );
   const contentIds = new Set(contentItems.map(({ id }) => id));
-  const drainResult = await appendAndFlush([
+  const drainResult = await appendAndFlushUnlocked([
     createPendingSnapshot(snapshot),
     ...contentItems,
   ]);
@@ -171,6 +239,12 @@ async function captureContent(
     ok: true,
     status: await getStatus(),
   };
+}
+
+function captureContent(
+  mode: "current" | "all",
+): Promise<ExtensionResponse> {
+  return serializeSync(() => captureContentUnlocked(mode));
 }
 
 async function ensureAlarm(
@@ -214,18 +288,39 @@ async function getStatus(retryPending = false): Promise<ExtensionStatus> {
     await flushPending();
   }
 
-  const [serverReachable, pending] = await Promise.all([
+  const [serverReachable, state, browserIdentifier] = await Promise.all([
     isServerReachable(),
-    readPendingItems(),
+    readQueueState(),
+    getBrowserIdentifier(),
   ]);
-  const lastError = pending[0]?.lastError;
+  const queueSummary = summarizePendingItems(state.pending);
+  const pendingErrors = state.pending.flatMap((item) =>
+    item.lastError === undefined
+      ? []
+      : [
+          {
+            error: item.lastError,
+            timestamp: item.lastAttemptAt ?? item.createdAt,
+          },
+        ],
+  );
+  const deadLetterErrors = state.deadLetters.map((item) => ({
+    error: `Discarded unsendable ${item.kind}: ${item.error}`,
+    timestamp: item.failedAt,
+  }));
+  const latestError = [...pendingErrors, ...deadLetterErrors]
+    .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
+    .at(-1)?.error;
   const status: ExtensionStatus = {
-    pendingCount: pending.length,
+    browserConfigured: browserIdentifier !== undefined,
+    deadLetterCount: state.deadLetters.length,
+    pendingOperationCount: queueSummary.pendingOperationCount,
+    pendingTabCount: queueSummary.pendingTabCount,
     serverReachable,
   };
 
-  if (lastError !== undefined) {
-    status.lastError = lastError;
+  if (latestError !== undefined) {
+    status.lastError = latestError;
   }
 
   return status;
@@ -233,7 +328,7 @@ async function getStatus(retryPending = false): Promise<ExtensionStatus> {
 
 async function handleSnapshotNow(): Promise<ExtensionResponse> {
   try {
-    await captureAndSync();
+    await captureAndSync(true);
     return { ok: true, status: await getStatus() };
   } catch (error) {
     return {
@@ -260,23 +355,33 @@ async function handleMessage(message: unknown): Promise<ExtensionResponse | void
       case "tabhub:capture-all":
         return captureContent("all");
       case "tabhub:browser-changed":
-        scheduleTabEventSnapshot();
+        await changeBrowserIdentity(message.browser);
         return { ok: true, status: await getStatus() };
     }
   } catch (error) {
+    let status: ExtensionStatus;
+
+    try {
+      status = await getStatus();
+    } catch {
+      status = {
+        browserConfigured: false,
+        deadLetterCount: 0,
+        pendingOperationCount: 0,
+        pendingTabCount: 0,
+        serverReachable: false,
+      };
+    }
+
     return {
       error: errorMessage(error),
       ok: false,
-      status: {
-        pendingCount: 0,
-        serverReachable: false,
-      },
+      status,
     };
   }
 }
 
 async function initializeWorker(): Promise<void> {
-  await ensureBrowserIdentifier();
   await ensureAlarms();
   await flushPending();
 }
@@ -288,7 +393,6 @@ export default defineBackground(() => {
 
   browser.runtime.onInstalled.addListener((details) => {
     void (async () => {
-      await ensureBrowserIdentifier();
       await ensureAlarms();
 
       if (details.reason === "install") {

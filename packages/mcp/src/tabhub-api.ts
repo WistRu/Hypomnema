@@ -35,6 +35,7 @@ export interface ListTabsInput {
   tag?: string;
   q?: string;
   searchMode?: SearchMode;
+  similarTo?: number;
   page: number;
   pageSize: number;
 }
@@ -156,6 +157,9 @@ export function createTabHubApi(
       }
       if (input.searchMode !== undefined) {
         searchParams.set("search_mode", input.searchMode);
+      }
+      if (input.similarTo !== undefined) {
+        searchParams.set("similar_to", String(input.similarTo));
       }
 
       return request(

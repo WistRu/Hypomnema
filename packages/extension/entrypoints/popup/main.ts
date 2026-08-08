@@ -19,6 +19,7 @@ function requiredElement<T extends Element>(selector: string): T {
 
 const serverStatus = requiredElement<HTMLElement>("#server-status");
 const pendingCount = requiredElement<HTMLElement>("#pending-count");
+const pendingOperations = requiredElement<HTMLElement>("#pending-operations");
 const statusDot = requiredElement<HTMLElement>("#status-dot");
 const detail = requiredElement<HTMLElement>("#detail");
 const captureCurrentButton = requiredElement<HTMLButtonElement>(
@@ -30,24 +31,32 @@ const captureAllButton = requiredElement<HTMLButtonElement>(
 const snapshotButton =
   requiredElement<HTMLButtonElement>("#snapshot-button");
 const optionsButton = requiredElement<HTMLButtonElement>("#options-button");
+let browserConfigured = false;
 
 function renderStatus(status: ExtensionStatus): void {
+  browserConfigured = status.browserConfigured;
   serverStatus.textContent = status.serverReachable
     ? "Available"
     : "Unavailable";
-  pendingCount.textContent = String(status.pendingCount);
+  pendingCount.textContent = String(status.pendingTabCount);
+  pendingOperations.textContent = String(status.pendingOperationCount);
   statusDot.className = `status-dot ${status.serverReachable ? "online" : "offline"}`;
   statusDot.title = status.serverReachable
     ? "TabHub server available"
     : "TabHub server unavailable";
 
-  if (status.lastError !== undefined && status.pendingCount > 0) {
+  if (!status.browserConfigured) {
+    detail.textContent =
+      "Choose this browser's identity in Browser settings before capturing tabs.";
+  } else if (status.lastError !== undefined) {
     detail.textContent = status.lastError;
-  } else if (status.pendingCount > 0) {
-    detail.textContent = "Saved locally and waiting to retry.";
+  } else if (status.pendingOperationCount > 0) {
+    detail.textContent = `${status.pendingTabCount} unique tabs across ${status.pendingOperationCount} queued operations are waiting to retry.`;
   } else {
     detail.textContent = "All queued items are synchronized.";
   }
+
+  setActionsDisabled(false);
 }
 
 function formatCaptureSummary(summary: CaptureSummary): string {
@@ -86,7 +95,7 @@ const actionButtons = [
 
 function setActionsDisabled(disabled: boolean): void {
   for (const button of actionButtons) {
-    button.disabled = disabled;
+    button.disabled = disabled || !browserConfigured;
   }
 }
 
@@ -106,12 +115,14 @@ function runAction(
 
     if (!response.ok) {
       detail.textContent = response.error;
-    } else if (response.capture !== undefined) {
-      detail.textContent = formatCaptureSummary(response.capture);
-    } else if (response.status.pendingCount > 0) {
-      detail.textContent = "Snapshot saved locally; retry is automatic.";
-    } else {
-      detail.textContent = doneLabel;
+    } else if (response.status.lastError === undefined) {
+      if (response.capture !== undefined) {
+        detail.textContent = formatCaptureSummary(response.capture);
+      } else if (response.status.pendingOperationCount > 0) {
+        detail.textContent = "Snapshot saved locally; retry is automatic.";
+      } else {
+        detail.textContent = doneLabel;
+      }
     }
   })()
     .catch((error: unknown) => {
@@ -158,6 +169,7 @@ optionsButton.addEventListener("click", () => {
 void refreshStatus().catch((error: unknown) => {
   serverStatus.textContent = "Unavailable";
   pendingCount.textContent = "—";
+  pendingOperations.textContent = "—";
   statusDot.className = "status-dot offline";
   detail.textContent =
     error instanceof Error ? error.message : "Could not read extension status.";

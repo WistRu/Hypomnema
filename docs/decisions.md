@@ -16,3 +16,7 @@
 - 2026-08-08: Store one active 512-dimensional embedding space in `sqlite-vec` with cosine distance and provider/model/content-revision metadata; embedding calls are explicit, batched, bounded, and stale vectors are invalidated before reuse.
 - 2026-08-08: Make inbox clustering deterministic with cosine k-means and local TF-IDF-style labels, so `cluster_inbox` can propose stable named groups without an additional LLM call or silently changing tags.
 - 2026-08-08: Build graph payloads with a set-based server catalog, then use deterministic memoized topic-group layout, React Flow visible-element rendering, and cycle-safe outgoing `follows` traversal for the current-work branch.
+- 2026-08-08: Reject non-loopback `TABHUB_HOST` values at startup because v1 deliberately has no authentication; production startup is documented through Windows Task Scheduler.
+- 2026-08-08: Keep schema-valid snapshots below the Fastify body limit, compact superseded offline work, cap local queue storage, and dead-letter permanent HTTP failures so one bad payload cannot block later captures.
+- 2026-08-08: Require a versioned explicit browser choice in each extension install; automatic capture waits for it, and a later change durably closes the old identity before opening the new one.
+- 2026-08-08: Virtualize dynamically measured table rows with TanStack Virtual while retaining server pagination, native table semantics, and expandable summaries.

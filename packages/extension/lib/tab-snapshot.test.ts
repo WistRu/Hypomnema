@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildSnapshot, toSnapshotTab } from "./tab-snapshot";
+import {
+  buildIdentityTransitionSnapshots,
+  buildSnapshot,
+  toSnapshotTab,
+} from "./tab-snapshot";
 
 describe("toSnapshotTab", () => {
   it("maps the fields accepted by the snapshot endpoint", () => {
@@ -43,5 +47,44 @@ describe("toSnapshotTab", () => {
         },
       ],
     });
+  });
+});
+
+describe("buildIdentityTransitionSnapshots", () => {
+  const tabs = [
+    { index: 0, title: "Example", url: "https://example.com", windowId: 1 },
+  ];
+
+  it("closes the previous identity before opening the new identity", () => {
+    expect(buildIdentityTransitionSnapshots("chrome", "edge", tabs)).toEqual([
+      { browser: "chrome", tabs: [] },
+      {
+        browser: "edge",
+        tabs: [
+          {
+            index: 0,
+            title: "Example",
+            url: "https://example.com",
+            windowId: 1,
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("only opens the selected identity on first configuration", () => {
+    expect(buildIdentityTransitionSnapshots(undefined, "yandex", tabs)).toEqual([
+      {
+        browser: "yandex",
+        tabs: [
+          {
+            index: 0,
+            title: "Example",
+            url: "https://example.com",
+            windowId: 1,
+          },
+        ],
+      },
+    ]);
   });
 });

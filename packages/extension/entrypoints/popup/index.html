@@ -22,20 +22,24 @@
           <strong id="server-status">Checking…</strong>
         </div>
         <div>
-          <span class="label">Unsynced items</span>
+          <span class="label">Unsynced tabs</span>
           <strong id="pending-count">—</strong>
+        </div>
+        <div>
+          <span class="label">Queued operations</span>
+          <strong id="pending-operations">—</strong>
         </div>
       </section>
 
       <p id="detail" class="detail" role="status" aria-live="polite"></p>
 
-      <button id="capture-current-button" class="primary" type="button">
+      <button id="capture-current-button" class="primary" type="button" disabled>
         Capture current tab
       </button>
-      <button id="capture-all-button" class="secondary" type="button">
+      <button id="capture-all-button" class="secondary" type="button" disabled>
         Capture all eligible tabs
       </button>
-      <button id="snapshot-button" class="secondary" type="button">
+      <button id="snapshot-button" class="secondary" type="button" disabled>
         Snapshot now
       </button>
       <button id="options-button" class="secondary" type="button">

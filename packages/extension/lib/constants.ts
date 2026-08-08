@@ -11,6 +11,8 @@ export const EXTRACT_CONTENT_SCRIPT_FILE =
 
 export const STORAGE_KEYS = {
   browser: "tabhub.browser",
+  browserConfigured: "tabhub.browserConfiguredVersion",
+  deadLetters: "tabhub.deadLetters",
   pendingSnapshots: "tabhub.pendingSnapshots",
 } as const;
 

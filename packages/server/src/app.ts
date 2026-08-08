@@ -1,5 +1,6 @@
 import {
   healthResponseSchema,
+  tabHubHttpBodyLimitBytes,
   type HealthResponse,
 } from "@tabhub/shared";
 import cors from "@fastify/cors";
@@ -66,7 +67,7 @@ export function createApp(options: CreateAppOptions): TabHubApp {
   const database = openDatabase(options.databasePath);
   const app = Fastify({
     logger: options.logger ?? false,
-    bodyLimit: 16 * 1024 * 1024,
+    bodyLimit: tabHubHttpBodyLimitBytes,
   });
   const tabCatalog = createTabCatalog(database.connection, options.clock);
   const tagCatalog = createTagCatalog(database.connection);

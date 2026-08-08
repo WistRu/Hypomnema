@@ -1,19 +1,27 @@
 import {
-  browserIdentifierSchema,
   ingestContentSchema,
   ingestSnapshotSchema,
   knownBrowserOptions,
-  type BrowserIdentifier,
 } from "@tabhub/shared";
 import { browser } from "wxt/browser";
 
 import { STORAGE_KEYS } from "./constants";
-import type { PendingItem } from "./queue";
+import {
+  MAX_DEAD_LETTERS,
+  type DeadLetter,
+  type PendingItem,
+} from "./queue";
 
 export type KnownBrowser = (typeof knownBrowserOptions)[number];
 
+export interface StoredQueueState {
+  deadLetters: DeadLetter[];
+  pending: PendingItem[];
+}
+
+export const BROWSER_CONFIG_VERSION = 1;
+
 const knownBrowsers = new Set<string>(knownBrowserOptions);
-const defaultBrowser: KnownBrowser = "chrome";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -23,37 +31,41 @@ export function isKnownBrowser(value: unknown): value is KnownBrowser {
   return typeof value === "string" && knownBrowsers.has(value);
 }
 
-export async function getBrowserIdentifier(): Promise<BrowserIdentifier> {
-  const stored = await browser.storage.local.get(STORAGE_KEYS.browser);
-  const parsed = browserIdentifierSchema.safeParse(stored[STORAGE_KEYS.browser]);
-
-  return parsed.success && isKnownBrowser(parsed.data)
-    ? parsed.data
-    : defaultBrowser;
-}
-
-export async function ensureBrowserIdentifier(): Promise<BrowserIdentifier> {
-  const stored = await browser.storage.local.get(STORAGE_KEYS.browser);
+/**
+ * A browser value is trusted only when accompanied by the explicit-choice
+ * marker. Earlier extension versions silently wrote `chrome`; treating that
+ * legacy value as configured would keep mislabelling Edge/Yandex installs.
+ */
+export async function getBrowserIdentifier(): Promise<
+  KnownBrowser | undefined
+> {
+  const stored = await browser.storage.local.get([
+    STORAGE_KEYS.browser,
+    STORAGE_KEYS.browserConfigured,
+  ]);
   const storedBrowser = stored[STORAGE_KEYS.browser];
 
-  if (isKnownBrowser(storedBrowser)) {
-    return storedBrowser;
-  }
-
-  await setBrowserIdentifier(defaultBrowser);
-  return defaultBrowser;
+  return stored[STORAGE_KEYS.browserConfigured] === BROWSER_CONFIG_VERSION &&
+    isKnownBrowser(storedBrowser)
+    ? storedBrowser
+    : undefined;
 }
 
-export async function setBrowserIdentifier(value: KnownBrowser): Promise<void> {
-  await browser.storage.local.set({ [STORAGE_KEYS.browser]: value });
+export async function getStoredBrowserIdentifier(): Promise<
+  KnownBrowser | undefined
+> {
+  const stored = await browser.storage.local.get(STORAGE_KEYS.browser);
+  const storedBrowser = stored[STORAGE_KEYS.browser];
+  return isKnownBrowser(storedBrowser) ? storedBrowser : undefined;
 }
 
 function parsePendingItem(value: unknown): PendingItem | undefined {
-  if (!isRecord(value)) {
+  if (
+    !isRecord(value) ||
+    (value.kind !== "snapshot" && value.kind !== "content")
+  ) {
     return undefined;
   }
-
-  const kind = value.kind === "content" ? "content" : "snapshot";
 
   if (
     typeof value.id !== "string" ||
@@ -72,14 +84,14 @@ function parsePendingItem(value: unknown): PendingItem | undefined {
   };
   let pending: PendingItem;
 
-  if (kind === "content") {
+  if (value.kind === "content") {
     const payload = ingestContentSchema.safeParse(value.payload);
 
     if (!payload.success) {
       return undefined;
     }
 
-    pending = { ...metadata, kind, payload: payload.data };
+    pending = { ...metadata, kind: "content", payload: payload.data };
   } else {
     const payload = ingestSnapshotSchema.safeParse(value.payload);
 
@@ -87,7 +99,7 @@ function parsePendingItem(value: unknown): PendingItem | undefined {
       return undefined;
     }
 
-    pending = { ...metadata, kind, payload: payload.data };
+    pending = { ...metadata, kind: "snapshot", payload: payload.data };
   }
 
   if (typeof value.lastAttemptAt === "string") {
@@ -101,24 +113,90 @@ function parsePendingItem(value: unknown): PendingItem | undefined {
   return pending;
 }
 
-export async function readPendingItems(): Promise<PendingItem[]> {
-  const stored = await browser.storage.local.get(STORAGE_KEYS.pendingSnapshots);
-  const value = stored[STORAGE_KEYS.pendingSnapshots];
-
-  if (!Array.isArray(value)) {
-    return [];
+function parseDeadLetter(value: unknown): DeadLetter | undefined {
+  if (
+    !isRecord(value) ||
+    (value.kind !== "snapshot" && value.kind !== "content") ||
+    typeof value.id !== "string" ||
+    typeof value.browser !== "string" ||
+    typeof value.createdAt !== "string" ||
+    typeof value.failedAt !== "string" ||
+    typeof value.error !== "string" ||
+    !Number.isInteger(value.attempts) ||
+    (value.attempts as number) < 1
+  ) {
+    return undefined;
   }
 
-  return value.flatMap((item) => {
-    const parsed = parsePendingItem(item);
-    return parsed === undefined ? [] : [parsed];
+  const deadLetter: DeadLetter = {
+    attempts: value.attempts as number,
+    browser: value.browser,
+    createdAt: value.createdAt,
+    error: value.error,
+    failedAt: value.failedAt,
+    id: value.id,
+    kind: value.kind,
+  };
+
+  if (
+    typeof value.statusCode === "number" &&
+    Number.isInteger(value.statusCode)
+  ) {
+    deadLetter.statusCode = value.statusCode;
+  }
+
+  if (typeof value.url === "string") {
+    deadLetter.url = value.url;
+  }
+
+  return deadLetter;
+}
+
+export async function readQueueState(): Promise<StoredQueueState> {
+  const stored = await browser.storage.local.get([
+    STORAGE_KEYS.pendingSnapshots,
+    STORAGE_KEYS.deadLetters,
+  ]);
+  const pendingValue = stored[STORAGE_KEYS.pendingSnapshots];
+  const deadLetterValue = stored[STORAGE_KEYS.deadLetters];
+
+  const pending = Array.isArray(pendingValue)
+    ? pendingValue.flatMap((item) => {
+        const parsed = parsePendingItem(item);
+        return parsed === undefined ? [] : [parsed];
+      })
+    : [];
+  const deadLetters = Array.isArray(deadLetterValue)
+    ? deadLetterValue
+        .flatMap((item) => {
+          const parsed = parseDeadLetter(item);
+          return parsed === undefined ? [] : [parsed];
+        })
+        .slice(-MAX_DEAD_LETTERS)
+    : [];
+
+  return { deadLetters, pending };
+}
+
+export async function writeQueueState(
+  queue: readonly PendingItem[],
+  deadLetters: readonly DeadLetter[],
+): Promise<void> {
+  await browser.storage.local.set({
+    [STORAGE_KEYS.deadLetters]: deadLetters.slice(-MAX_DEAD_LETTERS),
+    [STORAGE_KEYS.pendingSnapshots]: queue,
   });
 }
 
-export async function writePendingItems(
+export async function writeIdentityAndQueueState(
+  identity: KnownBrowser,
   queue: readonly PendingItem[],
+  deadLetters: readonly DeadLetter[],
 ): Promise<void> {
   await browser.storage.local.set({
+    [STORAGE_KEYS.browser]: identity,
+    [STORAGE_KEYS.browserConfigured]: BROWSER_CONFIG_VERSION,
+    [STORAGE_KEYS.deadLetters]: deadLetters.slice(-MAX_DEAD_LETTERS),
     [STORAGE_KEYS.pendingSnapshots]: queue,
   });
 }

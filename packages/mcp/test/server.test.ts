@@ -234,6 +234,78 @@ describe("TabHub MCP server", () => {
     }
   });
 
+  it("lists tabs similar to a positive tab ID through the MCP interface", async () => {
+    const listTabs = vi.fn(async (_input: ListTabsInput) => tabList);
+    const connection = await connectClient(createApi({ listTabs }));
+
+    try {
+      const listed = await connection.client.listTools();
+      const tool = listed.tools.find(({ name }) => name === "list_tabs");
+      expect(tool?.description).toContain("similar");
+      expect(tool?.annotations).toMatchObject({
+        readOnlyHint: true,
+        openWorldHint: true,
+      });
+
+      const result = await connection.client.callTool({
+        name: "list_tabs",
+        arguments: {
+          similar_to: 41,
+          search_mode: "semantic",
+          page_size: 10,
+        },
+      });
+
+      expect(listTabs).toHaveBeenCalledWith({
+        similarTo: 41,
+        searchMode: "semantic",
+        page: 1,
+        pageSize: 10,
+      });
+      expect(JSON.parse(textResult(result))).toEqual(tabList);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("rejects incompatible or incomplete list-tab search filters", async () => {
+    const listTabs = vi.fn(async (_input: ListTabsInput) => tabList);
+    const connection = await connectClient(createApi({ listTabs }));
+
+    try {
+      const incompatible = await connection.client.callTool({
+        name: "list_tabs",
+        arguments: { q: "agent", similar_to: 41 },
+      });
+      const incompleteSemantic = await connection.client.callTool({
+        name: "list_tabs",
+        arguments: { search_mode: "semantic" },
+      });
+      const invalidId = await connection.client.callTool({
+        name: "list_tabs",
+        arguments: { similar_to: 0 },
+      });
+      const invalidTag = await connection.client.callTool({
+        name: "list_tabs",
+        arguments: { tag: "Research//AI" },
+      });
+
+      expect(incompatible.isError).toBe(true);
+      expect(textResult(incompatible)).toContain(
+        "q and similar_to cannot be combined",
+      );
+      expect(incompleteSemantic.isError).toBe(true);
+      expect(textResult(incompleteSemantic)).toContain(
+        "Semantic search requires q or similar_to",
+      );
+      expect(invalidId.isError).toBe(true);
+      expect(invalidTag.isError).toBe(true);
+      expect(listTabs).not.toHaveBeenCalled();
+    } finally {
+      await connection.close();
+    }
+  });
+
   it("gets a tab with captured text only when requested", async () => {
     const getTab = vi.fn(async (_id: number) => tabDetail);
     const connection = await connectClient(createApi({ getTab }));

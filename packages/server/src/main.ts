@@ -7,11 +7,12 @@ import { config as loadEnvironment } from "dotenv";
 import { createApp } from "./app.js";
 import { createAnthropicSummaryProvider } from "./summary-provider.js";
 import { createEmbeddingProviderFromEnv } from "./embedding-provider.js";
+import { resolveServerHost } from "./runtime-config.js";
 
 const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
 loadEnvironment({ path: resolve(workspaceRoot, ".env") });
 
-const host = process.env.TABHUB_HOST ?? "127.0.0.1";
+const host = resolveServerHost(process.env.TABHUB_HOST);
 const port = Number.parseInt(process.env.TABHUB_PORT ?? "7717", 10);
 const databasePath = resolve(
   workspaceRoot,
