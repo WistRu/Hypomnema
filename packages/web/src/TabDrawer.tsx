@@ -236,6 +236,7 @@ export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
       queryClient.invalidateQueries({ queryKey: ["links", tabId] }),
       queryClient.invalidateQueries({ queryKey: ["tabs"] }),
       queryClient.invalidateQueries({ queryKey: ["tags"] }),
+      queryClient.invalidateQueries({ queryKey: ["graph"] }),
     ]);
   };
 

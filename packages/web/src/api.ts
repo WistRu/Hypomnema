@@ -1,6 +1,7 @@
 import {
   assignTagsResponseSchema,
   deleteResponseSchema,
+  graphResponseSchema,
   linkListResponseSchema,
   setStatusResponseSchema,
   summaryEnqueueResponseSchema,
@@ -136,6 +137,24 @@ export async function fetchTagTree(signal?: AbortSignal) {
   const parsed = tagTreeResponseSchema.safeParse(payload);
   if (!parsed.success) {
     throw new Error("TabHub returned an unexpected tag tree.");
+  }
+
+  return parsed.data;
+}
+
+export async function fetchGraph(rootTag: string, signal?: AbortSignal) {
+  const searchParams = new URLSearchParams();
+  if (rootTag) searchParams.set("root_tag", rootTag);
+  const query = searchParams.size > 0 ? `?${searchParams.toString()}` : "";
+  const payload = await requestJson(
+    `/api/graph${query}`,
+    { headers: { Accept: "application/json" }, signal: signal ?? null },
+    "TabHub could not load the graph",
+    "TabHub returned an unreadable graph.",
+  );
+  const parsed = graphResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected graph.");
   }
 
   return parsed.data;

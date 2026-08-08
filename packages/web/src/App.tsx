@@ -15,6 +15,8 @@ import {
   createContext,
   type KeyboardEvent,
   type MouseEvent,
+  lazy,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -33,6 +35,8 @@ import {
   type OpenFilter,
 } from "./api";
 import { TabDrawer } from "./TabDrawer";
+
+const GraphView = lazy(() => import("./GraphView"));
 
 const EMPTY_TABS: TabListItem[] = [];
 const tableFeatureSet = tableFeatures({});
@@ -348,6 +352,7 @@ function SearchIcon() {
 
 export function App() {
   const queryClient = useQueryClient();
+  const [view, setView] = useState<"table" | "graph">("table");
   const [browser, setBrowser] = useState("all");
   const [openState, setOpenState] = useState<OpenFilter>("all");
   const [status, setStatus] = useState<"all" | TabStatus>("all");
@@ -385,7 +390,10 @@ export function App() {
     mutationFn: () => updateTabStatuses([...selectedIds], bulkStatus),
     onSuccess: async () => {
       setSelectedIds(new Set());
-      await queryClient.invalidateQueries({ queryKey: ["tabs"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["tabs"] }),
+        queryClient.invalidateQueries({ queryKey: ["graph"] }),
+      ]);
     },
   });
   const bulkTagMutation = useMutation({
@@ -396,6 +404,7 @@ export function App() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["tabs"] }),
         queryClient.invalidateQueries({ queryKey: ["tags"] }),
+        queryClient.invalidateQueries({ queryKey: ["graph"] }),
       ]);
     },
   });
@@ -616,21 +625,47 @@ export function App() {
             <div>
               <p className="eyebrow">Workspace</p>
               <div className="title-row">
-                <h2 id="tab-list-title">{tag || "All tabs"}</h2>
-                {tabsQuery.data ? <span>{tabsQuery.data.total.toLocaleString()}</span> : null}
+                <h2 id="tab-list-title">
+                  {view === "graph" ? tag || "Knowledge graph" : tag || "All tabs"}
+                </h2>
+                {view === "table" && tabsQuery.data ? (
+                  <span>{tabsQuery.data.total.toLocaleString()}</span>
+                ) : null}
               </div>
               <p>
-                {tag
-                  ? `Tabs filed under ${tag} and its descendants.`
-                  : "Tabs captured from every connected browser."}
+                {view === "graph"
+                  ? tag
+                    ? `Directed links under ${tag} and its descendants.`
+                    : "Explore relationships across every captured tab."
+                  : tag
+                    ? `Tabs filed under ${tag} and its descendants.`
+                    : "Tabs captured from every connected browser."}
               </p>
             </div>
-            {tabsQuery.isFetching && !tabsQuery.isPending ? (
-              <span className="refresh-status" role="status">
-                <span aria-hidden="true" />
-                Refreshing
-              </span>
-            ) : null}
+            <div className="heading-actions">
+              {view === "table" && tabsQuery.isFetching && !tabsQuery.isPending ? (
+                <span className="refresh-status" role="status">
+                  <span aria-hidden="true" />
+                  Refreshing
+                </span>
+              ) : null}
+              <div className="view-switch" aria-label="Workspace view" role="group">
+                <button
+                  aria-pressed={view === "table"}
+                  type="button"
+                  onClick={() => setView("table")}
+                >
+                  Table
+                </button>
+                <button
+                  aria-pressed={view === "graph"}
+                  type="button"
+                  onClick={() => setView("graph")}
+                >
+                  Graph
+                </button>
+              </div>
+            </div>
           </section>
 
           <div className="workspace-layout">
@@ -679,7 +714,8 @@ export function App() {
               </nav>
             </aside>
 
-            <section className="table-panel" aria-label="Browser tabs">
+            {view === "table" ? (
+              <section className="table-panel" aria-label="Browser tabs">
               <div className="filter-bar">
                 <div className="filter-label">
                   <FilterIcon />
@@ -954,7 +990,24 @@ export function App() {
                   </div>
                 </nav>
               ) : null}
-            </section>
+              </section>
+            ) : (
+              <Suspense
+                fallback={
+                  <section className="graph-panel" aria-label="Tab knowledge graph">
+                    <div className="graph-canvas">
+                      <div className="graph-state" role="status">
+                        <div className="graph-state-mark" aria-hidden="true" />
+                        <strong>Loading graph view</strong>
+                        <span>Preparing the interactive canvas...</span>
+                      </div>
+                    </div>
+                  </section>
+                }
+              >
+                <GraphView rootTag={tag} onSelectTab={setActiveTabId} />
+              </Suspense>
+            )}
           </div>
         </main>
       </div>

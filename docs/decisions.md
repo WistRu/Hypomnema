@@ -15,3 +15,4 @@
 - 2026-08-08: Keep links directed and provenance-bearing in REST responses; UI writes `createdBy=user` and MCP writes `createdBy=agent` through the same server-owned catalog.
 - 2026-08-08: Store one active 512-dimensional embedding space in `sqlite-vec` with cosine distance and provider/model/content-revision metadata; embedding calls are explicit, batched, bounded, and stale vectors are invalidated before reuse.
 - 2026-08-08: Make inbox clustering deterministic with cosine k-means and local TF-IDF-style labels, so `cluster_inbox` can propose stable named groups without an additional LLM call or silently changing tags.
+- 2026-08-08: Build graph payloads with a set-based server catalog, then use deterministic memoized topic-group layout, React Flow visible-element rendering, and cycle-safe outgoing `follows` traversal for the current-work branch.

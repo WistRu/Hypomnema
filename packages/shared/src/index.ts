@@ -340,6 +340,33 @@ export const tabLinkSchema = z.object({
 
 export type TabLink = z.infer<typeof tabLinkSchema>;
 
+export const graphQuerySchema = z.object({
+  root_tag: tagPathSchema.optional(),
+});
+
+export type GraphQuery = z.infer<typeof graphQuerySchema>;
+
+export const graphNodeSchema = z.object({
+  id: tabIdSchema,
+  title: z.string().nullable(),
+  url: z.string(),
+  browser: browserIdentifierSchema,
+  status: tabStatusSchema,
+  importance: tabImportanceSchema,
+  isOpen: z.boolean(),
+  tagPaths: z.array(z.string()),
+  rootTags: z.array(z.string()),
+});
+
+export type GraphNode = z.infer<typeof graphNodeSchema>;
+
+export const graphResponseSchema = z.object({
+  nodes: z.array(graphNodeSchema),
+  edges: z.array(tabLinkSchema),
+});
+
+export type GraphResponse = z.infer<typeof graphResponseSchema>;
+
 const linkKindInputSchema = z.string().trim().min(1).max(128);
 const linkNoteInputSchema = z.string().max(10_000).nullable();
 

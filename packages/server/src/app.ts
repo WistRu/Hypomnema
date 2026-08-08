@@ -25,6 +25,8 @@ import { registerLinkRoutes } from "./link-routes.js";
 import { createEmbeddingCatalog } from "./embedding-catalog.js";
 import type { EmbeddingProvider } from "./embedding-provider.js";
 import { registerEmbeddingRoutes } from "./embedding-routes.js";
+import { createGraphCatalog } from "./graph-catalog.js";
+import { registerGraphRoutes } from "./graph-routes.js";
 
 export interface CreateAppOptions {
   databasePath: string;
@@ -76,6 +78,7 @@ export function createApp(options: CreateAppOptions): TabHubApp {
     options.embeddingProvider,
     options.clock,
   );
+  const graphCatalog = createGraphCatalog(database.connection);
   const summaryWorker =
     options.summaryProvider === undefined
       ? undefined
@@ -152,6 +155,7 @@ export function createApp(options: CreateAppOptions): TabHubApp {
   });
   registerLinkRoutes(app, linkCatalog);
   registerEmbeddingRoutes(app, embeddingCatalog);
+  registerGraphRoutes(app, graphCatalog);
 
   return app;
 }
