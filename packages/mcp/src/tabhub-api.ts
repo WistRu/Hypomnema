@@ -1,5 +1,6 @@
 import {
   assignTagsResponseSchema,
+  clusterInboxResponseSchema,
   setImportanceResponseSchema,
   setStatusResponseSchema,
   summaryEnqueueResponseSchema,
@@ -10,6 +11,8 @@ import {
   tabListResponseSchema,
   tagTreeResponseSchema,
   type AssignTagsResponse,
+  type ClusterInboxResponse,
+  type SearchMode,
   type SetImportanceResponse,
   type SetStatusResponse,
   type SummaryDepth,
@@ -31,6 +34,7 @@ export interface ListTabsInput {
   isOpen?: boolean;
   tag?: string;
   q?: string;
+  searchMode?: SearchMode;
   page: number;
   pageSize: number;
 }
@@ -58,6 +62,7 @@ export interface TabHubApi {
   }): Promise<TabLink>;
   summarizeTab(id: number, depth: SummaryDepth): Promise<SummaryEnqueueResponse>;
   getSummaryJob(id: number): Promise<SummaryJob>;
+  clusterInbox(maxClusters: number): Promise<ClusterInboxResponse>;
   listTags(): Promise<TagTreeResponse>;
   getStats(): Promise<StatsResponse>;
 }
@@ -149,6 +154,9 @@ export function createTabHubApi(
       if (input.q !== undefined) {
         searchParams.set("q", input.q);
       }
+      if (input.searchMode !== undefined) {
+        searchParams.set("search_mode", input.searchMode);
+      }
 
       return request(
         `/api/tabs?${searchParams.toString()}`,
@@ -209,6 +217,14 @@ export function createTabHubApi(
 
     async getSummaryJob(id) {
       return request(`/api/jobs/${id}`, summaryJobSchema, { method: "GET" });
+    },
+
+    async clusterInbox(maxClusters) {
+      return request("/api/clusters/inbox", clusterInboxResponseSchema, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ maxClusters }),
+      });
     },
 
     async listTags() {

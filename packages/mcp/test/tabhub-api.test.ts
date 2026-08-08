@@ -1,4 +1,5 @@
 import type {
+  ClusterInboxResponse,
   SummaryEnqueueResponse,
   SummaryJob,
   StatsResponse,
@@ -87,6 +88,19 @@ const createdLink: TabLink = {
   createdBy: "agent",
 };
 
+const clusterResponse: ClusterInboxResponse = {
+  clusters: [
+    {
+      name: "Agent research",
+      keywords: ["agents", "tools"],
+      tabIds: [3, 4],
+      size: 2,
+    },
+  ],
+  indexed: 7,
+  unclustered: 5,
+};
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -110,6 +124,7 @@ describe("TabHub REST adapter", () => {
         isOpen: false,
         tag: "AI/Agents",
         q: "agent notes",
+        searchMode: "semantic",
         page: 2,
         pageSize: 25,
       }),
@@ -128,6 +143,7 @@ describe("TabHub REST adapter", () => {
       is_open: "false",
       tag: "AI/Agents",
       q: "agent notes",
+      search_mode: "semantic",
       page: "2",
       pageSize: "25",
     });
@@ -304,6 +320,38 @@ describe("TabHub REST adapter", () => {
       api.linkTabs({ from: 3, to: 4, kind: "related" }),
     ).rejects.toThrow(
       "TabHub API POST /api/links returned an invalid response",
+    );
+  });
+
+  it("requests inbox clusters through the exact REST contract", async () => {
+    const fetchImpl: typeof fetch = vi.fn(async () =>
+      jsonResponse(clusterResponse),
+    );
+    const api = createTabHubApi({
+      baseUrl: "http://127.0.0.1:7717",
+      fetchImpl,
+    });
+
+    await expect(api.clusterInbox(4)).resolves.toEqual(clusterResponse);
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const [url, init] = vi.mocked(fetchImpl).mock.calls[0]!;
+    expect(String(url)).toBe("http://127.0.0.1:7717/api/clusters/inbox");
+    expect(init).toMatchObject({
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ maxClusters: 4 }),
+    });
+  });
+
+  it("rejects malformed cluster responses", async () => {
+    const fetchImpl: typeof fetch = vi.fn(async () =>
+      jsonResponse({ ...clusterResponse, indexed: -1 }),
+    );
+    const api = createTabHubApi({ fetchImpl });
+
+    await expect(api.clusterInbox(4)).rejects.toThrow(
+      "TabHub API POST /api/clusters/inbox returned an invalid response",
     );
   });
 

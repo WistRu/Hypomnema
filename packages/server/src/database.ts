@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import Database from "better-sqlite3";
+import * as sqliteVec from "sqlite-vec";
 
 const migrationsDirectory = fileURLToPath(
   new URL("../migrations", import.meta.url),
@@ -64,6 +65,7 @@ export function openDatabase(databasePath: string): TabHubDatabase {
 
   const connection = new Database(databasePath);
   try {
+    sqliteVec.load(connection);
     const migrations = loadMigrations();
     const supportedVersion = migrations.at(-1)?.version ?? 0;
     const currentVersion = connection.pragma("user_version", {

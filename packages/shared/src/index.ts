@@ -86,6 +86,10 @@ export const tabImportanceSchema = z.union([
 
 export type TabImportance = z.infer<typeof tabImportanceSchema>;
 
+export const searchModeSchema = z.enum(["fulltext", "semantic"]);
+
+export type SearchMode = z.infer<typeof searchModeSchema>;
+
 export const tabIdSchema = z.number().int().positive();
 
 export const tabIdParamSchema = z.object({
@@ -480,6 +484,52 @@ export const summaryJobSchema = z.object({
 
 export type SummaryJob = z.infer<typeof summaryJobSchema>;
 
+export const embeddingReindexRequestSchema = z.object({
+  limit: z.number().int().positive().max(1_000).default(100),
+});
+
+export type EmbeddingReindexRequest = z.infer<
+  typeof embeddingReindexRequestSchema
+>;
+
+export const embeddingReindexResponseSchema = z.object({
+  indexed: z.number().int().nonnegative(),
+  skipped: z.number().int().nonnegative(),
+  remaining: z.number().int().nonnegative(),
+  provider: z.string(),
+  model: z.string(),
+  dimensions: z.literal(512),
+});
+
+export type EmbeddingReindexResponse = z.infer<
+  typeof embeddingReindexResponseSchema
+>;
+
+export const clusterInboxRequestSchema = z.object({
+  maxClusters: z.number().int().min(1).max(50).default(8),
+});
+
+export type ClusterInboxRequest = z.infer<typeof clusterInboxRequestSchema>;
+
+export const inboxClusterSchema = z.object({
+  name: z.string(),
+  keywords: z.array(z.string()),
+  tabIds: z.array(tabIdSchema),
+  size: z.number().int().nonnegative(),
+});
+
+export type InboxCluster = z.infer<typeof inboxClusterSchema>;
+
+export const clusterInboxResponseSchema = z.object({
+  clusters: z.array(inboxClusterSchema),
+  indexed: z.number().int().nonnegative(),
+  unclustered: z.number().int().nonnegative(),
+});
+
+export type ClusterInboxResponse = z.infer<
+  typeof clusterInboxResponseSchema
+>;
+
 type TagTreeNodeShape = {
   id: number;
   name: string;
@@ -558,16 +608,39 @@ const queryBooleanSchema = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
-export const tabListQuerySchema = z.object({
-  browser: browserIdentifierSchema.optional(),
-  is_open: queryBooleanSchema.optional(),
-  q: z.string().trim().min(1).max(500).optional(),
-  status: tabStatusSchema.optional(),
-  importance: z.coerce.number().pipe(tabImportanceSchema).optional(),
-  tag: tagPathSchema.optional(),
-  page: z.coerce.number().int().positive().default(1),
-  pageSize: z.coerce.number().int().positive().max(200).default(50),
-});
+export const tabListQuerySchema = z
+  .object({
+    browser: browserIdentifierSchema.optional(),
+    is_open: queryBooleanSchema.optional(),
+    q: z.string().trim().min(1).max(500).optional(),
+    search_mode: searchModeSchema.default("fulltext"),
+    similar_to: z.coerce.number().int().positive().optional(),
+    status: tabStatusSchema.optional(),
+    importance: z.coerce.number().pipe(tabImportanceSchema).optional(),
+    tag: tagPathSchema.optional(),
+    page: z.coerce.number().int().positive().default(1),
+    pageSize: z.coerce.number().int().positive().max(200).default(50),
+  })
+  .superRefine((query, context) => {
+    if (query.q !== undefined && query.similar_to !== undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "q and similar_to cannot be combined",
+      });
+    }
+
+    if (
+      query.search_mode === "semantic" &&
+      query.q === undefined &&
+      query.similar_to === undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Semantic search requires q or similar_to",
+      });
+    }
+
+  });
 
 export type TabListQuery = z.infer<typeof tabListQuerySchema>;
 

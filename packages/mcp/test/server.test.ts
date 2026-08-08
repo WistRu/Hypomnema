@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import type {
+  ClusterInboxResponse,
   SummaryJob,
   TabDetailResponse,
   TabListResponse,
@@ -99,7 +100,21 @@ const succeededSummaryJob: SummaryJob = {
   },
 };
 
+const clusterResponse: ClusterInboxResponse = {
+  clusters: [
+    {
+      name: "Agent research",
+      keywords: ["agents", "tools"],
+      tabIds: [1],
+      size: 1,
+    },
+  ],
+  indexed: 7,
+  unclustered: 6,
+};
+
 const toolNames = [
+  "cluster_inbox",
   "list_tabs",
   "get_tab",
   "link_tabs",
@@ -134,6 +149,9 @@ function createApi(overrides: Partial<TabHubApi> = {}): TabHubApi {
       throw new Error("not implemented in this test");
     },
     getSummaryJob: async () => {
+      throw new Error("not implemented in this test");
+    },
+    clusterInbox: async () => {
       throw new Error("not implemented in this test");
     },
     listTags: async () => ({ items: [] }),
@@ -264,6 +282,39 @@ describe("TabHub MCP server", () => {
       expect(listTabs).toHaveBeenCalledWith({
         q: "agent notes",
         status: "inbox",
+        page: 1,
+        pageSize: 10,
+      });
+      expect(JSON.parse(textResult(result))).toEqual(tabList);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("routes semantic search through the REST search mode", async () => {
+    const listTabs = vi.fn(async (_input: ListTabsInput) => tabList);
+    const connection = await connectClient(createApi({ listTabs }));
+
+    try {
+      const listed = await connection.client.listTools();
+      const tool = listed.tools.find(({ name }) => name === "search_tabs");
+      expect(tool?.annotations).toMatchObject({
+        readOnlyHint: true,
+        openWorldHint: true,
+      });
+
+      const result = await connection.client.callTool({
+        name: "search_tabs",
+        arguments: {
+          query: "agent research",
+          mode: "semantic",
+          page_size: 10,
+        },
+      });
+
+      expect(listTabs).toHaveBeenCalledWith({
+        q: "agent research",
+        searchMode: "semantic",
         page: 1,
         pageSize: 10,
       });
@@ -444,6 +495,32 @@ describe("TabHub MCP server", () => {
 
       expect(getSummaryJob).toHaveBeenCalledTimes(2);
       expect(JSON.parse(textResult(result))).toEqual(queuedSummaryJob);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("clusters the inbox with the canonical default cluster limit", async () => {
+    const clusterInbox = vi.fn(async () => clusterResponse);
+    const connection = await connectClient(createApi({ clusterInbox }));
+
+    try {
+      const listed = await connection.client.listTools();
+      const tool = listed.tools.find(({ name }) => name === "cluster_inbox");
+      expect(tool?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      });
+
+      const result = await connection.client.callTool({
+        name: "cluster_inbox",
+        arguments: {},
+      });
+
+      expect(clusterInbox).toHaveBeenCalledWith(8);
+      expect(JSON.parse(textResult(result))).toEqual(clusterResponse);
     } finally {
       await connection.close();
     }

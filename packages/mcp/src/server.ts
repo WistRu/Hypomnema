@@ -37,7 +37,7 @@ const getTabInputSchema = z.object({
 
 const searchTabsInputSchema = z.object({
   query: z.string().trim().min(1).max(500),
-  mode: z.enum(["fulltext"]).default("fulltext"),
+  mode: z.enum(["fulltext", "semantic"]).default("fulltext"),
   browser: z.string().trim().min(1).max(64).optional(),
   status: tabStatusInputSchema.optional(),
   importance: tabImportanceInputSchema.optional(),
@@ -75,11 +75,20 @@ const summarizeTabInputSchema = z.object({
   depth: z.enum(["short", "deep"]),
 });
 
+const clusterInboxInputSchema = z.object({
+  max_clusters: z.number().int().min(1).max(50).default(8),
+});
+
 const emptyInputSchema = z.object({});
 
 const readOnlyAnnotations = {
   readOnlyHint: true,
   openWorldHint: false,
+} as const;
+
+const openWorldReadOnlyAnnotations = {
+  readOnlyHint: true,
+  openWorldHint: true,
 } as const;
 
 const mutationAnnotations = {
@@ -312,14 +321,15 @@ export function createMcpServer(
   server.registerTool(
     "search_tabs",
     {
-      description: "Search captured TabHub tabs using full-text search.",
+      description:
+        "Search captured TabHub tabs using full-text or semantic search.",
       inputSchema: searchTabsInputSchema,
-      annotations: readOnlyAnnotations,
+      annotations: openWorldReadOnlyAnnotations,
     },
     async (input) =>
       runTool(() =>
-        api.listTabs(
-          toListTabsInput({
+        api.listTabs({
+          ...toListTabsInput({
             ...(input.browser === undefined ? {} : { browser: input.browser }),
             ...(input.status === undefined ? {} : { status: input.status }),
             ...(input.importance === undefined
@@ -330,7 +340,8 @@ export function createMcpServer(
             page: input.page,
             page_size: input.page_size,
           }),
-        ),
+          ...(input.mode === "semantic" ? { searchMode: input.mode } : {}),
+        }),
       ),
   );
 
@@ -352,6 +363,18 @@ export function createMcpServer(
           summaryPollTimeoutMs,
         );
       }),
+  );
+
+  server.registerTool(
+    "cluster_inbox",
+    {
+      description:
+        "Group inbox tabs by semantic similarity and return proposed clusters.",
+      inputSchema: clusterInboxInputSchema,
+      annotations: summaryMutationAnnotations,
+    },
+    async ({ max_clusters: maxClusters }) =>
+      runTool(() => api.clusterInbox(maxClusters)),
   );
 
   server.registerTool(

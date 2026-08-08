@@ -28,6 +28,7 @@ export interface ListTabsInput {
   status: TabStatus | undefined;
   importance: TabImportance | undefined;
   tag: string | undefined;
+  rankedPage?: { ids: number[]; total: number };
 }
 
 export interface TabCatalog {
@@ -530,12 +531,32 @@ export function createTabCatalog(
         parameters.push(input.tag);
       }
 
+      let semanticOrderClause = "tabs.last_seen_at DESC, tabs.id DESC";
+      if (input.rankedPage !== undefined) {
+        if (input.rankedPage.ids.length === 0) {
+          predicates.push("0");
+        } else {
+          const rankedIds = input.rankedPage.ids.join(", ");
+          predicates.push(`tabs.id IN (${rankedIds})`);
+          semanticOrderClause = `CASE tabs.id ${input.rankedPage.ids
+            .map((id, rank) => `WHEN ${id} THEN ${rank}`)
+            .join(" ")} ELSE ${input.rankedPage.ids.length} END`;
+        }
+      }
+
       const whereClause =
         predicates.length > 0 ? `WHERE ${predicates.join(" AND ")}` : "";
-      const count = connection
-        .prepare(`SELECT COUNT(*) AS total FROM tabs ${whereClause}`)
-        .get(...parameters) as CountRow;
-      const offset = (input.page - 1) * input.pageSize;
+      const total =
+        input.rankedPage?.total ??
+        (
+          connection
+            .prepare(`SELECT COUNT(*) AS total FROM tabs ${whereClause}`)
+            .get(...parameters) as CountRow
+        ).total;
+      const offset =
+        input.rankedPage === undefined
+          ? (input.page - 1) * input.pageSize
+          : 0;
       const rows = connection
         .prepare(
           `SELECT
@@ -557,7 +578,7 @@ export function createTabCatalog(
            FROM tabs
            LEFT JOIN contents ON contents.tab_id = tabs.id
            ${whereClause}
-           ORDER BY tabs.last_seen_at DESC, tabs.id DESC
+           ORDER BY ${semanticOrderClause}
            LIMIT ? OFFSET ?`,
         )
         .all(...parameters, input.pageSize, offset) as TabRow[];
@@ -596,7 +617,7 @@ export function createTabCatalog(
 
       return {
         items: rows.map((row) => mapTabRow(row, tagPathsByTab.get(row.id) ?? [])),
-        total: count.total,
+        total,
         page: input.page,
         pageSize: input.pageSize,
       };

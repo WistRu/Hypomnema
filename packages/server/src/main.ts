@@ -6,6 +6,7 @@ import { config as loadEnvironment } from "dotenv";
 
 import { createApp } from "./app.js";
 import { createAnthropicSummaryProvider } from "./summary-provider.js";
+import { createEmbeddingProviderFromEnv } from "./embedding-provider.js";
 
 const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
 loadEnvironment({ path: resolve(workspaceRoot, ".env") });
@@ -80,12 +81,14 @@ const summaryProvider =
         ),
         timeoutMs: positiveInteger("TABHUB_SUMMARY_TIMEOUT_MS", 120_000),
       });
+const embeddingProvider = createEmbeddingProviderFromEnv(process.env);
 
 const app = createApp({
   databasePath,
   logger: true,
   webRoot: existsSync(webRoot) ? webRoot : false,
   ...(summaryProvider === undefined ? {} : { summaryProvider }),
+  ...(embeddingProvider === undefined ? {} : { embeddingProvider }),
   summaryDailyLimit: positiveInteger("TABHUB_DAILY_SUMMARY_LIMIT", 100),
   summaryMaxAttempts: positiveInteger("TABHUB_SUMMARY_MAX_ATTEMPTS", 5),
   summaryWorkerPollMs: positiveInteger("TABHUB_SUMMARY_POLL_MS", 1_000),

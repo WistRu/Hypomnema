@@ -12,6 +12,12 @@ import { describe, expect, it } from "vitest";
 
 import { createApp } from "../../server/src/app.js";
 
+function embeddingFor(text: string): number[] {
+  const vector = Array<number>(512).fill(0);
+  vector[/narwhal|research|extension/i.test(text) ? 0 : 1] = 1;
+  return vector;
+}
+
 function textResult(content: unknown): string {
   if (
     typeof content !== "object" ||
@@ -35,6 +41,14 @@ describe("TabHub built stdio server", () => {
         databasePath: join(directory, "tabhub.sqlite"),
         logger: false,
         clock: () => new Date("2026-08-08T21:00:00.000Z"),
+        embeddingProvider: {
+          provider: "fake",
+          model: "fake-512",
+          dimensions: 512,
+          async embed(input) {
+            return input.map(embeddingFor);
+          },
+        },
       });
       let client: Client | undefined;
 
@@ -70,6 +84,13 @@ describe("TabHub built stdio server", () => {
             htmlExcerpt: "<article>Narwhal research</article>",
           },
         });
+        const reindex = await app.inject({
+          method: "POST",
+          url: "/api/embeddings/reindex",
+          payload: { limit: 10 },
+        });
+        expect(reindex.statusCode).toBe(200);
+        expect(reindex.json()).toMatchObject({ indexed: 1, dimensions: 512 });
         const list = await app.inject({ method: "GET", url: "/api/tabs" });
         const listedTabs = list.json().items as Array<{
           id: number;
@@ -106,6 +127,7 @@ describe("TabHub built stdio server", () => {
 
         const tools = await client.listTools();
         expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+          "cluster_inbox",
           "get_stats",
           "get_tab",
           "link_tabs",
@@ -117,6 +139,39 @@ describe("TabHub built stdio server", () => {
           "summarize_tab",
           "tag_tabs",
         ]);
+
+        const semanticSearch = await client.callTool({
+          name: "search_tabs",
+          arguments: {
+            query: "narwhal research",
+            mode: "semantic",
+          },
+        });
+        expect(JSON.parse(textResult(semanticSearch))).toMatchObject({
+          total: 1,
+          items: [{ id: tabId }],
+        });
+
+        const clustered = await client.callTool({
+          name: "cluster_inbox",
+          arguments: { max_clusters: 4 },
+        });
+        const clusterResult = JSON.parse(textResult(clustered)) as {
+          clusters: Array<{ tabIds: number[]; size: number }>;
+          indexed: number;
+          unclustered: number;
+        };
+        expect(clusterResult.indexed).toBe(0);
+        expect(clusterResult.unclustered).toBe(1);
+        expect(
+          clusterResult.clusters.reduce(
+            (total, cluster) => total + cluster.size,
+            clusterResult.unclustered,
+          ),
+        ).toBe(2);
+        expect(clusterResult.clusters.flatMap(({ tabIds }) => tabIds)).toContain(
+          tabId,
+        );
 
         const search = await client.callTool({
           name: "search_tabs",

@@ -22,6 +22,9 @@ import { registerSummaryRoutes } from "./summary-routes.js";
 import { createSummaryWorker } from "./summary-worker.js";
 import { createLinkCatalog } from "./link-catalog.js";
 import { registerLinkRoutes } from "./link-routes.js";
+import { createEmbeddingCatalog } from "./embedding-catalog.js";
+import type { EmbeddingProvider } from "./embedding-provider.js";
+import { registerEmbeddingRoutes } from "./embedding-routes.js";
 
 export interface CreateAppOptions {
   databasePath: string;
@@ -32,6 +35,7 @@ export interface CreateAppOptions {
   summaryDailyLimit?: number;
   summaryMaxAttempts?: number;
   summaryWorkerPollMs?: number;
+  embeddingProvider?: EmbeddingProvider;
 }
 
 export type TabHubApp = FastifyInstance;
@@ -67,6 +71,11 @@ export function createApp(options: CreateAppOptions): TabHubApp {
   const statsCatalog = createStatsCatalog(database.connection);
   const summaryCatalog = createSummaryCatalog(database.connection, options.clock);
   const linkCatalog = createLinkCatalog(database.connection);
+  const embeddingCatalog = createEmbeddingCatalog(
+    database.connection,
+    options.embeddingProvider,
+    options.clock,
+  );
   const summaryWorker =
     options.summaryProvider === undefined
       ? undefined
@@ -132,7 +141,7 @@ export function createApp(options: CreateAppOptions): TabHubApp {
     }),
   );
 
-  registerTabRoutes(app, tabCatalog);
+  registerTabRoutes(app, tabCatalog, embeddingCatalog);
   registerTagRoutes(app, tagCatalog);
   registerStatsRoutes(app, statsCatalog);
   registerSummaryRoutes(app, {
@@ -142,6 +151,7 @@ export function createApp(options: CreateAppOptions): TabHubApp {
     maxAttempts: summaryMaxAttempts,
   });
   registerLinkRoutes(app, linkCatalog);
+  registerEmbeddingRoutes(app, embeddingCatalog);
 
   return app;
 }

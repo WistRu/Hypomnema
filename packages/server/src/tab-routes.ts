@@ -16,6 +16,12 @@ import {
 import type { FastifyInstance, FastifyReply } from "fastify";
 
 import {
+  EmbeddingNotIndexedError,
+  SimilarTabNotFoundError,
+  type EmbeddingCatalog,
+} from "./embedding-catalog.js";
+import { sendEmbeddingError } from "./embedding-routes.js";
+import {
   TabIdsNotFoundError,
   TabNotFoundError,
   type TabCatalog,
@@ -31,6 +37,7 @@ function sendValidationError(reply: FastifyReply, issues: unknown) {
 export function registerTabRoutes(
   app: FastifyInstance,
   tabCatalog: TabCatalog,
+  embeddingCatalog: EmbeddingCatalog,
 ): void {
   app.post("/api/ingest/content", async (request, reply) => {
     const parsed = ingestContentSchema.safeParse(request.body);
@@ -74,18 +81,74 @@ export function registerTabRoutes(
       return sendValidationError(reply, parsed.error.issues);
     }
 
-    return tabListResponseSchema.parse(
-      tabCatalog.listTabs({
-        browser: parsed.data.browser,
-        isOpen: parsed.data.is_open,
-        page: parsed.data.page,
-        pageSize: parsed.data.pageSize,
-        q: parsed.data.q,
-        status: parsed.data.status,
-        importance: parsed.data.importance,
-        tag: parsed.data.tag,
-      }),
-    );
+    try {
+      const embeddingFilters = {
+        ...(parsed.data.browser === undefined
+          ? {}
+          : { browser: parsed.data.browser }),
+        ...(parsed.data.is_open === undefined
+          ? {}
+          : { isOpen: parsed.data.is_open }),
+        ...(parsed.data.status === undefined
+          ? {}
+          : { status: parsed.data.status }),
+        ...(parsed.data.importance === undefined
+          ? {}
+          : { importance: parsed.data.importance }),
+        ...(parsed.data.tag === undefined ? {} : { tag: parsed.data.tag }),
+      };
+      const rankedPage =
+        parsed.data.similar_to !== undefined
+          ? embeddingCatalog.similarTabs(
+              parsed.data.similar_to,
+              parsed.data.page,
+              parsed.data.pageSize,
+              embeddingFilters,
+            )
+          : parsed.data.search_mode === "semantic" &&
+              parsed.data.q !== undefined
+            ? await embeddingCatalog.semanticSearch(
+                parsed.data.q,
+                parsed.data.page,
+                parsed.data.pageSize,
+                embeddingFilters,
+              )
+            : undefined;
+
+      return tabListResponseSchema.parse(
+        tabCatalog.listTabs({
+          browser: parsed.data.browser,
+          isOpen: parsed.data.is_open,
+          page: parsed.data.page,
+          pageSize: parsed.data.pageSize,
+          q:
+            parsed.data.search_mode === "fulltext"
+              ? parsed.data.q
+              : undefined,
+          status: parsed.data.status,
+          importance: parsed.data.importance,
+          tag: parsed.data.tag,
+          ...(rankedPage === undefined ? {} : { rankedPage }),
+        }),
+      );
+    } catch (error) {
+      if (error instanceof SimilarTabNotFoundError) {
+        return reply.code(404).send({
+          error: error.code,
+          message: error.message,
+          tabId: error.tabId,
+        });
+      }
+      if (error instanceof EmbeddingNotIndexedError) {
+        return reply.code(409).send({
+          error: error.code,
+          message: error.message,
+          tabId: error.tabId,
+        });
+      }
+
+      return sendEmbeddingError(reply, error);
+    }
   });
 
   app.get("/api/tabs/:id", async (request, reply) => {

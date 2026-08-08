@@ -27,7 +27,7 @@ Invoke-RestMethod http://127.0.0.1:7717/api/health
 Текущий ожидаемый ответ:
 
 ```json
-{"status":"ok","database":"ok","schemaVersion":4}
+{"status":"ok","database":"ok","schemaVersion":5}
 ```
 
 База по умолчанию создаётся в `data/tabhub.sqlite` относительно корня репозитория. Путь можно изменить через `TABHUB_DB_PATH` в корневом `.env`.
@@ -85,6 +85,33 @@ Invoke-RestMethod 'http://127.0.0.1:7717/api/tabs?q=local-first'
 
 В веб-интерфейсе тот же параметр доступен в строке поиска над таблицей.
 
+### Семантический поиск и кластеры inbox
+
+Эмбеддинги создаются только по явному запросу. По умолчанию TabHub использует локальный Ollama на `http://127.0.0.1:11434`; перед первым индексированием установите модель:
+
+```powershell
+ollama pull nomic-embed-text
+```
+
+Для Voyage задайте `EMBEDDING_PROVIDER=voyage`, `VOYAGE_API_KEY` и при необходимости `VOYAGE_EMBEDDING_MODEL` в `.env`. `EMBEDDING_PROVIDER=disabled` полностью отключает провайдер. Оба варианта сохраняют 512-мерные векторы в локальной таблице `sqlite-vec`; захваченный текст перед отправкой провайдеру ограничивается 32 000 символами и обрабатывается пакетами по 100 вкладок.
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:7717/api/embeddings/reindex `
+  -ContentType application/json `
+  -Body '{"limit":100}'
+
+Invoke-RestMethod 'http://127.0.0.1:7717/api/tabs?q=compiler&search_mode=semantic'
+Invoke-RestMethod 'http://127.0.0.1:7717/api/tabs?similar_to=1'
+
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:7717/api/clusters/inbox `
+  -ContentType application/json `
+  -Body '{"maxClusters":8}'
+```
+
+Повторный захват текста удаляет устаревший вектор. `cluster_inbox` индексирует только ещё не проиндексированные вкладки со статусом `inbox`, затем детерминированно предлагает именованные кластеры; он не создаёт теги и не меняет пользовательскую разметку.
+
 ### Суммаризация по запросу
 
 TabHub никогда не суммаризирует вкладки автоматически. Чтобы включить ручные запросы из UI или MCP, задайте `ANTHROPIC_API_KEY` в `.env` и перезапустите сервер. По умолчанию короткий режим использует `claude-haiku-4-5-20251001`, глубокий — `claude-sonnet-5`; модели и расчётные цены можно переопределить переменными `ANTHROPIC_*` из `.env.example`.
@@ -117,7 +144,7 @@ corepack pnpm --filter @tabhub/mcp build
 corepack pnpm dev
 ```
 
-MCP-процесс использует `TABHUB_API_URL` и остаётся тонким адаптером над REST API. Он предоставляет инструменты `list_tabs`, `get_tab`, `search_tabs`, `summarize_tab`, `set_status`, `set_importance`, `tag_tabs`, `link_tabs`, `list_tags`, `get_stats` и ресурс `tabhub://tab/{id}`. `summarize_tab` помечает запрос как агентский, ставит его в ту же SQLite-очередь и ожидает завершения до 55 секунд; если работа ещё не закончилась, повторный вызов продолжит ожидание того же активного задания. На этом этапе `search_tabs` выполняет полнотекстовый поиск; семантический режим добавляется на этапе 6. Контент в ответах MCP ограничен примерно 20 000 символами.
+MCP-процесс использует `TABHUB_API_URL` и остаётся тонким адаптером над REST API. Он предоставляет инструменты `list_tabs`, `get_tab`, `search_tabs`, `summarize_tab`, `cluster_inbox`, `set_status`, `set_importance`, `tag_tabs`, `link_tabs`, `list_tags`, `get_stats` и ресурс `tabhub://tab/{id}`. `search_tabs` поддерживает режимы `fulltext` и `semantic`; `cluster_inbox` явно индексирует неразобранные вкладки и возвращает предложения с названиями, ключевыми словами и идентификаторами вкладок. `summarize_tab` помечает запрос как агентский, ставит его в ту же SQLite-очередь и ожидает завершения до 55 секунд; если работа ещё не закончилась, повторный вызов продолжит ожидание того же активного задания. Контент в ответах MCP ограничен примерно 20 000 символами.
 
 ### Claude Desktop
 
@@ -162,7 +189,7 @@ tool_timeout_sec = 60
 TABHUB_API_URL = "http://127.0.0.1:7717"
 ```
 
-После подключения откройте `/mcp` в Codex и убедитесь, что `tabhub` и десять инструментов доступны.
+После подключения откройте `/mcp` в Codex и убедитесь, что `tabhub` и одиннадцать инструментов доступны.
 
 ## Проверки
 
@@ -190,4 +217,5 @@ corepack pnpm backup
 - Этап 3: REST-операции управления, иерархические теги, статистика и MCP-инструменты для Claude Desktop/Codex — готово.
 - Этап 4: явная суммаризация через надёжную SQLite-очередь, последовательный Anthropic worker, UI и MCP — готово.
 - Этап 5: дерево тем, карточка вкладки, связи, важность, custom fields и массовые операции в UI/MCP — готово.
-- Этапы 6–7: см. [план реализации](./tab-manager-plan.md).
+- Этап 6: `sqlite-vec`, явное индексирование через Ollama/Voyage, семантический поиск, похожие вкладки и именованные кластеры inbox в REST/MCP — готово.
+- Этап 7: см. [план реализации](./tab-manager-plan.md).
