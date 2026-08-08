@@ -3,8 +3,9 @@ import {
   ingestContentSchema,
   ingestSnapshotResponseSchema,
   ingestSnapshotSchema,
-  patchTabStatusResponseSchema,
-  patchTabStatusSchema,
+  patchTabSchema,
+  setImportanceResponseSchema,
+  setImportanceSchema,
   setStatusResponseSchema,
   setStatusSchema,
   tabDetailResponseSchema,
@@ -82,6 +83,7 @@ export function registerTabRoutes(
         q: parsed.data.q,
         status: parsed.data.status,
         importance: parsed.data.importance,
+        tag: parsed.data.tag,
       }),
     );
   });
@@ -129,9 +131,33 @@ export function registerTabRoutes(
     }
   });
 
+  app.patch("/api/tabs/importance", async (request, reply) => {
+    const parsed = setImportanceSchema.safeParse(request.body);
+
+    if (!parsed.success) {
+      return sendValidationError(reply, parsed.error.issues);
+    }
+
+    try {
+      return setImportanceResponseSchema.parse(
+        tabCatalog.updateImportances(parsed.data),
+      );
+    } catch (error) {
+      if (error instanceof TabIdsNotFoundError) {
+        return reply.code(404).send({
+          error: error.code,
+          message: error.message,
+          missingIds: error.missingIds,
+        });
+      }
+
+      throw error;
+    }
+  });
+
   app.patch("/api/tabs/:id", async (request, reply) => {
     const params = tabIdParamSchema.safeParse(request.params);
-    const body = patchTabStatusSchema.safeParse(request.body);
+    const body = patchTabSchema.safeParse(request.body);
 
     if (!params.success || !body.success) {
       return sendValidationError(reply, [
@@ -140,7 +166,7 @@ export function registerTabRoutes(
       ]);
     }
 
-    const result = tabCatalog.updateStatus(params.data.id, body.data.status);
+    const result = tabCatalog.updateTab(params.data.id, body.data);
 
     if (result === undefined) {
       return reply.code(404).send({
@@ -149,6 +175,6 @@ export function registerTabRoutes(
       });
     }
 
-    return patchTabStatusResponseSchema.parse(result);
+    return tabDetailResponseSchema.parse(result);
   });
 }

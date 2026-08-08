@@ -10,3 +10,6 @@
 - 2026-08-08: Rename ambiguous duplicate root tags during the v3 migration, then enforce root-name uniqueness in SQLite so concurrent local server processes cannot fork a tag path.
 - 2026-08-08: Persist summary jobs and every provider attempt in SQLite, process one request at a time, and bind each job to a content revision so retries and restarts cannot attach stale output.
 - 2026-08-08: Call Anthropic's Messages API directly with pinned configurable model IDs; resolve configurable token prices at request time so stored cost estimates follow the dated Sonnet 5 pricing transition without hidden SDK retries.
+- 2026-08-08: Treat a null value in the tab patch's `customFields` map as deletion; this keeps arbitrary-field editing atomic without adding a second field-specific endpoint.
+- 2026-08-08: Resolve tag filters as subtrees, so choosing a parent topic includes tabs assigned directly to it or to any descendant while preserving one canonical path vocabulary.
+- 2026-08-08: Keep links directed and provenance-bearing in REST responses; UI writes `createdBy=user` and MCP writes `createdBy=agent` through the same server-owned catalog.

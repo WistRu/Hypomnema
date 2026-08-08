@@ -3,13 +3,20 @@ import type Database from "better-sqlite3";
 import type {
   AssignTags,
   AssignTagsResponse,
+  CreateTag,
+  PatchTag,
+  TagRecord,
   TagTreeNode,
   TagTreeResponse,
 } from "@tabhub/shared";
 
 export interface TagCatalog {
   assignTags(input: AssignTags): AssignTagsResponse;
+  createTag(input: CreateTag): TagRecord;
+  deleteTag(id: number): void;
   listTags(): TagTreeResponse;
+  unassignTag(tabId: number, tagId: number): void;
+  updateTag(id: number, input: PatchTag): TagRecord;
 }
 
 export class TabsNotFoundError extends Error {
@@ -18,6 +25,53 @@ export class TabsNotFoundError extends Error {
   constructor(readonly missingIds: number[]) {
     super(`No tabs exist with ids: ${missingIds.join(", ")}`);
     this.name = "TabsNotFoundError";
+  }
+}
+
+export class TagNotFoundError extends Error {
+  readonly code = "TAG_NOT_FOUND";
+
+  constructor(readonly tagId: number) {
+    super(`No tag exists with id ${tagId}`);
+    this.name = "TagNotFoundError";
+  }
+}
+
+export class TagConflictError extends Error {
+  readonly code = "TAG_CONFLICT";
+
+  constructor(name: string, parentId: number | null) {
+    super(
+      `A tag named ${name} already exists ${parentId === null ? "at the root" : `under parent ${parentId}`}`,
+    );
+    this.name = "TagConflictError";
+  }
+}
+
+export class TagHierarchyConflictError extends Error {
+  readonly code = "TAG_HIERARCHY_CONFLICT";
+
+  constructor(tagId: number, parentId: number) {
+    super(`Tag ${tagId} cannot be moved under itself or descendant ${parentId}`);
+    this.name = "TagHierarchyConflictError";
+  }
+}
+
+export class TagHasChildrenError extends Error {
+  readonly code = "TAG_HAS_CHILDREN";
+
+  constructor(readonly tagId: number) {
+    super(`Tag ${tagId} cannot be deleted while it has children`);
+    this.name = "TagHasChildrenError";
+  }
+}
+
+export class TagAssignmentNotFoundError extends Error {
+  readonly code = "TAG_ASSIGNMENT_NOT_FOUND";
+
+  constructor(tabId: number, tagId: number) {
+    super(`Tab ${tabId} is not assigned tag ${tagId}`);
+    this.name = "TagAssignmentNotFoundError";
   }
 }
 
@@ -33,8 +87,29 @@ interface TagTreeRow {
   tab_count: number;
 }
 
+interface TagRecordRow {
+  id: number;
+  name: string;
+  parent_id: number | null;
+  color: string | null;
+}
+
+function mapTagRecord(row: TagRecordRow): TagRecord {
+  return {
+    id: row.id,
+    name: row.name,
+    parentId: row.parent_id,
+    color: row.color,
+  };
+}
+
 export function createTagCatalog(connection: Database.Database): TagCatalog {
   const selectTab = connection.prepare("SELECT id FROM tabs WHERE id = ?");
+  const selectTagById = connection.prepare(`
+    SELECT id, name, parent_id, color
+    FROM tags
+    WHERE id = ?
+  `);
   const insertTag = connection.prepare(`
     INSERT OR IGNORE INTO tags (name, parent_id)
     VALUES (?, ?)
@@ -46,9 +121,50 @@ export function createTagCatalog(connection: Database.Database): TagCatalog {
     ORDER BY id
     LIMIT 1
   `);
+  const insertTagRecord = connection.prepare(`
+    INSERT OR IGNORE INTO tags (name, parent_id, color)
+    VALUES (?, ?, ?)
+  `);
+  const selectSiblingTag = connection.prepare(`
+    SELECT id
+    FROM tags
+    WHERE name = ? AND parent_id IS ? AND id != ?
+    LIMIT 1
+  `);
+  const selectDescendant = connection.prepare(`
+    WITH RECURSIVE descendants(id) AS (
+      SELECT id
+      FROM tags
+      WHERE parent_id = ?
+      UNION ALL
+      SELECT child.id
+      FROM tags AS child
+      JOIN descendants ON child.parent_id = descendants.id
+    )
+    SELECT id
+    FROM descendants
+    WHERE id = ?
+    LIMIT 1
+  `);
+  const selectChild = connection.prepare(`
+    SELECT id
+    FROM tags
+    WHERE parent_id = ?
+    LIMIT 1
+  `);
+  const updateTagRecord = connection.prepare(`
+    UPDATE tags
+    SET name = ?, parent_id = ?, color = ?
+    WHERE id = ?
+  `);
+  const deleteTagRecord = connection.prepare("DELETE FROM tags WHERE id = ?");
   const assignTag = connection.prepare(`
     INSERT OR IGNORE INTO tab_tags (tab_id, tag_id, assigned_by)
     VALUES (?, ?, ?)
+  `);
+  const deleteTagAssignment = connection.prepare(`
+    DELETE FROM tab_tags
+    WHERE tab_id = ? AND tag_id = ?
   `);
   const selectTagTree = connection.prepare(`
     WITH RECURSIVE descendants(ancestor_id, descendant_id) AS (
@@ -111,10 +227,98 @@ export function createTagCatalog(connection: Database.Database): TagCatalog {
       return { tagId: parentId, assigned };
     },
   );
+  const createTransaction = connection.transaction(
+    (input: CreateTag): TagRecord => {
+      const parentId = input.parentId ?? null;
+      if (
+        input.parentId !== undefined &&
+        selectTagById.get(input.parentId) === undefined
+      ) {
+        throw new TagNotFoundError(input.parentId);
+      }
+
+      const inserted = insertTagRecord.run(
+        input.name,
+        parentId,
+        input.color ?? null,
+      );
+      if (inserted.changes === 0) {
+        throw new TagConflictError(input.name, parentId);
+      }
+
+      const row = selectTagById.get(
+        Number(inserted.lastInsertRowid),
+      ) as TagRecordRow;
+      return mapTagRecord(row);
+    },
+  );
+  const updateTransaction = connection.transaction(
+    (id: number, input: PatchTag): TagRecord => {
+      const current = selectTagById.get(id) as TagRecordRow | undefined;
+      if (current === undefined) {
+        throw new TagNotFoundError(id);
+      }
+
+      const name = input.name ?? current.name;
+      const parentId =
+        input.parentId === undefined ? current.parent_id : input.parentId;
+      const color = input.color === undefined ? current.color : input.color;
+
+      if (parentId !== null) {
+        if (selectTagById.get(parentId) === undefined) {
+          throw new TagNotFoundError(parentId);
+        }
+        if (
+          parentId === id ||
+          selectDescendant.get(id, parentId) !== undefined
+        ) {
+          throw new TagHierarchyConflictError(id, parentId);
+        }
+      }
+
+      if (selectSiblingTag.get(name, parentId, id) !== undefined) {
+        throw new TagConflictError(name, parentId);
+      }
+
+      updateTagRecord.run(name, parentId, color, id);
+      return mapTagRecord(selectTagById.get(id) as TagRecordRow);
+    },
+  );
+  const deleteTransaction = connection.transaction((id: number): void => {
+    if (selectTagById.get(id) === undefined) {
+      throw new TagNotFoundError(id);
+    }
+    if (selectChild.get(id) !== undefined) {
+      throw new TagHasChildrenError(id);
+    }
+
+    deleteTagRecord.run(id);
+  });
+  const unassignTransaction = connection.transaction(
+    (tabId: number, tagId: number): void => {
+      if (selectTab.get(tabId) === undefined) {
+        throw new TabsNotFoundError([tabId]);
+      }
+      if (selectTagById.get(tagId) === undefined) {
+        throw new TagNotFoundError(tagId);
+      }
+      if (deleteTagAssignment.run(tabId, tagId).changes === 0) {
+        throw new TagAssignmentNotFoundError(tabId, tagId);
+      }
+    },
+  );
 
   return {
     assignTags(input) {
       return assignTransaction(input);
+    },
+
+    createTag(input) {
+      return createTransaction(input);
+    },
+
+    deleteTag(id) {
+      deleteTransaction(id);
     },
 
     listTags() {
@@ -164,6 +368,14 @@ export function createTagCatalog(connection: Database.Database): TagCatalog {
       }
 
       return { items: roots };
+    },
+
+    unassignTag(tabId, tagId) {
+      unassignTransaction(tabId, tagId);
+    },
+
+    updateTag(id, input) {
+      return updateTransaction(id, input);
     },
   };
 }

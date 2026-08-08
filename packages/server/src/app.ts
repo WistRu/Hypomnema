@@ -20,6 +20,8 @@ import { createSummaryCatalog } from "./summary-catalog.js";
 import type { SummaryProvider } from "./summary-provider.js";
 import { registerSummaryRoutes } from "./summary-routes.js";
 import { createSummaryWorker } from "./summary-worker.js";
+import { createLinkCatalog } from "./link-catalog.js";
+import { registerLinkRoutes } from "./link-routes.js";
 
 export interface CreateAppOptions {
   databasePath: string;
@@ -64,6 +66,7 @@ export function createApp(options: CreateAppOptions): TabHubApp {
   const tagCatalog = createTagCatalog(database.connection);
   const statsCatalog = createStatsCatalog(database.connection);
   const summaryCatalog = createSummaryCatalog(database.connection, options.clock);
+  const linkCatalog = createLinkCatalog(database.connection);
   const summaryWorker =
     options.summaryProvider === undefined
       ? undefined
@@ -138,6 +141,7 @@ export function createApp(options: CreateAppOptions): TabHubApp {
     worker: summaryWorker,
     maxAttempts: summaryMaxAttempts,
   });
+  registerLinkRoutes(app, linkCatalog);
 
   return app;
 }

@@ -1,13 +1,16 @@
 import {
   assignTagsResponseSchema,
+  setImportanceResponseSchema,
   setStatusResponseSchema,
   summaryEnqueueResponseSchema,
   summaryJobSchema,
   statsResponseSchema,
   tabDetailResponseSchema,
+  tabLinkSchema,
   tabListResponseSchema,
   tagTreeResponseSchema,
   type AssignTagsResponse,
+  type SetImportanceResponse,
   type SetStatusResponse,
   type SummaryDepth,
   type SummaryEnqueueResponse,
@@ -15,6 +18,7 @@ import {
   type StatsResponse,
   type TabDetailResponse,
   type TabImportance,
+  type TabLink,
   type TabListResponse,
   type TabStatus,
   type TagTreeResponse,
@@ -25,6 +29,7 @@ export interface ListTabsInput {
   status?: TabStatus;
   importance?: TabImportance;
   isOpen?: boolean;
+  tag?: string;
   q?: string;
   page: number;
   pageSize: number;
@@ -37,10 +42,20 @@ export interface TabHubApi {
     ids: number[];
     status: TabStatus;
   }): Promise<SetStatusResponse>;
+  setImportance(input: {
+    ids: number[];
+    importance: TabImportance;
+  }): Promise<SetImportanceResponse>;
   tagTabs(input: {
     ids: number[];
     tagPath: string;
   }): Promise<AssignTagsResponse>;
+  linkTabs(input: {
+    from: number;
+    to: number;
+    kind: string;
+    note?: string | null;
+  }): Promise<TabLink>;
   summarizeTab(id: number, depth: SummaryDepth): Promise<SummaryEnqueueResponse>;
   getSummaryJob(id: number): Promise<SummaryJob>;
   listTags(): Promise<TagTreeResponse>;
@@ -128,6 +143,9 @@ export function createTabHubApi(
       if (input.isOpen !== undefined) {
         searchParams.set("is_open", String(input.isOpen));
       }
+      if (input.tag !== undefined) {
+        searchParams.set("tag", input.tag);
+      }
       if (input.q !== undefined) {
         searchParams.set("q", input.q);
       }
@@ -153,11 +171,27 @@ export function createTabHubApi(
       });
     },
 
+    async setImportance(input) {
+      return request("/api/tabs/importance", setImportanceResponseSchema, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input),
+      });
+    },
+
     async tagTabs(input) {
       return request("/api/tags/assign", assignTagsResponseSchema, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...input, assignedBy: "agent" }),
+      });
+    },
+
+    async linkTabs(input) {
+      return request("/api/links", tabLinkSchema, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...input, createdBy: "agent" }),
       });
     },
 

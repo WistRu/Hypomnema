@@ -52,7 +52,16 @@ describe("tab management REST behavior", () => {
       });
 
       expect(patchResponse.statusCode).toBe(200);
-      expect(patchResponse.json()).toEqual({ id: tabId, status: "done" });
+      expect(patchResponse.json()).toMatchObject({
+        id: tabId,
+        title: "Managed tab",
+        status: "done",
+        importance: 0,
+        content: { text: "Detailed managed content" },
+        tags: [],
+        links: [],
+        customFields: {},
+      });
 
       const detailResponse = await app.inject({
         method: "GET",
@@ -100,6 +109,159 @@ describe("tab management REST behavior", () => {
     }
   });
 
+  it("patches importance and custom fields and deletes null-valued fields", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-tab-patch-"));
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+    });
+
+    try {
+      await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          tabs: [
+            {
+              url: "https://example.com/patch-fields",
+              title: "Patch fields",
+              windowId: 1,
+              index: 0,
+            },
+          ],
+        },
+      });
+      const list = await app.inject({ method: "GET", url: "/api/tabs" });
+      const tabId = list.json().items[0].id as number;
+
+      const initialPatch = await app.inject({
+        method: "PATCH",
+        url: `/api/tabs/${tabId}`,
+        payload: {
+          status: "in_progress",
+          importance: 3,
+          customFields: {
+            " owner ": "alice",
+            obsolete: "remove me",
+          },
+        },
+      });
+
+      expect(initialPatch.statusCode).toBe(200);
+      expect(initialPatch.json()).toMatchObject({
+        id: tabId,
+        status: "in_progress",
+        importance: 3,
+        customFields: { owner: "alice", obsolete: "remove me" },
+      });
+
+      const deletionPatch = await app.inject({
+        method: "PATCH",
+        url: `/api/tabs/${tabId}`,
+        payload: {
+          customFields: { owner: null, " reviewed ": "yes" },
+        },
+      });
+      expect(deletionPatch.statusCode).toBe(200);
+      expect(deletionPatch.json()).toMatchObject({
+        status: "in_progress",
+        importance: 3,
+        customFields: { obsolete: "remove me", reviewed: "yes" },
+      });
+      expect(deletionPatch.json().customFields).not.toHaveProperty("owner");
+
+      const empty = await app.inject({
+        method: "PATCH",
+        url: `/api/tabs/${tabId}`,
+        payload: {},
+      });
+      expect(empty.statusCode).toBe(400);
+
+      const blankKey = await app.inject({
+        method: "PATCH",
+        url: `/api/tabs/${tabId}`,
+        payload: { customFields: { "   ": "invalid" } },
+      });
+      expect(blankKey.statusCode).toBe(400);
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("updates importance in bulk without partially updating missing ID sets", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-importance-"));
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+    });
+
+    try {
+      await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "edge",
+          tabs: [
+            {
+              url: "https://example.com/important-one",
+              title: "Important one",
+              windowId: 1,
+              index: 0,
+            },
+            {
+              url: "https://example.com/important-two",
+              title: "Important two",
+              windowId: 1,
+              index: 1,
+            },
+          ],
+        },
+      });
+      const list = await app.inject({
+        method: "GET",
+        url: "/api/tabs?pageSize=10",
+      });
+      const ids = (list.json().items as Array<{ id: number }>).map(
+        ({ id }) => id,
+      );
+
+      const missing = await app.inject({
+        method: "PATCH",
+        url: "/api/tabs/importance",
+        payload: { ids: [ids[0], 999_999], importance: 3 },
+      });
+      expect(missing.statusCode).toBe(404);
+      expect(missing.json()).toMatchObject({
+        error: "TAB_NOT_FOUND",
+        missingIds: [999_999],
+      });
+      const afterFailure = await app.inject({
+        method: "GET",
+        url: `/api/tabs/${ids[0]}`,
+      });
+      expect(afterFailure.json().importance).toBe(0);
+
+      const updated = await app.inject({
+        method: "PATCH",
+        url: "/api/tabs/importance",
+        payload: { ids, importance: 2 },
+      });
+      expect(updated.statusCode).toBe(200);
+      expect(updated.json()).toEqual({ updated: 2, importance: 2 });
+
+      const filtered = await app.inject({
+        method: "GET",
+        url: "/api/tabs?importance=2&pageSize=10",
+      });
+      expect(filtered.json()).toMatchObject({ total: 2 });
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("creates hierarchical tags, assigns them atomically, and returns a counted tree", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-tags-"));
     const app = createApp({
@@ -127,13 +289,21 @@ describe("tab management REST behavior", () => {
               windowId: 1,
               index: 1,
             },
+            {
+              url: "https://example.com/untagged",
+              title: "Untagged",
+              windowId: 1,
+              index: 2,
+            },
           ],
         },
       });
       const list = await app.inject({ method: "GET", url: "/api/tabs" });
-      const ids = (list.json().items as Array<{ id: number }>).map(
-        (tab) => tab.id,
-      );
+      const ids = (
+        list.json().items as Array<{ id: number; title: string | null }>
+      )
+        .filter(({ title }) => title !== "Untagged")
+        .map(({ id }) => id);
 
       const assign = await app.inject({
         method: "POST",
@@ -158,6 +328,24 @@ describe("tab management REST behavior", () => {
         },
       });
       expect(repeated.json()).toMatchObject({ assigned: 0 });
+
+      const rowsWithTags = await app.inject({
+        method: "GET",
+        url: "/api/tabs?pageSize=10",
+      });
+      const compactTagsByTitle = Object.fromEntries(
+        (
+          rowsWithTags.json().items as Array<{
+            title: string;
+            tagPaths: string[];
+          }>
+        ).map(({ title, tagPaths }) => [title, tagPaths]),
+      );
+      expect(compactTagsByTitle).toEqual({
+        One: ["AI/LLM/Agents"],
+        Two: ["AI/LLM/Agents"],
+        Untagged: [],
+      });
 
       const bulkStatus = await app.inject({
         method: "PATCH",
@@ -202,6 +390,23 @@ describe("tab management REST behavior", () => {
           },
         ],
       });
+
+      for (const tagPath of ["AI", "AI/LLM", "AI/LLM/Agents"]) {
+        const filtered = await app.inject({
+          method: "GET",
+          url: `/api/tabs?tag=${encodeURIComponent(tagPath)}&pageSize=10`,
+        });
+        expect(filtered.statusCode).toBe(200);
+        expect(filtered.json().total).toBe(2);
+        expect(
+          (filtered.json().items as Array<{ id: number }>).map(({ id }) => id),
+        ).toEqual(expect.arrayContaining(ids));
+      }
+      const unknownTag = await app.inject({
+        method: "GET",
+        url: "/api/tabs?tag=AI%2FMissing",
+      });
+      expect(unknownTag.json().total).toBe(0);
 
       const detail = await app.inject({
         method: "GET",

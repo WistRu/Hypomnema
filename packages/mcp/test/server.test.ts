@@ -32,6 +32,7 @@ const tabList: TabListResponse = {
       lastSeenAt: "2026-08-08T12:30:00.000Z",
       closedAt: null,
       summary: null,
+      tagPaths: ["Work/Research"],
     },
   ],
   total: 1,
@@ -101,8 +102,10 @@ const succeededSummaryJob: SummaryJob = {
 const toolNames = [
   "list_tabs",
   "get_tab",
+  "link_tabs",
   "search_tabs",
   "set_status",
+  "set_importance",
   "tag_tabs",
   "summarize_tab",
   "list_tags",
@@ -118,7 +121,13 @@ function createApi(overrides: Partial<TabHubApi> = {}): TabHubApi {
     setStatus: async () => {
       throw new Error("not implemented in this test");
     },
+    setImportance: async () => {
+      throw new Error("not implemented in this test");
+    },
     tagTabs: async () => {
+      throw new Error("not implemented in this test");
+    },
+    linkTabs: async () => {
       throw new Error("not implemented in this test");
     },
     summarizeTab: async () => {
@@ -186,6 +195,7 @@ describe("TabHub MCP server", () => {
           status: "inbox",
           importance: 2,
           is_open: true,
+          tag: "AI/Agents",
           page: 2,
           page_size: 25,
         },
@@ -196,6 +206,7 @@ describe("TabHub MCP server", () => {
         status: "inbox",
         importance: 2,
         isOpen: true,
+        tag: "AI/Agents",
         page: 2,
         pageSize: 25,
       });
@@ -289,6 +300,76 @@ describe("TabHub MCP server", () => {
       expect(JSON.parse(textResult(tagResult))).toEqual({
         tagId: 7,
         assigned: 2,
+      });
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("sets importance using the MCP level vocabulary", async () => {
+    const setImportance = vi.fn(async () => ({
+      updated: 2,
+      importance: 3 as const,
+    }));
+    const connection = await connectClient(createApi({ setImportance }));
+
+    try {
+      const result = await connection.client.callTool({
+        name: "set_importance",
+        arguments: { ids: [1, 2], level: 3 },
+      });
+
+      expect(setImportance).toHaveBeenCalledWith({
+        ids: [1, 2],
+        importance: 3,
+      });
+      expect(JSON.parse(textResult(result))).toEqual({
+        updated: 2,
+        importance: 3,
+      });
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("links tabs with a related default and non-idempotent mutation metadata", async () => {
+    const linkTabs = vi.fn(async () => ({
+      id: 21,
+      fromTab: 1,
+      toTab: 2,
+      kind: "related",
+      note: null,
+      createdBy: "agent" as const,
+    }));
+    const connection = await connectClient(createApi({ linkTabs }));
+
+    try {
+      const listed = await connection.client.listTools();
+      const tool = listed.tools.find(({ name }) => name === "link_tabs");
+      expect(tool?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      });
+
+      const result = await connection.client.callTool({
+        name: "link_tabs",
+        arguments: { from: 1, to: 2 },
+      });
+
+      expect(linkTabs).toHaveBeenCalledWith({
+        from: 1,
+        to: 2,
+        kind: "related",
+      });
+      expect(JSON.parse(textResult(result))).toEqual({
+        id: 21,
+        fromTab: 1,
+        toTab: 2,
+        kind: "related",
+        note: null,
+        createdBy: "agent",
       });
     } finally {
       await connection.close();

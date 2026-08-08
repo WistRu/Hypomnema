@@ -5,7 +5,9 @@ import type {
   IngestContentResponse,
   IngestSnapshot,
   IngestSnapshotResponse,
-  PatchTabStatusResponse,
+  PatchTab,
+  SetImportance,
+  SetImportanceResponse,
   SetStatus,
   SetStatusResponse,
   TabDetailResponse,
@@ -25,6 +27,7 @@ export interface ListTabsInput {
   q: string | undefined;
   status: TabStatus | undefined;
   importance: TabImportance | undefined;
+  tag: string | undefined;
 }
 
 export interface TabCatalog {
@@ -32,10 +35,8 @@ export interface TabCatalog {
   ingestContent(content: IngestContent): IngestContentResponse;
   listTabs(input: ListTabsInput): TabListResponse;
   getTab(id: number): TabDetailResponse | undefined;
-  updateStatus(
-    id: number,
-    status: TabStatus,
-  ): PatchTabStatusResponse | undefined;
+  updateTab(id: number, input: PatchTab): TabDetailResponse | undefined;
+  updateImportances(input: SetImportance): SetImportanceResponse;
   updateStatuses(input: SetStatus): SetStatusResponse;
 }
 
@@ -95,6 +96,11 @@ interface TabTagRow {
   assigned_by: "user" | "agent";
 }
 
+interface TabTagPathRow {
+  tab_id: number;
+  path: string;
+}
+
 interface TabLinkRow {
   id: number;
   from_tab: number;
@@ -127,7 +133,7 @@ function toFtsQuery(query: string): string {
   return tokens.map((token) => `"${token}"`).join(" AND ");
 }
 
-function mapTabRow(row: TabRow): TabListItem {
+function mapTabRow(row: TabRow, tagPaths: string[]): TabListItem {
   return {
     id: row.id,
     url: row.url,
@@ -144,6 +150,7 @@ function mapTabRow(row: TabRow): TabListItem {
     lastSeenAt: row.last_seen_at,
     closedAt: row.closed_at,
     summary: row.summary,
+    tagPaths,
   };
 }
 
@@ -271,6 +278,20 @@ export function createTabCatalog(
     SET status = ?
     WHERE id = ?
   `);
+  const updateTabImportance = connection.prepare(`
+    UPDATE tabs
+    SET importance = ?
+    WHERE id = ?
+  `);
+  const upsertCustomField = connection.prepare(`
+    INSERT INTO custom_fields (tab_id, key, value)
+    VALUES (?, ?, ?)
+    ON CONFLICT (tab_id, key) DO UPDATE SET value = excluded.value
+  `);
+  const deleteCustomField = connection.prepare(`
+    DELETE FROM custom_fields
+    WHERE tab_id = ? AND key = ?
+  `);
   const selectExistingTabId = connection.prepare(
     "SELECT id FROM tabs WHERE id = ?",
   );
@@ -328,6 +349,99 @@ export function createTabCatalog(
       }
 
       return { updated, status: input.status };
+    },
+  );
+  const updateImportancesTransaction = connection.transaction(
+    (input: SetImportance): SetImportanceResponse => {
+      const missingIds = input.ids.filter(
+        (id) => selectExistingTabId.get(id) === undefined,
+      );
+
+      if (missingIds.length > 0) {
+        throw new TabIdsNotFoundError(missingIds);
+      }
+
+      let updated = 0;
+      for (const id of input.ids) {
+        updated += updateTabImportance.run(input.importance, id).changes;
+      }
+
+      return { updated, importance: input.importance };
+    },
+  );
+
+  const getTabDetail = (id: number): TabDetailResponse | undefined => {
+    const row = selectTabDetail.get(id) as TabDetailRow | undefined;
+
+    if (row === undefined) {
+      return undefined;
+    }
+
+    const tags = selectTabTags.all(id) as TabTagRow[];
+    const links = selectTabLinks.all(id, id) as TabLinkRow[];
+    const customFields = Object.fromEntries(
+      (selectCustomFields.all(id) as CustomFieldRow[]).map((field) => [
+        field.key,
+        field.value,
+      ]),
+    );
+
+    return {
+      ...mapTabRow(
+        row,
+        tags.map((tag) => tag.path),
+      ),
+      content:
+        row.content_tab_id === null
+          ? null
+          : {
+              text: row.text,
+              htmlExcerpt: row.html_excerpt,
+              summary: row.summary,
+              summaryModel: row.summary_model,
+              extractedAt: row.extracted_at,
+            },
+      tags: tags.map((tag) => ({
+        id: tag.id,
+        name: tag.name,
+        path: tag.path,
+        color: tag.color,
+        assignedBy: tag.assigned_by,
+      })),
+      links: links.map((link) => ({
+        id: link.id,
+        fromTab: link.from_tab,
+        toTab: link.to_tab,
+        kind: link.kind,
+        note: link.note,
+        createdBy: link.created_by,
+      })),
+      customFields,
+    };
+  };
+  const updateTabTransaction = connection.transaction(
+    (id: number, input: PatchTab): TabDetailResponse | undefined => {
+      if (selectExistingTabId.get(id) === undefined) {
+        return undefined;
+      }
+
+      if (input.status !== undefined) {
+        updateTabStatus.run(input.status, id);
+      }
+      if (input.importance !== undefined) {
+        updateTabImportance.run(input.importance, id);
+      }
+      if (input.customFields !== undefined) {
+        for (const [key, value] of Object.entries(input.customFields)) {
+          if (value === null) {
+            deleteCustomField.run(id, key);
+          } else {
+            upsertCustomField.run(id, key, value);
+          }
+        }
+      }
+
+      return getTabDetail(id);
     },
   );
 
@@ -388,6 +502,34 @@ export function createTabCatalog(
         parameters.push(input.importance);
       }
 
+      if (input.tag !== undefined) {
+        predicates.push(`tabs.id IN (
+          WITH RECURSIVE
+            tag_paths(id, path) AS (
+              SELECT id, name
+              FROM tags
+              WHERE parent_id IS NULL
+              UNION ALL
+              SELECT child.id, tag_paths.path || '/' || child.name
+              FROM tags AS child
+              JOIN tag_paths ON child.parent_id = tag_paths.id
+            ),
+            descendants(id) AS (
+              SELECT id
+              FROM tag_paths
+              WHERE path = ?
+              UNION ALL
+              SELECT child.id
+              FROM tags AS child
+              JOIN descendants ON child.parent_id = descendants.id
+            )
+          SELECT tab_tags.tab_id
+          FROM tab_tags
+          JOIN descendants ON descendants.id = tab_tags.tag_id
+        )`);
+        parameters.push(input.tag);
+      }
+
       const whereClause =
         predicates.length > 0 ? `WHERE ${predicates.join(" AND ")}` : "";
       const count = connection
@@ -419,9 +561,41 @@ export function createTabCatalog(
            LIMIT ? OFFSET ?`,
         )
         .all(...parameters, input.pageSize, offset) as TabRow[];
+      const tagPathsByTab = new Map<number, string[]>();
+      if (rows.length > 0) {
+        const placeholders = rows.map(() => "?").join(", ");
+        const tagPathRows = connection
+          .prepare(
+            `WITH RECURSIVE tag_paths(id, path) AS (
+               SELECT id, name
+               FROM tags
+               WHERE parent_id IS NULL
+               UNION ALL
+               SELECT child.id, tag_paths.path || '/' || child.name
+               FROM tags AS child
+               JOIN tag_paths ON child.parent_id = tag_paths.id
+             )
+             SELECT tab_tags.tab_id, tag_paths.path
+             FROM tab_tags
+             JOIN tag_paths ON tag_paths.id = tab_tags.tag_id
+             WHERE tab_tags.tab_id IN (${placeholders})
+             ORDER BY
+               tab_tags.tab_id,
+               tag_paths.path COLLATE NOCASE,
+               tag_paths.path,
+               tag_paths.id`,
+          )
+          .all(...rows.map(({ id }) => id)) as TabTagPathRow[];
+
+        for (const tag of tagPathRows) {
+          const paths = tagPathsByTab.get(tag.tab_id) ?? [];
+          paths.push(tag.path);
+          tagPathsByTab.set(tag.tab_id, paths);
+        }
+      }
 
       return {
-        items: rows.map(mapTabRow),
+        items: rows.map((row) => mapTabRow(row, tagPathsByTab.get(row.id) ?? [])),
         total: count.total,
         page: input.page,
         pageSize: input.pageSize,
@@ -429,58 +603,15 @@ export function createTabCatalog(
     },
 
     getTab(id) {
-      const row = selectTabDetail.get(id) as TabDetailRow | undefined;
-
-      if (row === undefined) {
-        return undefined;
-      }
-
-      const tags = selectTabTags.all(id) as TabTagRow[];
-      const links = selectTabLinks.all(id, id) as TabLinkRow[];
-      const customFields = Object.fromEntries(
-        (selectCustomFields.all(id) as CustomFieldRow[]).map((field) => [
-          field.key,
-          field.value,
-        ]),
-      );
-
-      return {
-        ...mapTabRow(row),
-        content:
-          row.content_tab_id === null
-            ? null
-            : {
-                text: row.text,
-                htmlExcerpt: row.html_excerpt,
-                summary: row.summary,
-                summaryModel: row.summary_model,
-                extractedAt: row.extracted_at,
-              },
-        tags: tags.map((tag) => ({
-          id: tag.id,
-          name: tag.name,
-          path: tag.path,
-          color: tag.color,
-          assignedBy: tag.assigned_by,
-        })),
-        links: links.map((link) => ({
-          id: link.id,
-          fromTab: link.from_tab,
-          toTab: link.to_tab,
-          kind: link.kind,
-          note: link.note,
-          createdBy: link.created_by,
-        })),
-        customFields,
-      };
+      return getTabDetail(id);
     },
 
-    updateStatus(id, status) {
-      if (updateTabStatus.run(status, id).changes === 0) {
-        return undefined;
-      }
+    updateTab(id, input) {
+      return updateTabTransaction(id, input);
+    },
 
-      return { id, status };
+    updateImportances(input) {
+      return updateImportancesTransaction(input);
     },
 
     updateStatuses(input) {

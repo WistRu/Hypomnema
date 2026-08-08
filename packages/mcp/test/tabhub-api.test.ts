@@ -3,6 +3,7 @@ import type {
   SummaryJob,
   StatsResponse,
   TabDetailResponse,
+  TabLink,
   TabListResponse,
   TagTreeResponse,
 } from "@tabhub/shared";
@@ -33,6 +34,7 @@ const detailResponse: TabDetailResponse = {
   lastSeenAt: "2026-08-08T12:30:00.000Z",
   closedAt: null,
   summary: null,
+  tagPaths: [],
   content: null,
   tags: [],
   links: [],
@@ -76,6 +78,15 @@ const summaryJob: SummaryJob = {
   },
 };
 
+const createdLink: TabLink = {
+  id: 21,
+  fromTab: 3,
+  toTab: 4,
+  kind: "related",
+  note: "Read these together",
+  createdBy: "agent",
+};
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -97,6 +108,7 @@ describe("TabHub REST adapter", () => {
         status: "inbox",
         importance: 2,
         isOpen: false,
+        tag: "AI/Agents",
         q: "agent notes",
         page: 2,
         pageSize: 25,
@@ -114,6 +126,7 @@ describe("TabHub REST adapter", () => {
       status: "inbox",
       importance: "2",
       is_open: "false",
+      tag: "AI/Agents",
       q: "agent notes",
       page: "2",
       pageSize: "25",
@@ -214,6 +227,84 @@ describe("TabHub REST adapter", () => {
         body: undefined,
       },
     ]);
+  });
+
+  it("sets tab importance through the exact REST mutation contract", async () => {
+    const fetchImpl: typeof fetch = vi.fn(async () =>
+      jsonResponse({ updated: 2, importance: 3 }),
+    );
+    const api = createTabHubApi({
+      baseUrl: "http://127.0.0.1:7717",
+      fetchImpl,
+    });
+
+    await expect(
+      api.setImportance({ ids: [3, 4], importance: 3 }),
+    ).resolves.toEqual({ updated: 2, importance: 3 });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const [url, init] = vi.mocked(fetchImpl).mock.calls[0]!;
+    expect(String(url)).toBe("http://127.0.0.1:7717/api/tabs/importance");
+    expect(init).toMatchObject({
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ids: [3, 4], importance: 3 }),
+    });
+  });
+
+  it("creates links with explicit agent provenance", async () => {
+    const fetchImpl: typeof fetch = vi.fn(async () =>
+      jsonResponse(createdLink, 201),
+    );
+    const api = createTabHubApi({
+      baseUrl: "http://127.0.0.1:7717",
+      fetchImpl,
+    });
+
+    await expect(
+      api.linkTabs({
+        from: 3,
+        to: 4,
+        kind: "related",
+        note: "Read these together",
+      }),
+    ).resolves.toEqual(createdLink);
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const [url, init] = vi.mocked(fetchImpl).mock.calls[0]!;
+    expect(String(url)).toBe("http://127.0.0.1:7717/api/links");
+    expect(init).toMatchObject({
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        from: 3,
+        to: 4,
+        kind: "related",
+        note: "Read these together",
+        createdBy: "agent",
+      }),
+    });
+  });
+
+  it("rejects malformed importance and link mutation responses", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl
+      .mockResolvedValueOnce(jsonResponse({ updated: -1, importance: 3 }))
+      .mockResolvedValueOnce(
+        jsonResponse({ ...createdLink, createdBy: "system" }),
+      );
+    const api = createTabHubApi({ fetchImpl });
+
+    await expect(
+      api.setImportance({ ids: [3], importance: 3 }),
+    ).rejects.toThrow(
+      "TabHub API PATCH /api/tabs/importance returned an invalid response",
+    );
+    await expect(
+      api.linkTabs({ from: 3, to: 4, kind: "related" }),
+    ).rejects.toThrow(
+      "TabHub API POST /api/links returned an invalid response",
+    );
   });
 
   it("rejects malformed summary enqueue and job responses", async () => {

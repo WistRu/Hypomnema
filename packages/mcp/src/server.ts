@@ -24,6 +24,7 @@ const listTabsInputSchema = z.object({
   status: tabStatusInputSchema.optional(),
   importance: tabImportanceInputSchema.optional(),
   is_open: z.boolean().optional(),
+  tag: z.string().trim().min(1).max(2_048).optional(),
   q: z.string().trim().min(1).max(500).optional(),
   page: z.number().int().positive().default(1),
   page_size: z.number().int().positive().max(200).default(50),
@@ -52,9 +53,21 @@ const setStatusInputSchema = z.object({
   status: tabStatusInputSchema,
 });
 
+const setImportanceInputSchema = z.object({
+  ids: tabIdsInputSchema,
+  level: tabImportanceInputSchema,
+});
+
 const tagTabsInputSchema = z.object({
   ids: tabIdsInputSchema,
   tag_path: z.string().trim().min(1).max(2_048),
+});
+
+const linkTabsInputSchema = z.object({
+  from: z.number().int().positive(),
+  to: z.number().int().positive(),
+  kind: z.string().trim().min(1).max(128).default("related"),
+  note: z.string().max(10_000).optional(),
 });
 
 const summarizeTabInputSchema = z.object({
@@ -81,6 +94,13 @@ const summaryMutationAnnotations = {
   destructiveHint: false,
   idempotentHint: false,
   openWorldHint: true,
+} as const;
+
+const createMutationAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
 } as const;
 
 const capturedTextLimit = 20_000;
@@ -250,6 +270,7 @@ function toListTabsInput(
       ? {}
       : { importance: input.importance }),
     ...(input.is_open === undefined ? {} : { isOpen: input.is_open }),
+    ...(input.tag === undefined ? {} : { tag: input.tag }),
     ...(input.q === undefined ? {} : { q: input.q }),
     page: input.page,
     pageSize: input.page_size,
@@ -344,6 +365,17 @@ export function createMcpServer(
   );
 
   server.registerTool(
+    "set_importance",
+    {
+      description: "Set the importance level for one or more TabHub tabs.",
+      inputSchema: setImportanceInputSchema,
+      annotations: mutationAnnotations,
+    },
+    async ({ ids, level }) =>
+      runTool(() => api.setImportance({ ids, importance: level })),
+  );
+
+  server.registerTool(
     "tag_tabs",
     {
       description:
@@ -353,6 +385,24 @@ export function createMcpServer(
     },
     async ({ ids, tag_path: tagPath }) =>
       runTool(() => api.tagTabs({ ids, tagPath })),
+  );
+
+  server.registerTool(
+    "link_tabs",
+    {
+      description: "Create a typed link between two TabHub tabs.",
+      inputSchema: linkTabsInputSchema,
+      annotations: createMutationAnnotations,
+    },
+    async ({ from, to, kind, note }) =>
+      runTool(() =>
+        api.linkTabs({
+          from,
+          to,
+          kind,
+          ...(note === undefined ? {} : { note }),
+        }),
+      ),
   );
 
   server.registerTool(

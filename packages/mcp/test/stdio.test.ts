@@ -51,6 +51,12 @@ describe("TabHub built stdio server", () => {
                 windowId: 1,
                 index: 0,
               },
+              {
+                url: "https://example.com/mcp-related",
+                title: "Related MCP reference",
+                windowId: 1,
+                index: 1,
+              },
             ],
           },
         });
@@ -65,7 +71,16 @@ describe("TabHub built stdio server", () => {
           },
         });
         const list = await app.inject({ method: "GET", url: "/api/tabs" });
-        const tabId = list.json().items[0].id as number;
+        const listedTabs = list.json().items as Array<{
+          id: number;
+          title: string;
+        }>;
+        const tabId = listedTabs.find(
+          ({ title }) => title === "Narwhal MCP acceptance",
+        )!.id;
+        const relatedTabId = listedTabs.find(
+          ({ title }) => title === "Related MCP reference",
+        )!.id;
         const origin = await app.listen({ host: "127.0.0.1", port: 0 });
         const entrypoint = fileURLToPath(
           new URL("../dist/main.js", import.meta.url),
@@ -93,9 +108,11 @@ describe("TabHub built stdio server", () => {
         expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
           "get_stats",
           "get_tab",
+          "link_tabs",
           "list_tabs",
           "list_tags",
           "search_tabs",
+          "set_importance",
           "set_status",
           "summarize_tab",
           "tag_tabs",
@@ -117,6 +134,37 @@ describe("TabHub built stdio server", () => {
         await client.callTool({
           name: "tag_tabs",
           arguments: { ids: [tabId], tag_path: "Research/MCP" },
+        });
+        await client.callTool({
+          name: "set_importance",
+          arguments: { ids: [tabId], level: 3 },
+        });
+        await client.callTool({
+          name: "link_tabs",
+          arguments: {
+            from: tabId,
+            to: relatedTabId,
+            kind: "follows",
+            note: "Agent-created acceptance link",
+          },
+        });
+
+        const managedDetail = await app.inject({
+          method: "GET",
+          url: `/api/tabs/${tabId}`,
+        });
+        expect(managedDetail.json()).toMatchObject({
+          importance: 3,
+          tags: [{ path: "Research/MCP", assignedBy: "agent" }],
+          links: [
+            {
+              fromTab: tabId,
+              toTab: relatedTabId,
+              kind: "follows",
+              note: "Agent-created acceptance link",
+              createdBy: "agent",
+            },
+          ],
         });
 
         const resource = await client.readResource({
@@ -142,7 +190,7 @@ describe("TabHub built stdio server", () => {
           byStatus: Array<{ status: string; count: number }>;
           byTag: Array<{ path: string; total: number }>;
         };
-        expect(statsResult.total).toBe(1);
+        expect(statsResult.total).toBe(2);
         expect(
           statsResult.byStatus.find(({ status }) => status === "done"),
         ).toEqual({ status: "done", count: 1 });

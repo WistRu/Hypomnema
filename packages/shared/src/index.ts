@@ -151,6 +151,36 @@ export type PatchTabStatusResponse = z.infer<
   typeof patchTabStatusResponseSchema
 >;
 
+const customFieldKeyInputSchema = z.string().trim().min(1).max(256);
+const customFieldValueInputSchema = z.string().max(100_000).nullable();
+
+const patchCustomFieldsSchema = z
+  .record(customFieldKeyInputSchema, customFieldValueInputSchema)
+  .refine(
+    (fields) => Object.keys(fields).length > 0,
+    "At least one custom field is required",
+  )
+  .refine(
+    (fields) => Object.keys(fields).length <= 100,
+    "At most 100 custom fields can be changed at once",
+  );
+
+export const patchTabSchema = z
+  .object({
+    status: tabStatusSchema.optional(),
+    importance: tabImportanceSchema.optional(),
+    customFields: patchCustomFieldsSchema.optional(),
+  })
+  .refine(
+    (input) =>
+      input.status !== undefined ||
+      input.importance !== undefined ||
+      input.customFields !== undefined,
+    "At least one tab field is required",
+  );
+
+export type PatchTab = z.infer<typeof patchTabSchema>;
+
 export const tabIdsSchema = z
   .array(tabIdSchema)
   .min(1)
@@ -172,6 +202,78 @@ export const setStatusResponseSchema = z.object({
 });
 
 export type SetStatusResponse = z.infer<typeof setStatusResponseSchema>;
+
+export const setImportanceSchema = z.object({
+  ids: tabIdsSchema,
+  importance: tabImportanceSchema,
+});
+
+export type SetImportance = z.infer<typeof setImportanceSchema>;
+
+export const setImportanceResponseSchema = z.object({
+  updated: z.number().int().nonnegative(),
+  importance: tabImportanceSchema,
+});
+
+export type SetImportanceResponse = z.infer<
+  typeof setImportanceResponseSchema
+>;
+
+export const tagIdSchema = z.number().int().positive();
+
+export const tagIdParamSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export type TagIdParam = z.infer<typeof tagIdParamSchema>;
+
+const tagNameInputSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(128)
+  .refine((name) => !name.includes("/"), "Tag names cannot contain slashes");
+const tagColorInputSchema = z.string().max(128).nullable();
+
+export const createTagSchema = z.object({
+  name: tagNameInputSchema,
+  parentId: tagIdSchema.optional(),
+  color: tagColorInputSchema.optional(),
+});
+
+export type CreateTag = z.infer<typeof createTagSchema>;
+
+export const patchTagSchema = z
+  .object({
+    name: tagNameInputSchema.optional(),
+    parentId: tagIdSchema.nullable().optional(),
+    color: tagColorInputSchema.optional(),
+  })
+  .refine(
+    (input) =>
+      input.name !== undefined ||
+      input.parentId !== undefined ||
+      input.color !== undefined,
+    "At least one tag field is required",
+  );
+
+export type PatchTag = z.infer<typeof patchTagSchema>;
+
+export const tagRecordSchema = z.object({
+  id: tagIdSchema,
+  name: z.string(),
+  parentId: tagIdSchema.nullable(),
+  color: z.string().nullable(),
+});
+
+export type TagRecord = z.infer<typeof tagRecordSchema>;
+
+export const tabTagIdsParamSchema = z.object({
+  tabId: z.coerce.number().int().positive(),
+  tagId: z.coerce.number().int().positive(),
+});
+
+export type TabTagIdsParam = z.infer<typeof tabTagIdsParamSchema>;
 
 export const assignTagsSchema = z.object({
   ids: tabIdsSchema,
@@ -204,6 +306,7 @@ export const tabListItemSchema = z.object({
   lastSeenAt: z.string().datetime(),
   closedAt: z.string().datetime().nullable(),
   summary: z.string().nullable(),
+  tagPaths: z.array(z.string()),
 });
 
 export type TabListItem = z.infer<typeof tabListItemSchema>;
@@ -232,6 +335,57 @@ export const tabLinkSchema = z.object({
 });
 
 export type TabLink = z.infer<typeof tabLinkSchema>;
+
+const linkKindInputSchema = z.string().trim().min(1).max(128);
+const linkNoteInputSchema = z.string().max(10_000).nullable();
+
+export const linkIdSchema = z.number().int().positive();
+
+export const linkIdParamSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export type LinkIdParam = z.infer<typeof linkIdParamSchema>;
+
+export const linkListQuerySchema = z.object({
+  tab_id: z.coerce.number().int().positive().optional(),
+});
+
+export type LinkListQuery = z.infer<typeof linkListQuerySchema>;
+
+export const linkListResponseSchema = z.object({
+  items: z.array(tabLinkSchema),
+});
+
+export type LinkListResponse = z.infer<typeof linkListResponseSchema>;
+
+export const createLinkSchema = z.object({
+  from: tabIdSchema,
+  to: tabIdSchema,
+  kind: linkKindInputSchema.default("related"),
+  note: linkNoteInputSchema.optional(),
+  createdBy: assignedBySchema,
+});
+
+export type CreateLink = z.infer<typeof createLinkSchema>;
+
+export const patchLinkSchema = z
+  .object({
+    kind: linkKindInputSchema.optional(),
+    note: linkNoteInputSchema.optional(),
+  })
+  .refine(
+    (input) => input.kind !== undefined || input.note !== undefined,
+    "At least one link field is required",
+  );
+
+export type PatchLink = z.infer<typeof patchLinkSchema>;
+
+export const deleteResponseSchema = z.object({
+  deleted: z.literal(true),
+});
+
+export type DeleteResponse = z.infer<typeof deleteResponseSchema>;
 
 export const customFieldsSchema = z.record(z.string(), z.string().nullable());
 
@@ -410,6 +564,7 @@ export const tabListQuerySchema = z.object({
   q: z.string().trim().min(1).max(500).optional(),
   status: tabStatusSchema.optional(),
   importance: z.coerce.number().pipe(tabImportanceSchema).optional(),
+  tag: tagPathSchema.optional(),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(200).default(50),
 });
