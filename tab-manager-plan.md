@@ -1,0 +1,243 @@
+# TabHub — план реализации
+
+Спецификация для агента-исполнителя. Проект: локальная система управления вкладками из нескольких браузеров с ИИ-интеграцией через MCP.
+
+---
+
+## 1. Контекст и цель
+
+Пользователь работает на Windows в нескольких Chromium-браузерах (Chrome, Yandex Browser, Edge и др.). В каждом копятся сотни открытых вкладок, которые нельзя терять, но не успевается разбирать. Существующие расширения не подходят: они не объединяют вкладки из разных браузеров и не дают подключить ИИ-агента.
+
+**Цель:** единое локальное хранилище вкладок из всех браузеров + MCP-сервер, через который Claude Desktop и Codex могут читать контент вкладок, суммаризировать, тегировать, связывать и структурировать их + веб-интерфейс с таблицей и графом связей.
+
+**Не-цели (v1):** синхронизация между устройствами, мультипользовательность, облако, мобильные браузеры, Firefox/Safari.
+
+## 2. Архитектура
+
+```
+┌─────────────────────────────┐
+│ Расширение (одно на все     │  chrome.tabs + извлечение контента
+│ Chromium-браузеры)          │
+└──────────┬──────────────────┘
+           │ HTTP → localhost:7717
+┌──────────▼──────────────────┐
+│ Бэкенд (Node.js + Fastify)  │
+│  ├─ REST API                │
+│  ├─ SQLite (FTS5+sqlite-vec)│
+│  └─ Воркер суммаризации     │──→ Claude API (Haiku/Sonnet)
+└──────┬───────────────┬──────┘
+       │               │
+┌──────▼──────┐  ┌─────▼───────────────┐
+│ Веб-UI      │  │ MCP-сервер (stdio)  │←→ Claude Desktop / Codex
+│ React+Vite  │  │ обращается к REST   │
+└─────────────┘  └─────────────────────┘
+```
+
+Принципы:
+- Расширение — только сборщик, вся логика и хранение на бэкенде.
+- MCP-сервер — тонкий адаптер над REST API, без собственной логики.
+- Всё локально, никакой авторизации в v1 (bind только на 127.0.0.1).
+
+## 3. Стек
+
+| Компонент | Технология |
+|---|---|
+| Монорепо | pnpm workspaces + TypeScript везде |
+| Расширение | WXT, Manifest V3, Readability.js (@mozilla/readability) |
+| Бэкенд | Node.js 22, Fastify, better-sqlite3, zod для валидации |
+| БД | SQLite + FTS5 + sqlite-vec, миграции через drizzle-kit или простые SQL-файлы |
+| MCP-сервер | @modelcontextprotocol/sdk (TypeScript), транспорт stdio |
+| Суммаризация | Anthropic API: claude-haiku (массово), claude-sonnet (по запросу глубокий анализ) |
+| Эмбеддинги | Voyage AI (voyage-3-lite) или локально ollama/nomic-embed — сделать провайдер сменным |
+| Фронтенд | React 19 + Vite + Tailwind, TanStack Table (таблица), React Flow (граф), TanStack Query |
+
+Структура репозитория:
+
+```
+tabhub/
+  packages/
+    extension/      # WXT-расширение
+    server/         # Fastify + SQLite + воркер
+    mcp/            # MCP-сервер
+    web/            # React UI (собирается и раздаётся сервером со /app)
+    shared/         # общие типы и zod-схемы
+```
+
+## 4. Модель данных (SQLite)
+
+```sql
+CREATE TABLE tabs (
+  id INTEGER PRIMARY KEY,
+  url TEXT NOT NULL,
+  url_normalized TEXT NOT NULL,        -- без utm_* и якорей, для дедупликации
+  title TEXT,
+  browser TEXT NOT NULL,               -- 'chrome' | 'yandex' | 'edge' | ...
+  window_id INTEGER, tab_index INTEGER,
+  favicon_url TEXT,
+  status TEXT NOT NULL DEFAULT 'inbox',-- 'inbox' | 'in_progress' | 'done' | 'archived'
+  importance INTEGER DEFAULT 0,        -- 0..3
+  is_open INTEGER NOT NULL DEFAULT 1,  -- вкладка сейчас открыта в браузере
+  first_seen_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  closed_at TEXT,
+  UNIQUE(url_normalized, browser)
+);
+
+CREATE TABLE contents (
+  tab_id INTEGER PRIMARY KEY REFERENCES tabs(id),
+  text TEXT,                           -- очищенный Readability-текст
+  html_excerpt TEXT,
+  summary TEXT,                        -- краткое содержание от LLM
+  summary_model TEXT,
+  extracted_at TEXT
+);
+
+CREATE VIRTUAL TABLE contents_fts USING fts5(text, summary, title, content='');
+-- + виртуальная таблица sqlite-vec для эмбеддингов: vec_contents(tab_id, embedding float[512])
+
+CREATE TABLE tags (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  parent_id INTEGER REFERENCES tags(id),  -- иерархия тем любой глубины
+  color TEXT,
+  UNIQUE(name, parent_id)
+);
+
+CREATE TABLE tab_tags (
+  tab_id INTEGER REFERENCES tabs(id),
+  tag_id INTEGER REFERENCES tags(id),
+  assigned_by TEXT NOT NULL,           -- 'user' | 'agent'
+  PRIMARY KEY (tab_id, tag_id)
+);
+
+CREATE TABLE links (
+  id INTEGER PRIMARY KEY,
+  from_tab INTEGER NOT NULL REFERENCES tabs(id),
+  to_tab INTEGER NOT NULL REFERENCES tabs(id),
+  kind TEXT NOT NULL DEFAULT 'related',-- 'related' | 'follows' | 'duplicates' | 'contradicts' | custom
+  note TEXT,
+  created_by TEXT NOT NULL             -- 'user' | 'agent'
+);
+
+CREATE TABLE custom_fields (           -- произвольные признаки пользователя
+  tab_id INTEGER REFERENCES tabs(id),
+  key TEXT NOT NULL,
+  value TEXT,
+  PRIMARY KEY (tab_id, key)
+);
+```
+
+Дедупликация: одна и та же нормализованная ссылка в одном браузере = одна запись; повторное появление обновляет `last_seen_at`.
+
+## 5. REST API бэкенда (localhost:7717)
+
+- `POST /api/ingest/snapshot` — расширение шлёт полный список открытых вкладок браузера `{browser, tabs: [{url, title, windowId, index, faviconUrl}]}`. Сервер выполняет upsert, вкладки, пропавшие из снапшота, помечает `is_open=0`, `closed_at=now` (запись НЕ удаляется).
+- `POST /api/ingest/content` — расширение шлёт извлечённый текст `{browser, url, text, htmlExcerpt}`.
+- `GET /api/tabs` — фильтры: `status, tag, browser, importance, is_open, q` (FTS), `similar_to` (векторный поиск), пагинация.
+- `GET /api/tabs/:id` — вкладка + контент + summary + теги + связи.
+- `PATCH /api/tabs/:id` — статус, важность, custom fields.
+- `POST /api/tabs/:id/summarize` — поставить в очередь суммаризацию (`depth: 'short' | 'deep'`).
+- CRUD: `/api/tags`, `/api/links`.
+- `GET /api/graph?root_tag=...` — узлы и рёбра для React Flow.
+- `GET /api/stats` — счётчики inbox/в работе/изучено по браузерам и темам.
+
+Воркер суммаризации: очередь в таблице `jobs`, обработка последовательно, retry с бэкоффом, ключ Anthropic из `.env`.
+
+## 6. MCP-сервер
+
+Транспорт stdio, регистрируется в Claude Desktop (`claude_desktop_config.json`) и в Codex. Инструменты:
+
+| Инструмент | Описание |
+|---|---|
+| `list_tabs(filters)` | список вкладок с фильтрами как в GET /api/tabs; возвращает компактный JSON без полного текста |
+| `get_tab(id, include_content)` | детали вкладки; контент отдавать усечённым до ~20k символов |
+| `search_tabs(query, mode)` | mode: 'fulltext' \| 'semantic' |
+| `summarize_tab(id, depth)` | запустить суммаризацию, вернуть результат |
+| `set_status(ids[], status)` | пометить изучено / в работе / архив |
+| `set_importance(ids[], level)` | важность 0..3 |
+| `tag_tabs(ids[], tag_path)` | tag_path вида "AI/LLM/Agents" — создаёт иерархию при необходимости |
+| `link_tabs(from, to, kind, note)` | создать связь |
+| `list_tags()` | дерево тегов со счётчиками |
+| `cluster_inbox(max_clusters)` | сгруппировать неразобранные вкладки по эмбеддингам, вернуть предлагаемые кластеры с названиями |
+| `get_stats()` | сводка для «разбора завалов» |
+
+Ресурсы MCP: `tabhub://tab/{id}` — markdown-представление вкладки (title, url, summary, текст).
+
+Все мутации от MCP пишутся с `assigned_by/created_by = 'agent'`, чтобы в UI отличать разметку агента от ручной.
+
+## 7. Расширение
+
+- WXT, один билд; для Chrome/Edge установка из папки (dev mode), Yandex Browser поддерживает расширения Chrome — то же самое.
+- Background service worker: подписки на `chrome.tabs.onCreated/onUpdated/onRemoved`; полный снапшот при старте браузера и далее каждые 5 минут (debounce), плюс дельты по событиям.
+- Определение браузера: задаётся при установке в options-странице расширения (простой select), т.к. надёжно отличить Yandex от Chrome по API нельзя.
+- Извлечение контента: по кнопке в popup («захватить эту вкладку») и команда «захватить все» — content script прогоняет DOM через Readability и шлёт текст. Автозахват всех вкладок в v1 НЕ делать (шумно и медленно), это войдёт в v2 по allowlist доменов.
+- Popup: количество несинхронизированных вкладок, кнопки «снапшот сейчас», «захватить контент», индикатор доступности сервера.
+
+## 8. Веб-UI (localhost:7717/app)
+
+Экраны v1:
+1. **Inbox / Таблица** — TanStack Table: колонки title, браузер (иконка), теги, статус, важность, summary (раскрывается), возраст. Фильтры сверху, массовые операции (статус, тег), полнотекстовый поиск.
+2. **Карточка вкладки** — контент, summary, теги, связи, кнопка «открыть в браузере», ручные custom fields.
+3. **Граф** — React Flow: узлы = вкладки (цвет по статусу, размер по важности), рёбра = links, группировка по тегу-корню; клик по узлу открывает карточку; выделение «ветки текущей работы» (все узлы, достижимые из выбранного по рёбрам `follows`).
+4. **Дерево тем** — сайдбар с иерархией тегов и счётчиками.
+
+Дизайн: тёмная тема по умолчанию, плотная информационная вёрстка, без декоративности.
+
+## 9. Этапы реализации
+
+Каждый этап заканчивается работающим вертикальным срезом и коммитом.
+
+**Этап 0 — каркас (0.5 дня)**
+Монорепо, tsconfig, shared-схемы zod, пустой Fastify c healthcheck, миграции SQLite.
+✅ Критерий: `pnpm dev` поднимает сервер, `GET /api/health` отвечает.
+
+**Этап 1 — сбор вкладок (1–2 дня)**
+Расширение со снапшотами, ingest-эндпоинты, дедупликация, простейшая таблица в UI (без графа).
+✅ Критерий: вкладки из Chrome, Edge и Yandex видны в одном списке с указанием браузера; закрытая вкладка получает `is_open=0`, но остаётся в базе.
+
+**Этап 2 — контент и поиск (1–2 дня)**
+Захват контента через Readability, FTS5, поиск в UI.
+✅ Критерий: захваченный текст ищется полнотекстово.
+
+**Этап 3 — MCP-сервер, базовые инструменты (1–2 дня)**
+`list_tabs, get_tab, search_tabs, set_status, tag_tabs, list_tags, get_stats` + конфиг для Claude Desktop и Codex + README по подключению.
+✅ Критерий: из Claude Desktop команда «покажи мои неразобранные вкладки про X и пометь первые три как изученные» работает end-to-end.
+
+**Этап 4 — суммаризация (1 день)**
+Воркер, очередь jobs, `summarize_tab` в MCP, summary в таблице UI.
+✅ Критерий: массовая суммаризация 50 вкладок отрабатывает без падений, стоимость логируется.
+
+**Этап 5 — теги, связи, статусы в UI (1–2 дня)**
+Иерархия тегов, редактирование связей, массовые операции, custom fields.
+✅ Критерий: вручную и через агента можно построить дерево тем и связать вкладки.
+
+**Этап 6 — эмбеддинги и кластеризация (1–2 дня)**
+sqlite-vec, semantic search, `cluster_inbox`.
+✅ Критерий: агент по команде «разбери мой inbox» предлагает осмысленные кластеры с названиями.
+
+**Этап 7 — граф (1–2 дня)**
+React Flow, режимы раскраски, «ветка текущей работы».
+✅ Критерий: граф на 300+ узлах не тормозит (виртуализация/фильтрация по тегу обязательна).
+
+## 10. Нефункциональные требования
+
+- Windows — основная платформа: пути, автозапуск сервера через Планировщик задач или NSSM; в README — инструкция установки.
+- Производительность: база до 10 000 вкладок, таблица с виртуализацией, ответы API < 100 мс на типовых фильтрах.
+- Надёжность: сервер недоступен → расширение копит очередь в `chrome.storage.local` и досылает.
+- Бэкап: команда `pnpm backup` копирует sqlite-файл с датой.
+- Секреты: только `.env`, в git не коммитить; `.env.example` обязателен.
+- Тесты: unit на нормализацию URL и дедупликацию, интеграционные на ingest и MCP-инструменты (vitest).
+
+## 11. Известные риски
+
+- Manifest V3 усыпляет service worker — использовать `chrome.alarms` для периодических снапшотов, не setInterval.
+- Readability не работает на SPA до отрисовки — извлекать по событию, с fallback на `document.body.innerText`.
+- Yandex Browser может иметь отличия в API — проверить на этапе 1 первым делом.
+- Стоимость LLM: суммаризация только по запросу (пользователя или агента), никогда автоматически для всех вкладок; лимит в конфиге (например, максимум N summary в день).
+
+## 12. Порядок работы для агента-исполнителя
+
+1. Идти строго по этапам, после каждого — прогнать критерий приёмки и показать результат.
+2. Не добавлять фич сверх спецификации без согласования (особенно auth, облако, sync).
+3. Спорные решения (библиотека, схема) — принять самостоятельно, зафиксировать одной строкой в `docs/decisions.md`.
+4. В конце каждого этапа обновлять README: как запустить, как подключить MCP.
