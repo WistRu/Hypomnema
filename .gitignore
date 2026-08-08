@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.output/
+.wxt/
+coverage/
+*.log
+.env
+data/
+backups/
+packages/server/data/
+packages/server/backups/

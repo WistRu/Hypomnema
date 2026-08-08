@@ -1,0 +1,20 @@
+{
+  "name": "@tabhub/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsup src/main.ts --format esm --platform node --target node22 --clean",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "backup": "tsx src/backup.ts"
+  },
+  "dependencies": {
+    "@tabhub/shared": "workspace:*",
+    "better-sqlite3": "^13.0.3",
+    "dotenv": "^17.4.2",
+    "fastify": "^5.11.2"
+  }
+}
