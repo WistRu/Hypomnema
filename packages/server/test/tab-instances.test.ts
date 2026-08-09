@@ -32,6 +32,9 @@ describe("physical tab instances", () => {
               windowId: 1,
               index: 0,
               active: true,
+              audible: true,
+              discarded: true,
+              muted: true,
               pinned: false,
               lastAccessed: 1_754_737_100_000,
             },
@@ -69,6 +72,9 @@ describe("physical tab instances", () => {
             browserTabId: 101,
             title: "First occurrence",
             active: true,
+            audible: true,
+            discarded: true,
+            muted: true,
             pinned: false,
             duplicateGroupSize: 2,
           }),
@@ -112,6 +118,179 @@ describe("physical tab instances", () => {
       expect(canonical.json()).toMatchObject({ total: 1 });
     } finally {
       await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("returns every filtered physical occurrence from the bulk endpoint without a page limit", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-instance-bulk-"));
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+      clock: () => new Date("2026-08-09T10:00:00.000Z"),
+    });
+    const installationId = "e875c8d9-c2b4-4a70-98c1-31c9c8b03513";
+
+    try {
+      const ingest = await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          installationId,
+          tabs: [
+            ...Array.from({ length: 251 }, (_, index) => ({
+              tabId: index + 1,
+              url: "https://bulk.example/exact",
+              title: `Bulk selection ${index + 1}`,
+              windowId: 1,
+              index,
+            })),
+            {
+              tabId: 252,
+              url: "https://bulk.example/unique",
+              title: "Excluded unique tab",
+              windowId: 2,
+              index: 0,
+            },
+          ],
+        },
+      });
+      expect(ingest.statusCode).toBe(200);
+
+      const bulk = await app.inject({
+        method: "GET",
+        url: "/api/tab-instances/bulk?browser=chrome&duplicates_only=true&q=Bulk+selection",
+      });
+
+      expect(bulk.statusCode).toBe(200);
+      expect(bulk.json()).toMatchObject({
+        total: 251,
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            installationId,
+            browserTabId: 1,
+            duplicateGroupSize: 251,
+          }),
+          expect.objectContaining({
+            installationId,
+            browserTabId: 251,
+            duplicateGroupSize: 251,
+          }),
+        ]),
+      });
+      const items = bulk.json().items as Array<{ instanceId: number }>;
+      expect(items).toHaveLength(251);
+      expect(new Set(items.map(({ instanceId }) => instanceId)).size).toBe(251);
+      expect(bulk.json()).not.toHaveProperty("page");
+      expect(bulk.json()).not.toHaveProperty("pageSize");
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("reads bulk instances and their tag paths from one database snapshot", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-instance-bulk-read-"));
+    const databasePath = join(directory, "tabhub.sqlite");
+    const app = createApp({ databasePath, logger: false });
+
+    try {
+      const ingested = await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          installationId: "ef95fd3f-78da-4555-898d-e3aa2197461b",
+          tabs: [
+            {
+              tabId: 1,
+              url: "https://snapshot.example/tagged",
+              title: "Tagged bulk instance",
+              windowId: 1,
+              index: 0,
+            },
+          ],
+        },
+      });
+      expect(ingested.statusCode).toBe(200);
+    } finally {
+      await app.close();
+    }
+
+    const reader = openDatabase(databasePath);
+    const writer = openDatabase(databasePath);
+    const canonicalTabId = (
+      writer.connection.prepare("SELECT id FROM tabs").get() as { id: number }
+    ).id;
+    const tagId = Number(
+      writer.connection
+        .prepare("INSERT INTO tags (name, parent_id) VALUES ('Snapshot', NULL)")
+        .run().lastInsertRowid,
+    );
+    writer.connection
+      .prepare(
+        "INSERT INTO tab_tags (tab_id, tag_id, assigned_by) VALUES (?, ?, 'user')",
+      )
+      .run(canonicalTabId, tagId);
+    let assignmentDeletedDuringRead = false;
+    const connection = new Proxy(reader.connection, {
+      get(target, property) {
+        if (property === "prepare") {
+          return (source: string) => {
+            const statement = target.prepare(source);
+            if (!source.includes("SELECT *\n            FROM instances")) {
+              return statement;
+            }
+
+            return new Proxy(statement, {
+              get(statementTarget, statementProperty) {
+                if (statementProperty === "all") {
+                  return (...parameters: unknown[]) => {
+                    const rows = Reflect.apply(
+                      statementTarget.all,
+                      statementTarget,
+                      parameters,
+                    );
+                    writer.connection.prepare("DELETE FROM tab_tags").run();
+                    assignmentDeletedDuringRead = true;
+                    return rows;
+                  };
+                }
+
+                const value = Reflect.get(
+                  statementTarget,
+                  statementProperty,
+                  statementTarget,
+                ) as unknown;
+                return typeof value === "function"
+                  ? value.bind(statementTarget)
+                  : value;
+              },
+            });
+          };
+        }
+
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as typeof reader.connection;
+
+    try {
+      const result = createTabInstanceCatalog(connection).listAllInstances({
+        browser: undefined,
+        duplicatesOnly: false,
+        q: undefined,
+      });
+
+      expect(assignmentDeletedDuringRead).toBe(true);
+      expect(result).toMatchObject({
+        total: 1,
+        items: [{ browserTabId: 1, tagPaths: ["Snapshot"] }],
+      });
+    } finally {
+      writer.close();
+      reader.close();
       await rm(directory, { recursive: true, force: true });
     }
   });

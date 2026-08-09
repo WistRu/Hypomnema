@@ -1,6 +1,8 @@
 import {
   duplicateGroupListQuerySchema,
   duplicateGroupListResponseSchema,
+  tabInstanceBulkQuerySchema,
+  tabInstanceBulkResponseSchema,
   tabInstanceListQuerySchema,
   tabInstanceListResponseSchema,
 } from "@tabhub/shared";
@@ -28,6 +30,24 @@ export function registerTabInstanceRoutes(
         duplicatesOnly: parsed.data.duplicates_only,
         page: parsed.data.page,
         pageSize: parsed.data.pageSize,
+      }),
+    );
+  });
+
+  app.get("/api/tab-instances/bulk", async (request, reply) => {
+    const parsed = tabInstanceBulkQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "VALIDATION_ERROR",
+        issues: parsed.error.issues,
+      });
+    }
+
+    return tabInstanceBulkResponseSchema.parse(
+      catalog.listAllInstances({
+        browser: parsed.data.browser,
+        q: parsed.data.q,
+        duplicatesOnly: parsed.data.duplicates_only,
       }),
     );
   });

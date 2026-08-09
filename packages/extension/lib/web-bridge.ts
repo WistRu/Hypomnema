@@ -3,9 +3,11 @@ import {
   type BridgeRequestType,
   type ExtensionRequest,
   isValidBridgeRequestId,
-  parseScopedDuplicateUrls,
 } from "./messages";
-import { isDuplicatePreviewId } from "./duplicate-preview-registry";
+import {
+  parsePhysicalTabCommand,
+  type PhysicalTabCommand,
+} from "./physical-tab-commands";
 import {
   isBrowserSessionId,
   isInstallationId,
@@ -13,7 +15,7 @@ import {
 } from "./storage";
 
 export const BRIDGE_CHANNEL = "tabhub-extension-bridge" as const;
-export const BRIDGE_VERSION = 3 as const;
+export const BRIDGE_VERSION = 4 as const;
 
 interface BridgeRequestBase {
   channel: typeof BRIDGE_CHANNEL;
@@ -32,11 +34,12 @@ export type BridgeRequest = BridgeRequestBase &
         tabId: number;
         type: "activate-tab";
       }
-    | { type: "preview-obvious-duplicates"; urls?: string[] }
     | {
-        confirmed: true;
-        previewId: string;
-        type: "close-obvious-duplicates";
+        browser: "chrome" | "edge" | "other" | "yandex";
+        browserSessionId: string;
+        command: PhysicalTabCommand;
+        installationId: string;
+        type: "tab-command";
       }
   );
 
@@ -124,26 +127,22 @@ export function parseBridgeRequest(value: unknown): BridgeRequest | undefined {
     };
   }
 
-  if (
-    value.type !== "preview-obvious-duplicates" &&
-    value.type !== "close-obvious-duplicates"
-  ) {
-    return undefined;
-  }
-
-  if (value.type === "preview-obvious-duplicates") {
-    const urls = parseScopedDuplicateUrls(value.urls);
-    if (urls === null) {
-      return undefined;
-    }
-
+  if (value.type === "tab-command") {
+    const command = parsePhysicalTabCommand(value.command);
     if (
+      !isKnownBrowser(value.browser) ||
+      !isBrowserSessionId(value.browserSessionId) ||
+      !isInstallationId(value.installationId) ||
+      command === undefined ||
       !hasOnlyKeys(value, [
+        "browser",
+        "browserSessionId",
         "channel",
+        "command",
+        "installationId",
         "requestId",
         "source",
         "type",
-        "urls",
         "version",
       ])
     ) {
@@ -152,33 +151,15 @@ export function parseBridgeRequest(value: unknown): BridgeRequest | undefined {
 
     return {
       ...base,
-      type: "preview-obvious-duplicates",
-      ...(urls === undefined ? {} : { urls }),
+      browser: value.browser,
+      browserSessionId: value.browserSessionId as string,
+      command,
+      installationId: value.installationId as string,
+      type: "tab-command",
     };
   }
 
-  if (
-    value.confirmed !== true ||
-    !isDuplicatePreviewId(value.previewId) ||
-    !hasOnlyKeys(value, [
-      "channel",
-      "confirmed",
-      "previewId",
-      "requestId",
-      "source",
-      "type",
-      "version",
-    ])
-  ) {
-    return undefined;
-  }
-
-  return {
-    ...base,
-    confirmed: true,
-    previewId: value.previewId,
-    type: "close-obvious-duplicates",
-  };
+  return undefined;
 }
 
 export function toAppExtensionRequest(
@@ -195,16 +176,13 @@ export function toAppExtensionRequest(
         tabId: request.tabId,
         type: "tabhub:app-activate-tab",
       };
-    case "preview-obvious-duplicates":
+    case "tab-command":
       return {
-        type: "tabhub:app-preview-obvious-duplicates",
-        ...(request.urls === undefined ? {} : { urls: request.urls }),
-      };
-    case "close-obvious-duplicates":
-      return {
-        confirmed: true,
-        previewId: request.previewId,
-        type: "tabhub:app-close-obvious-duplicates",
+        browser: request.browser,
+        browserSessionId: request.browserSessionId,
+        command: request.command,
+        installationId: request.installationId,
+        type: "tabhub:app-tab-command",
       };
   }
 }

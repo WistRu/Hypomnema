@@ -1,19 +1,39 @@
 import type { TabInstance } from "@tabhub/shared";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { fetchOpenTabs } from "./api";
-import { DuplicateReview } from "./DuplicateReview";
+import { createWorkspace, fetchAllOpenTabs, fetchOpenTabs } from "./api";
 import {
   createWindowExtensionBridge,
   ExtensionBridgeError,
+  type ClosePreviewResult,
   type ExtensionProbe,
+  type MoveDestination,
+  type PhysicalTabTarget,
+  type TabCommand,
+  type TabCommandResult,
+  type TabMutationResult,
 } from "./extension-bridge";
+import { OpenTabBulkToolbar, OpenTabSelectionMenu } from "./OpenTabBulkToolbar";
 import {
   tabActivationAvailability,
   type TabActivationAvailability,
 } from "./open-tab-activation";
+import {
+  controllableSelection,
+  closePreviewTargetsForSelection,
+  extraExactCopyPlan,
+  reconcileSelectionWithSnapshot,
+  removeSucceededPhysicalTabs,
+  setSelectedTabs,
+  tabsFromHostname,
+  tabsOlderThan,
+  type OpenTabSelection,
+} from "./open-tab-selection";
 import { clampPage, isTrulyEmptyPage } from "./pagination";
+import { serializeTabs, type TabExportFormat } from "./tab-export";
+import { TabOperationDialog } from "./TabOperationDialog";
+import { SavedWorkspacesDrawer } from "./SavedWorkspacesDrawer";
 
 const BROWSER_LABELS: Record<string, string> = {
   chrome: "Chrome",
@@ -50,6 +70,36 @@ function physicalLocation(tab: TabInstance): string {
   return `Window ${tab.windowId} | position ${tab.index + 1} | ${tabId}`;
 }
 
+function SelectionCheckbox({
+  checked,
+  indeterminate = false,
+  label,
+  onChange,
+  onClick,
+}: {
+  checked: boolean;
+  indeterminate?: boolean;
+  label: string;
+  onChange: (checked: boolean) => void;
+  onClick?: (event: MouseEvent<HTMLInputElement>) => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+  return (
+    <input
+      aria-label={label}
+      checked={checked}
+      className="selection-checkbox"
+      ref={ref}
+      type="checkbox"
+      onChange={(event) => onChange(event.target.checked)}
+      onClick={onClick}
+    />
+  );
+}
+
 function unavailableLabel(activation: Exclude<TabActivationAvailability, { kind: "ready" }>): string {
   switch (activation.kind) {
     case "checking":
@@ -74,7 +124,9 @@ export function OpenTabRow({
   isActivating = false,
   tab,
   onActivateTab,
+  onSelectedChange,
   onSelectCanonicalTab,
+  selected = false,
 }: {
   activation: TabActivationAvailability;
   activationError?: string | undefined;
@@ -82,12 +134,23 @@ export function OpenTabRow({
   isActivating?: boolean | undefined;
   tab: TabInstance;
   onActivateTab: (tab: TabInstance) => void;
+  onSelectedChange?: (selected: boolean) => void;
   onSelectCanonicalTab: (id: number) => void;
+  selected?: boolean;
 }) {
   const label = tab.title?.trim() || hostname(tab.url);
 
   return (
-    <tr>
+    <tr aria-selected={selected} className={selected ? "is-selected" : undefined}>
+      {onSelectedChange ? (
+        <td data-column="select">
+          <SelectionCheckbox
+            checked={selected}
+            label={`Select ${label}`}
+            onChange={onSelectedChange}
+          />
+        </td>
+      ) : null}
       <td>
         <div className="physical-tab-title">
           <div className="physical-tab-heading">
@@ -144,7 +207,12 @@ export function OpenTabRow({
         <div className="physical-flags">
           {tab.active ? <span className="physical-flag is-active">Active</span> : null}
           {tab.pinned ? <span className="physical-flag is-protected">Pinned</span> : null}
-          {!tab.active && !tab.pinned ? <span className="physical-flag">Standard</span> : null}
+          {tab.audible ? <span className="physical-flag is-audible">Playing</span> : null}
+          {tab.muted ? <span className="physical-flag is-muted">Muted</span> : null}
+          {tab.discarded ? <span className="physical-flag is-sleeping">Sleeping</span> : null}
+          {!tab.active && !tab.pinned && !tab.audible && !tab.muted && !tab.discarded ? (
+            <span className="physical-flag">Standard</span>
+          ) : null}
         </div>
       </td>
       <td>
@@ -169,6 +237,33 @@ export function OpenTabsView({
   const [duplicatesOnly, setDuplicatesOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [selection, setSelection] = useState<OpenTabSelection>(() => new Map());
+  const [duplicateKeepers, setDuplicateKeepers] = useState<
+    Map<number, PhysicalTabTarget>
+  >(() => new Map());
+  const [selectionBusy, setSelectionBusy] = useState(false);
+  const [selectionHostname, setSelectionHostname] = useState("");
+  const [workspacesOpen, setWorkspacesOpen] = useState(false);
+  const [moveDestination, setMoveDestination] = useState<MoveDestination>({ kind: "app-window" });
+  const [pendingDialog, setPendingDialog] = useState<
+    | { kind: "close"; preview: ClosePreviewResult }
+    | { kind: "reload"; count: number }
+    | null
+  >(null);
+  const [actionResult, setActionResult] = useState<TabCommandResult | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const closeWorkspaces = useCallback(() => setWorkspacesOpen(false), []);
+  useEffect(() => {
+    setDuplicateKeepers((current) => {
+      const next = new Map(
+        [...current].filter(([instanceId]) => selection.has(instanceId)),
+      );
+      return next.size === current.size ? current : next;
+    });
+  }, [selection]);
+  const dismissOperationDialog = useCallback(() => setPendingDialog(null), []);
+  const queryClient = useQueryClient();
   const bridge = useMemo(() => createWindowExtensionBridge(), []);
   const q = useDebouncedValue(search, 300).trim();
   const probeQuery = useQuery({
@@ -198,9 +293,75 @@ export function OpenTabsView({
         available: false,
         browser: null,
         browserSessionId: null,
+        controlWindowId: null,
         installationId: null,
+        pendingUndos: [],
+        windows: [],
       }
     : probeQuery.data;
+  const controlled = useMemo(
+    () => controllableSelection(selection, activationProbe),
+    [activationProbe, selection],
+  );
+  const currentScope =
+    activationProbe?.available === true && activationProbe.browser !== null
+      ? {
+          browser: activationProbe.browser,
+          browserSessionId: activationProbe.browserSessionId,
+          installationId: activationProbe.installationId,
+        }
+      : null;
+  const commandMutation = useMutation({
+    mutationFn: async (command: TabCommand) => {
+      if (currentScope === null) {
+        throw new ExtensionBridgeError("Open TabHub in the browser profile that owns these tabs.");
+      }
+      const response = await bridge.command({ ...currentScope, command });
+      if (
+        response.browser !== currentScope.browser ||
+        response.browserSessionId !== currentScope.browserSessionId ||
+        response.installationId !== currentScope.installationId
+      ) {
+        throw new ExtensionBridgeError("The extension browser session changed during the action.");
+      }
+      return response.result;
+    },
+    onMutate: () => {
+      setActionError(null);
+      setActionFeedback(null);
+    },
+    onSuccess: async (result) => {
+      setActionResult(result);
+      if (result.kind === "close" && currentScope !== null) {
+        setSelection((current) =>
+          removeSucceededPhysicalTabs(
+            current,
+            currentScope,
+            result.succeededTabIds,
+          ),
+        );
+      }
+      if (result.kind !== "close-preview") {
+        await Promise.all([
+          openTabsQuery.refetch(),
+          physicalCountQuery.refetch(),
+          probeQuery.refetch(),
+          fetchAllOpenTabs({
+            browser: "all",
+            duplicatesOnly: false,
+            q: "",
+          })
+            .then((snapshot) =>
+              setSelection((current) =>
+                reconcileSelectionWithSnapshot(current, snapshot),
+              ),
+            )
+            .catch(() => undefined),
+        ]);
+      }
+    },
+    onError: (error) => setActionError(error.message),
+  });
   const activationMutation = useMutation({
     mutationFn: async (tab: TabInstance) => {
       const availability = tabActivationAvailability(tab, activationProbe);
@@ -226,6 +387,157 @@ export function OpenTabsView({
     },
   });
   const tabs = openTabsQuery.data?.items ?? [];
+  const visibleSelectedCount = tabs.filter((tab) => selection.has(tab.instanceId)).length;
+  const allVisibleSelected = tabs.length > 0 && visibleSelectedCount === tabs.length;
+  const someVisibleSelected = visibleSelectedCount > 0 && !allVisibleSelected;
+  const selectedTabs = [...selection.values()];
+  const updateSelection = useCallback(
+    (changedTabs: readonly TabInstance[], selected: boolean) => {
+      setSelection((current) => setSelectedTabs(current, changedTabs, selected));
+      if (!selected) {
+        setDuplicateKeepers((current) => {
+          const next = new Map(current);
+          for (const tab of changedTabs) next.delete(tab.instanceId);
+          return next;
+        });
+      }
+    },
+    [],
+  );
+  const clearSelection = useCallback(() => {
+    setSelection(new Map());
+    setDuplicateKeepers(new Map());
+  }, []);
+  const loadAllFilteredTabs = () =>
+    fetchAllOpenTabs({ browser, duplicatesOnly, q: search.trim() });
+  const selectWithLoader = async (loader: () => Promise<TabInstance[]>) => {
+    setSelectionBusy(true);
+    setActionError(null);
+    try {
+      const selected = await loader();
+      setSelection((current) => setSelectedTabs(current, selected, true));
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSelectionBusy(false);
+    }
+  };
+  const selectExactCopies = async () => {
+    setSelectionBusy(true);
+    setActionError(null);
+    try {
+      const [filtered, universe] = await Promise.all([
+        loadAllFilteredTabs(),
+        fetchAllOpenTabs({ browser, duplicatesOnly: false, q: "" }),
+      ]);
+      const filteredIds = new Set(filtered.map(({ instanceId }) => instanceId));
+      const plan = extraExactCopyPlan(universe).filter(
+        ({ candidate, keeper }) =>
+          filteredIds.has(candidate.instanceId) && keeper.browserTabId !== null,
+      );
+      const keepersToPreserve = new Set(
+        plan.map(({ keeper }) => keeper.instanceId),
+      );
+      setSelection((current) => {
+        const withoutKeepers = new Map(current);
+        for (const instanceId of keepersToPreserve) {
+          withoutKeepers.delete(instanceId);
+        }
+        return setSelectedTabs(
+          withoutKeepers,
+          plan.map(({ candidate }) => candidate),
+          true,
+        );
+      });
+      setDuplicateKeepers((current) => {
+        const next = new Map(current);
+        for (const instanceId of keepersToPreserve) next.delete(instanceId);
+        for (const { candidate, keeper } of plan) {
+          next.set(candidate.instanceId, {
+            expectedUrl: keeper.url,
+            tabId: keeper.browserTabId!,
+          });
+        }
+        return next;
+      });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSelectionBusy(false);
+    }
+  };
+  const commandTargets = controlled.map(({ tab, target }) => ({
+    expectedUrl: tab.url,
+    tabId: target.tabId,
+  }));
+  const closePreviewTargets = closePreviewTargetsForSelection(
+    controlled,
+    duplicateKeepers,
+  );
+  const runCommand = (command: TabCommand) => {
+    void commandMutation.mutateAsync(command).catch(() => undefined);
+  };
+  const previewClose = async () => {
+    try {
+      const result = await commandMutation.mutateAsync({
+        kind: "close-preview",
+        targets: closePreviewTargets,
+      });
+      if (result.kind === "close-preview") {
+        setPendingDialog({ kind: "close", preview: result });
+      }
+    } catch {
+      // Mutation state presents the correlated bridge error.
+    }
+  };
+  const saveSelectionAsWorkspace = async (closeAfter: boolean) => {
+    if (selectedTabs.length > 2_000) {
+      setActionError("A workspace can contain at most 2,000 tabs.");
+      return;
+    }
+    const name = window.prompt("Workspace name")?.trim();
+    if (!name) return;
+    setSelectionBusy(true);
+    setActionError(null);
+    try {
+      const workspace = await createWorkspace({
+        name,
+        selections: selectedTabs.map((tab) => ({
+          browser: tab.browser,
+          browserSessionId: tab.browserSessionId,
+          browserTabId: tab.browserTabId,
+          installationId: tab.installationId,
+          instanceId: tab.instanceId,
+        })),
+      });
+      await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+      setActionFeedback(`Saved “${workspace.name}” with ${workspace.itemCount.toLocaleString()} tabs.`);
+      if (closeAfter) await previewClose();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSelectionBusy(false);
+    }
+  };
+  const copySelection = async (format: TabExportFormat) => {
+    try {
+      await navigator.clipboard.writeText(serializeTabs(selectedTabs, format));
+      setActionFeedback(`Copied ${selectedTabs.length.toLocaleString()} tabs as ${format}.`);
+      setActionError(null);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Clipboard access failed.");
+    }
+  };
+  const mutationReceipt =
+    actionResult && ["close", "discard", "move", "reload", "set-muted", "set-pinned"].includes(actionResult.kind)
+      ? (actionResult as TabMutationResult)
+      : null;
+  const discoverableUndos =
+    activationProbe?.available === true
+      ? activationProbe.pendingUndos.filter(
+          ({ undoId }) => undoId !== mutationReceipt?.undo?.undoId,
+        )
+      : [];
   const totalPages = openTabsQuery.data
     ? Math.max(1, Math.ceil(openTabsQuery.data.total / openTabsQuery.data.pageSize))
     : 1;
@@ -258,6 +570,9 @@ export function OpenTabsView({
           </strong>
           <span>Every open occurrence is listed, including exact copies.</span>
         </div>
+        <button className="secondary-action" type="button" onClick={() => setWorkspacesOpen(true)}>
+          Workspaces
+        </button>
         {(openTabsQuery.isFetching || physicalCountQuery.isFetching) &&
         !physicalCountQuery.isPending ? (
           <span className="refresh-status" role="status">
@@ -266,13 +581,6 @@ export function OpenTabsView({
           </span>
         ) : null}
       </div>
-
-      <DuplicateReview
-        browser={browser}
-        onCollectionChanged={async () => {
-          await Promise.all([openTabsQuery.refetch(), physicalCountQuery.refetch()]);
-        }}
-      />
 
       <div className="table-panel physical-table-panel">
         <div className="open-tab-bridge-status" role="status">
@@ -324,6 +632,26 @@ export function OpenTabsView({
             />
             Exact duplicates only
           </label>
+          <OpenTabSelectionMenu
+            busy={selectionBusy}
+            hostname={selectionHostname}
+            onHostnameChange={setSelectionHostname}
+            onSelectAllResults={() => void selectWithLoader(loadAllFilteredTabs)}
+            onSelectExactCopies={() => void selectExactCopies()}
+            onSelectHostname={() =>
+              void selectWithLoader(async () =>
+                tabsFromHostname(await loadAllFilteredTabs(), selectionHostname),
+              )
+            }
+            onSelectOld={(days) =>
+              void selectWithLoader(async () =>
+                tabsOlderThan(await loadAllFilteredTabs(), days),
+              )
+            }
+            onSelectVisible={() =>
+              updateSelection(tabs, true)
+            }
+          />
           <p className="result-count">
             {openTabsQuery.data
               ? openTabsQuery.data.total === 0
@@ -333,6 +661,85 @@ export function OpenTabsView({
           </p>
         </div>
 
+        {selection.size > 0 ? (
+          <OpenTabBulkToolbar
+            busy={commandMutation.isPending || selectionBusy}
+            controlWindowId={activationProbe?.controlWindowId ?? null}
+            controllableCount={controlled.length}
+            destination={moveDestination}
+            selectedCount={selection.size}
+            windows={activationProbe?.windows ?? []}
+            onClear={clearSelection}
+            onClose={() => void previewClose()}
+            onCopy={(format) => void copySelection(format)}
+            onDestinationChange={setMoveDestination}
+            onDiscard={() => runCommand({ kind: "discard", targets: commandTargets })}
+            onMove={() => runCommand({ destination: moveDestination, kind: "move", targets: commandTargets })}
+            onReload={() => setPendingDialog({ kind: "reload", count: controlled.length })}
+            onSaveWorkspace={() => void saveSelectionAsWorkspace(false)}
+            onSaveWorkspaceAndClose={() => void saveSelectionAsWorkspace(true)}
+            onSetMuted={(value) => runCommand({ kind: "set-muted", targets: commandTargets, value })}
+            onSetPinned={(value) => runCommand({ kind: "set-pinned", targets: commandTargets, value })}
+          />
+        ) : null}
+
+        {mutationReceipt ? (
+          <div className="open-tab-action-receipt" role="status" tabIndex={-1}>
+            <span>
+              {mutationReceipt.kind}: {mutationReceipt.succeededTabIds.length.toLocaleString()} succeeded · {mutationReceipt.skipped.length.toLocaleString()} skipped · {mutationReceipt.failed.length.toLocaleString()} failed
+            </span>
+            {mutationReceipt.undo ? (
+              <button
+                disabled={commandMutation.isPending}
+                type="button"
+                onClick={() => runCommand({ kind: "undo-close", undoId: mutationReceipt.undo!.undoId })}
+              >
+                Reopen closed tabs
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {discoverableUndos.length > 0 ? (
+          <div className="open-tab-action-receipt" role="status">
+            <span>Recent closes available to undo</span>
+            {discoverableUndos.map((undo) => (
+              <button
+                disabled={commandMutation.isPending}
+                key={undo.undoId}
+                type="button"
+                onClick={() =>
+                  runCommand({ kind: "undo-close", undoId: undo.undoId })
+                }
+              >
+                Reopen {undo.count.toLocaleString()} tabs
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {actionResult?.kind === "undo-close" ? (
+          <div className="duplicate-action-result" role="status">
+            <span>
+              Reopened {actionResult.restoredTabIds.length.toLocaleString()}; skipped {actionResult.skipped.length.toLocaleString()}; failed {actionResult.failed.length.toLocaleString()}.
+            </span>
+            {actionResult.retry ? (
+              <button
+                disabled={commandMutation.isPending}
+                type="button"
+                onClick={() => runCommand({ kind: "undo-close", undoId: actionResult.retry!.undoId })}
+              >
+                Retry {actionResult.retry.count.toLocaleString()} failed
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {actionResult?.kind === "open-workspace" ? (
+          <p className="duplicate-action-result" role="status">
+            Opened {actionResult.openedTabIds.length.toLocaleString()} workspace tabs; failed {actionResult.failed.length.toLocaleString()}.
+          </p>
+        ) : null}
+        {actionFeedback ? <p className="duplicate-action-result" role="status">{actionFeedback}</p> : null}
+        {actionError ? <p className="duplicate-action-error" role="alert">{actionError}</p> : null}
+
         <div className="physical-table-scroll">
           <table className="physical-tabs-table">
             <caption className="sr-only">
@@ -340,6 +747,16 @@ export function OpenTabsView({
             </caption>
             <thead>
               <tr>
+                <th data-column="select" scope="col">
+                  <SelectionCheckbox
+                    checked={allVisibleSelected}
+                    indeterminate={someVisibleSelected}
+                    label="Select all open tabs on this page"
+                    onChange={(checked) =>
+                      updateSelection(tabs, checked)
+                    }
+                  />
+                </th>
                 <th scope="col">Open tab</th>
                 <th scope="col">Browser location</th>
                 <th scope="col">Protection</th>
@@ -362,8 +779,12 @@ export function OpenTabsView({
                     activationMutation.variables?.instanceId === tab.instanceId
                   }
                   key={tab.instanceId}
+                  selected={selection.has(tab.instanceId)}
                   tab={tab}
                   onActivateTab={(target) => activationMutation.mutate(target)}
+                  onSelectedChange={(checked) =>
+                    updateSelection([tab], checked)
+                  }
                   onSelectCanonicalTab={onSelectCanonicalTab}
                 />
               ))}
@@ -434,6 +855,44 @@ export function OpenTabsView({
           </nav>
         ) : null}
       </div>
+      {pendingDialog ? (
+        <TabOperationDialog
+          busy={commandMutation.isPending}
+          candidateCount={
+            pendingDialog.kind === "close"
+              ? pendingDialog.preview.candidateTabIds.length
+              : pendingDialog.count
+          }
+          kind={pendingDialog.kind}
+          protectedCount={
+            pendingDialog.kind === "close" ? pendingDialog.preview.skipped.length : 0
+          }
+          onDismiss={dismissOperationDialog}
+          onConfirm={() => {
+            const command: TabCommand =
+              pendingDialog.kind === "close"
+                ? {
+                    confirmed: true,
+                    kind: "close",
+                    previewId: pendingDialog.preview.previewId,
+                  }
+                : { kind: "reload", targets: commandTargets };
+            void commandMutation
+              .mutateAsync(command)
+              .then(() => setPendingDialog(null))
+              .catch(() => undefined);
+          }}
+        />
+      ) : null}
+      {workspacesOpen ? (
+        <SavedWorkspacesDrawer
+          busy={commandMutation.isPending}
+          onClose={closeWorkspaces}
+          onCommand={async (command) => {
+            await commandMutation.mutateAsync(command);
+          }}
+        />
+      ) : null}
     </section>
   );
 }

@@ -24,7 +24,7 @@ describe("isExtensionRequest", () => {
     expect(isExtensionRequest(message)).toBe(false);
   });
 
-  it("accepts probe, activation, scoped preview, and explicitly-confirmed close requests", () => {
+  it("accepts probe, activation, and session-scoped tab commands", () => {
     expect(isExtensionRequest({ type: "tabhub:app-probe" })).toBe(true);
     expect(
       isExtensionRequest({
@@ -37,15 +37,17 @@ describe("isExtensionRequest", () => {
     ).toBe(true);
     expect(
       isExtensionRequest({
-        type: "tabhub:app-preview-obvious-duplicates",
-        urls: [" https://example.com/same "],
-      }),
-    ).toBe(true);
-    expect(
-      isExtensionRequest({
-        confirmed: true,
-        previewId: "123e4567-e89b-42d3-a456-426614174001",
-        type: "tabhub:app-close-obvious-duplicates",
+        browser: "chrome",
+        browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+        command: {
+          kind: "set-muted",
+          targets: [
+            { tabId: 42, expectedUrl: "https://example.com/exact" },
+          ],
+          value: true,
+        },
+        installationId: "123e4567-e89b-42d3-a456-426614174000",
+        type: "tabhub:app-tab-command",
       }),
     ).toBe(true);
   });
@@ -64,6 +66,30 @@ describe("isExtensionRequest", () => {
       installationId: "not-an-installation-id",
       tabId: 42,
       type: "tabhub:app-activate-tab",
+    },
+    {
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      command: {
+        kind: "discard",
+        targets: [
+          { tabId: 42, expectedUrl: "https://example.com" },
+          { tabId: 42, expectedUrl: "https://example.com/duplicate-id" },
+        ],
+      },
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      type: "tabhub:app-tab-command",
+    },
+    {
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      command: {
+        kind: "close",
+        confirmed: false,
+        previewId: "323e4567-e89b-42d3-a456-426614174000",
+      },
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      type: "tabhub:app-tab-command",
     },
     {
       browser: "chrome",
@@ -94,6 +120,15 @@ describe("isExtensionRequest", () => {
       type: "tabhub:app-activate-tab",
     },
     { type: "tabhub:app-close-obvious-duplicates" },
+    {
+      confirmed: true,
+      previewId: "123e4567-e89b-42d3-a456-426614174001",
+      type: "tabhub:app-close-obvious-duplicates",
+    },
+    {
+      type: "tabhub:app-preview-obvious-duplicates",
+      urls: ["https://example.com/same"],
+    },
     { confirmed: false, type: "tabhub:app-close-obvious-duplicates" },
     {
       confirmed: true,

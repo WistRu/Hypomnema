@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchDuplicateGroups, fetchOpenTabs } from "../src/api";
+import {
+  fetchAllOpenTabs,
+  fetchDuplicateGroups,
+  fetchOpenTabs,
+} from "../src/api";
 
 function instance(instanceId: number, active = false) {
   return {
@@ -16,6 +20,9 @@ function instance(instanceId: number, active = false) {
     index: instanceId - 101,
     faviconUrl: null,
     active,
+    audible: false,
+    discarded: false,
+    muted: false,
     pinned: false,
     lastAccessed: 1_754_700_000_000 + instanceId,
     firstSeenAt: "2026-08-09T00:00:00.000Z",
@@ -33,6 +40,42 @@ afterEach(() => {
 });
 
 describe("open-tab API", () => {
+  it("loads more than 200 filtered physical occurrences with one bulk request", async () => {
+    const items = Array.from({ length: 251 }, (_, index) =>
+      instance(index + 101),
+    );
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        items,
+        total: items.length,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchAllOpenTabs({
+        browser: "chrome",
+        duplicatesOnly: true,
+        q: "exact copy",
+      }),
+    ).resolves.toHaveLength(251);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/tab-instances/bulk?browser=chrome&duplicates_only=true&q=exact+copy",
+    );
+  });
+
+  it("rejects a bulk payload that violates the shared response contract", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ items: [], total: "all" })),
+    );
+
+    await expect(
+      fetchAllOpenTabs({ browser: "all", duplicatesOnly: false, q: "" }),
+    ).rejects.toThrow("unexpected bulk open-tab list");
+  });
+
   it("requests physical occurrences with duplicate and browser filters", async () => {
     const fetchMock = vi.fn(async () =>
       Response.json({
@@ -50,6 +93,9 @@ describe("open-tab API", () => {
             index: 5,
             faviconUrl: null,
             active: false,
+            audible: false,
+            discarded: false,
+            muted: false,
             pinned: false,
             lastAccessed: 1_754_700_000_000,
             firstSeenAt: "2026-08-09T00:00:00.000Z",

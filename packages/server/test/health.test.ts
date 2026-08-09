@@ -5,11 +5,106 @@ import { join } from "node:path";
 
 import { healthResponseSchema } from "@tabhub/shared";
 import Database from "better-sqlite3";
+import * as sqliteVec from "sqlite-vec";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "../src/app.js";
 
 describe("GET /api/health", () => {
+  it("upgrades a version 7 database with runtime defaults and workspace storage", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-v7-upgrade-"));
+    const databasePath = join(directory, "tabhub.sqlite");
+    const legacyDatabase = new Database(databasePath);
+
+    try {
+      sqliteVec.load(legacyDatabase);
+      legacyDatabase.pragma("foreign_keys = ON");
+      const migrationNames = [
+        "001_initial.sql",
+        "002_full_text_search.sql",
+        "003_tag_indexes.sql",
+        "004_summary_jobs.sql",
+        "005_embeddings.sql",
+        "006_tab_instances.sql",
+        "007_browser_session_identity.sql",
+      ];
+      for (const fileName of migrationNames) {
+        legacyDatabase.exec(
+          await readFile(
+            new URL(`../migrations/${fileName}`, import.meta.url),
+            "utf8",
+          ),
+        );
+      }
+      legacyDatabase.pragma("user_version = 7");
+      legacyDatabase
+        .prepare(`
+          INSERT INTO tabs (
+            id, url, url_normalized, title, browser, first_seen_at, last_seen_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run(
+          1,
+          "https://example.com/version-seven",
+          "https://example.com/version-seven",
+          "Version seven",
+          "chrome",
+          "2026-08-09T11:00:00.000Z",
+          "2026-08-09T11:00:00.000Z",
+        );
+      legacyDatabase
+        .prepare(`
+          INSERT INTO tab_instances (
+            tab_id, installation_id, instance_key, browser_session_id,
+            browser_tab_id, url, title, window_id, tab_index, active, pinned,
+            first_seen_at, last_seen_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run(
+          1,
+          "0b69c1df-716e-44f1-8211-4dc130177e76",
+          "tab:77",
+          "333c8de5-e02a-4336-8c50-cf88b7d6e7b6",
+          77,
+          "https://example.com/version-seven",
+          "Version seven",
+          1,
+          0,
+          0,
+          0,
+          "2026-08-09T11:00:00.000Z",
+          "2026-08-09T11:00:00.000Z",
+        );
+    } finally {
+      legacyDatabase.close();
+    }
+
+    const app = createApp({ databasePath, logger: false });
+    try {
+      const health = await app.inject({ method: "GET", url: "/api/health" });
+      expect(health.json().schemaVersion).toBe(8);
+
+      const physical = await app.inject({
+        method: "GET",
+        url: "/api/tab-instances",
+      });
+      expect(physical.json()).toMatchObject({
+        total: 1,
+        items: [{ audible: false, muted: false, discarded: false }],
+      });
+
+      const workspaces = await app.inject({
+        method: "GET",
+        url: "/api/workspaces",
+      });
+      expect(workspaces.statusCode).toBe(200);
+      expect(workspaces.json()).toEqual({ items: [] });
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("reports a migrated, ready local database", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-health-"));
     const app = createApp({
@@ -27,7 +122,7 @@ describe("GET /api/health", () => {
       expect(healthResponseSchema.parse(response.json())).toEqual({
         status: "ok",
         database: "ok",
-        schemaVersion: 7,
+        schemaVersion: 8,
       });
     } finally {
       await app.close();
@@ -54,7 +149,7 @@ describe("GET /api/health", () => {
 
         expect(response.statusCode).toBe(200);
         expect(healthResponseSchema.parse(response.json()).schemaVersion).toBe(
-          7,
+          8,
         );
       } finally {
         await reopenedApp.close();
@@ -109,7 +204,7 @@ describe("GET /api/health", () => {
         method: "GET",
         url: "/api/health",
       });
-      expect(healthResponse.json().schemaVersion).toBe(7);
+      expect(healthResponse.json().schemaVersion).toBe(8);
 
       const physicalResponse = await app.inject({
         method: "GET",
@@ -206,7 +301,7 @@ describe("GET /api/health", () => {
     try {
       const response = await app.inject({ method: "GET", url: "/api/health" });
       expect(response.statusCode).toBe(200);
-      expect(response.json().schemaVersion).toBe(7);
+      expect(response.json().schemaVersion).toBe(8);
 
       const tags = await app.inject({ method: "GET", url: "/api/tags" });
       const paths = tags

@@ -5,15 +5,19 @@ import type {
   DuplicateGroupListResponse,
   IngestSnapshot,
   TabInstance,
+  TabInstanceBulkResponse,
   TabInstanceListResponse,
 } from "@tabhub/shared";
 
 import { normalizeUrl } from "./normalize-url.js";
 
-export interface ListTabInstancesInput {
+export interface FilterTabInstancesInput {
   browser: string | undefined;
   q: string | undefined;
   duplicatesOnly: boolean;
+}
+
+export interface ListTabInstancesInput extends FilterTabInstancesInput {
   page: number;
   pageSize: number;
 }
@@ -21,6 +25,7 @@ export interface ListTabInstancesInput {
 export interface TabInstanceCatalog {
   syncSnapshot(snapshot: IngestSnapshot, now: string): { closed: number };
   listInstances(input: ListTabInstancesInput): TabInstanceListResponse;
+  listAllInstances(input: FilterTabInstancesInput): TabInstanceBulkResponse;
   listDuplicateGroups(input: {
     browser: string | undefined;
     page: number;
@@ -61,6 +66,9 @@ interface TabInstanceRow {
   tab_index: number;
   favicon_url: string | null;
   active: 0 | 1;
+  audible: 0 | 1;
+  muted: 0 | 1;
+  discarded: 0 | 1;
   pinned: 0 | 1;
   last_accessed: number | null;
   first_seen_at: string;
@@ -92,6 +100,74 @@ interface DuplicateTotalsRow {
   total_protected: number;
 }
 
+interface TabInstanceQuery {
+  baseQuery: string;
+  parameters: Array<string | number>;
+  whereClause: string;
+}
+
+function tabInstanceQuery(input: FilterTabInstancesInput): TabInstanceQuery {
+  const predicates: string[] = [];
+  const parameters: Array<string | number> = [];
+  if (input.browser !== undefined) {
+    predicates.push("browser = ?");
+    parameters.push(input.browser);
+  }
+  if (input.q !== undefined) {
+    predicates.push("(url LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\')");
+    const escaped = input.q
+      .replaceAll("\\", "\\\\")
+      .replaceAll("%", "\\%")
+      .replaceAll("_", "\\_");
+    parameters.push(`%${escaped}%`, `%${escaped}%`);
+  }
+  if (input.duplicatesOnly) {
+    predicates.push("duplicate_group_size > 1");
+  }
+
+  return {
+    parameters,
+    whereClause:
+      predicates.length === 0 ? "" : `WHERE ${predicates.join(" AND ")}`,
+    baseQuery: `
+      WITH instances AS (
+        SELECT
+          tab_instances.id AS instance_id,
+          tabs.id AS canonical_tab_id,
+          tab_instances.installation_id,
+          tab_instances.browser_session_id,
+          tab_instances.browser_tab_id,
+          tab_instances.url,
+          tabs.url_normalized,
+          tab_instances.title,
+          tabs.browser,
+          tab_instances.window_id,
+          tab_instances.tab_index,
+          tab_instances.favicon_url,
+          tab_instances.active,
+          tab_instances.audible,
+          tab_instances.muted,
+          tab_instances.discarded,
+          tab_instances.pinned,
+          tab_instances.last_accessed,
+          tab_instances.first_seen_at,
+          tab_instances.last_seen_at,
+          tabs.status,
+          tabs.importance,
+          contents.summary,
+          COUNT(*) OVER (
+            PARTITION BY
+              tab_instances.installation_id,
+              tabs.browser,
+              tab_instances.url
+          ) AS duplicate_group_size
+        FROM tab_instances
+        JOIN tabs ON tabs.id = tab_instances.tab_id
+        LEFT JOIN contents ON contents.tab_id = tabs.id
+      )`,
+  };
+}
+
 function installationIdFor(snapshot: IngestSnapshot): string {
   return snapshot.installationId ?? `legacy:${snapshot.browser}`;
 }
@@ -117,6 +193,9 @@ function mapInstanceRow(row: TabInstanceRow, tagPaths: string[]): TabInstance {
     index: row.tab_index,
     faviconUrl: row.favicon_url,
     active: row.active === 1,
+    audible: row.audible === 1,
+    muted: row.muted === 1,
+    discarded: row.discarded === 1,
     pinned: row.pinned === 1,
     lastAccessed: row.last_accessed,
     firstSeenAt: row.first_seen_at,
@@ -182,6 +261,9 @@ export function createTabInstanceCatalog(
       tab_index,
       favicon_url,
       active,
+      audible,
+      muted,
+      discarded,
       pinned,
       last_accessed,
       first_seen_at,
@@ -198,6 +280,9 @@ export function createTabInstanceCatalog(
       @tabIndex,
       @faviconUrl,
       @active,
+      @audible,
+      @muted,
+      @discarded,
       @pinned,
       @lastAccessed,
       @now,
@@ -213,6 +298,9 @@ export function createTabInstanceCatalog(
       tab_index = excluded.tab_index,
       favicon_url = excluded.favicon_url,
       active = excluded.active,
+      audible = excluded.audible,
+      muted = excluded.muted,
+      discarded = excluded.discarded,
       pinned = excluded.pinned,
       last_accessed = excluded.last_accessed,
       last_seen_at = excluded.last_seen_at
@@ -254,6 +342,9 @@ export function createTabInstanceCatalog(
       tab_instances.tab_index,
       tab_instances.favicon_url,
       tab_instances.active,
+      tab_instances.audible,
+      tab_instances.muted,
+      tab_instances.discarded,
       tab_instances.pinned,
       tab_instances.last_accessed,
       tab_instances.first_seen_at,
@@ -383,6 +474,9 @@ export function createTabInstanceCatalog(
           tabIndex: tab.index,
           faviconUrl: tab.faviconUrl ?? null,
           active: tab.active === true ? 1 : 0,
+          audible: tab.audible === true ? 1 : 0,
+          muted: tab.muted === true ? 1 : 0,
+          discarded: tab.discarded === true ? 1 : 0,
           pinned: tab.pinned === true ? 1 : 0,
           lastAccessed: tab.lastAccessed ?? null,
           now,
@@ -398,58 +492,7 @@ export function createTabInstanceCatalog(
     },
 
     listInstances(input) {
-      const predicates: string[] = [];
-      const parameters: Array<string | number> = [];
-      if (input.browser !== undefined) {
-        predicates.push("browser = ?");
-        parameters.push(input.browser);
-      }
-      if (input.q !== undefined) {
-        predicates.push("(url LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\')");
-        const escaped = input.q
-          .replaceAll("\\", "\\\\")
-          .replaceAll("%", "\\%")
-          .replaceAll("_", "\\_");
-        parameters.push(`%${escaped}%`, `%${escaped}%`);
-      }
-      if (input.duplicatesOnly) {
-        predicates.push("duplicate_group_size > 1");
-      }
-      const whereClause =
-        predicates.length === 0 ? "" : `WHERE ${predicates.join(" AND ")}`;
-      const baseQuery = `
-        WITH instances AS (
-          SELECT
-            tab_instances.id AS instance_id,
-            tabs.id AS canonical_tab_id,
-            tab_instances.installation_id,
-            tab_instances.browser_session_id,
-            tab_instances.browser_tab_id,
-            tab_instances.url,
-            tabs.url_normalized,
-            tab_instances.title,
-            tabs.browser,
-            tab_instances.window_id,
-            tab_instances.tab_index,
-            tab_instances.favicon_url,
-            tab_instances.active,
-            tab_instances.pinned,
-            tab_instances.last_accessed,
-            tab_instances.first_seen_at,
-            tab_instances.last_seen_at,
-            tabs.status,
-            tabs.importance,
-            contents.summary,
-            COUNT(*) OVER (
-              PARTITION BY
-                tab_instances.installation_id,
-                tabs.browser,
-                tab_instances.url
-            ) AS duplicate_group_size
-          FROM tab_instances
-          JOIN tabs ON tabs.id = tab_instances.tab_id
-          LEFT JOIN contents ON contents.tab_id = tabs.id
-        )`;
+      const { baseQuery, parameters, whereClause } = tabInstanceQuery(input);
       const total = connection
         .prepare(
           `${baseQuery} SELECT COUNT(*) AS total FROM instances ${whereClause}`,
@@ -476,6 +519,31 @@ export function createTabInstanceCatalog(
         page: input.page,
         pageSize: input.pageSize,
       };
+    },
+
+    listAllInstances(input) {
+      const readSnapshot = connection.transaction(() => {
+        const { baseQuery, parameters, whereClause } = tabInstanceQuery(input);
+        const rows = connection
+          .prepare(`
+            ${baseQuery}
+            SELECT *
+            FROM instances
+            ${whereClause}
+            ORDER BY last_seen_at DESC, instance_id DESC
+          `)
+          .all(...parameters) as TabInstanceRow[];
+        const tagPathsByTab = loadTagPaths(rows);
+
+        return {
+          items: rows.map((row) =>
+            mapInstanceRow(row, tagPathsByTab.get(row.canonical_tab_id) ?? []),
+          ),
+          total: rows.length,
+        };
+      });
+
+      return readSnapshot();
     },
 
     listDuplicateGroups(input) {

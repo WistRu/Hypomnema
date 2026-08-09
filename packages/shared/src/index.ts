@@ -49,6 +49,9 @@ export const snapshotTabSchema = z.object({
   index: z.number().int().nonnegative(),
   faviconUrl: z.string().max(snapshotTabFaviconUrlMaxLength).optional(),
   active: z.boolean().optional(),
+  audible: z.boolean().optional(),
+  muted: z.boolean().optional(),
+  discarded: z.boolean().optional(),
   pinned: z.boolean().optional(),
   lastAccessed: z.number().finite().nonnegative().optional(),
 });
@@ -396,6 +399,9 @@ export const tabInstanceSchema = z.object({
   index: z.number().int().nonnegative(),
   faviconUrl: z.string().nullable(),
   active: z.boolean(),
+  audible: z.boolean(),
+  muted: z.boolean(),
+  discarded: z.boolean(),
   pinned: z.boolean(),
   lastAccessed: z.number().finite().nonnegative().nullable(),
   firstSeenAt: z.string().datetime(),
@@ -408,6 +414,96 @@ export const tabInstanceSchema = z.object({
 });
 
 export type TabInstance = z.infer<typeof tabInstanceSchema>;
+
+export const workspaceSelectionSchema = z.strictObject({
+  instanceId: z.number().int().positive(),
+  browser: browserIdentifierSchema,
+  installationId: z.string().trim().min(1).max(256),
+  browserSessionId: browserSessionIdSchema.nullable(),
+  browserTabId: z.number().int().nonnegative().nullable(),
+});
+
+export type WorkspaceSelection = z.infer<typeof workspaceSelectionSchema>;
+
+const workspaceNameSchema = z.string().trim().min(1).max(200);
+
+export const createWorkspaceSchema = z.object({
+  name: workspaceNameSchema,
+  selections: z
+    .array(workspaceSelectionSchema)
+    .min(1)
+    .max(2_000)
+    .refine(
+      (selections) =>
+        new Set(selections.map(({ instanceId }) => instanceId)).size ===
+        selections.length,
+      "Workspace selections must use unique instance IDs",
+    ),
+});
+
+export type CreateWorkspace = z.infer<typeof createWorkspaceSchema>;
+
+export const patchWorkspaceSchema = z.object({
+  name: workspaceNameSchema,
+});
+
+export type PatchWorkspace = z.infer<typeof patchWorkspaceSchema>;
+
+export const workspaceIdSchema = z.number().int().positive();
+
+export const workspaceIdParamSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export type WorkspaceIdParam = z.infer<typeof workspaceIdParamSchema>;
+
+export const workspaceItemSchema = z.object({
+  id: z.number().int().positive(),
+  ordinal: z.number().int().nonnegative(),
+  sourceInstanceId: z.number().int().positive(),
+  canonicalTabId: tabIdSchema.nullable(),
+  browser: browserIdentifierSchema,
+  installationId: z.string().trim().min(1),
+  browserSessionId: browserSessionIdSchema.nullable(),
+  browserTabId: z.number().int().nonnegative().nullable(),
+  url: tabUrlSchema,
+  title: z.string().nullable(),
+  windowId: z.number().int(),
+  index: z.number().int().nonnegative(),
+  faviconUrl: z.string().nullable(),
+  active: z.boolean(),
+  pinned: z.boolean(),
+  audible: z.boolean(),
+  muted: z.boolean(),
+  discarded: z.boolean(),
+  lastAccessed: z.number().finite().nonnegative().nullable(),
+});
+
+export type WorkspaceItem = z.infer<typeof workspaceItemSchema>;
+
+export const workspaceSummarySchema = z.object({
+  id: workspaceIdSchema,
+  name: z.string(),
+  itemCount: z.number().int().nonnegative(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type WorkspaceSummary = z.infer<typeof workspaceSummarySchema>;
+
+export const workspaceDetailSchema = workspaceSummarySchema.extend({
+  items: z.array(workspaceItemSchema),
+});
+
+export type WorkspaceDetail = z.infer<typeof workspaceDetailSchema>;
+
+export const workspaceListResponseSchema = z.object({
+  items: z.array(workspaceSummarySchema),
+});
+
+export type WorkspaceListResponse = z.infer<
+  typeof workspaceListResponseSchema
+>;
 
 const persistedTagNameSchema = z.string();
 const persistedTagPathSchema = z.string();
@@ -795,6 +891,25 @@ export const tabInstanceListResponseSchema = z.object({
 
 export type TabInstanceListResponse = z.infer<
   typeof tabInstanceListResponseSchema
+>;
+
+export const tabInstanceBulkQuerySchema = tabInstanceListQuerySchema.pick({
+  browser: true,
+  q: true,
+  duplicates_only: true,
+});
+
+export type TabInstanceBulkQuery = z.infer<
+  typeof tabInstanceBulkQuerySchema
+>;
+
+export const tabInstanceBulkResponseSchema = z.object({
+  items: z.array(tabInstanceSchema),
+  total: z.number().int().nonnegative(),
+});
+
+export type TabInstanceBulkResponse = z.infer<
+  typeof tabInstanceBulkResponseSchema
 >;
 
 export const duplicateGroupListQuerySchema = z.object({

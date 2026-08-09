@@ -11,7 +11,7 @@ function baseRequest() {
     channel: "tabhub-extension-bridge",
     requestId: "request-1",
     source: "tabhub-web",
-    version: 3,
+    version: 4,
   };
 }
 
@@ -43,24 +43,41 @@ describe("parseBridgeRequest", () => {
     });
   });
 
-  it("parses a strict confirmed close envelope and trims its unique URLs", () => {
+  it("parses one strict scoped physical-tab command", () => {
     const parsed = parseBridgeRequest({
       ...baseRequest(),
-      confirmed: true,
-      previewId: "123e4567-e89b-42d3-a456-426614174001",
-      type: "close-obvious-duplicates",
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      command: {
+        destination: { kind: "new-window" },
+        kind: "move",
+        targets: [
+          { tabId: 42, expectedUrl: "https://example.com/exact" },
+        ],
+      },
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      type: "tab-command",
     });
 
-    expect(parsed).toEqual({
-      ...baseRequest(),
-      confirmed: true,
-      previewId: "123e4567-e89b-42d3-a456-426614174001",
-      type: "close-obvious-duplicates",
+    expect(parsed).toMatchObject({
+      command: {
+        destination: { kind: "new-window" },
+        kind: "move",
+      },
+      type: "tab-command",
     });
     expect(parsed && toAppExtensionRequest(parsed)).toEqual({
-      confirmed: true,
-      previewId: "123e4567-e89b-42d3-a456-426614174001",
-      type: "tabhub:app-close-obvious-duplicates",
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      command: {
+        destination: { kind: "new-window" },
+        kind: "move",
+        targets: [
+          { tabId: 42, expectedUrl: "https://example.com/exact" },
+        ],
+      },
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      type: "tabhub:app-tab-command",
     });
   });
 
@@ -74,6 +91,12 @@ describe("parseBridgeRequest", () => {
       type: "activate-tab",
     },
     { ...baseRequest(), type: "close-obvious-duplicates" },
+    {
+      ...baseRequest(),
+      confirmed: true,
+      previewId: "123e4567-e89b-42d3-a456-426614174001",
+      type: "close-obvious-duplicates",
+    },
     {
       ...baseRequest(),
       confirmed: false,
@@ -93,7 +116,7 @@ describe("parseBridgeRequest", () => {
     {
       ...baseRequest(),
       type: "preview-obvious-duplicates",
-      urls: ["not a URL"],
+      urls: ["https://example.com/same"],
     },
   ])("rejects a malformed or over-permissive page envelope: %#", (value) => {
     expect(parseBridgeRequest(value)).toBeUndefined();
@@ -111,7 +134,16 @@ describe("createBridgeResponse", () => {
           available: true,
           browser: "chrome",
           browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+          controlWindowId: 90,
           installationId: "123e4567-e89b-42d3-a456-426614174000",
+          pendingUndos: [
+            {
+              count: 2,
+              expiresAt: 100_000,
+              undoId: "423e4567-e89b-42d3-a456-426614174000",
+            },
+          ],
+          windows: [{ focused: true, tabCount: 2, windowId: 90 }],
         },
         ok: true,
         type: "probe",
@@ -125,7 +157,16 @@ describe("createBridgeResponse", () => {
         available: true,
         browser: "chrome",
         browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+        controlWindowId: 90,
         installationId: "123e4567-e89b-42d3-a456-426614174000",
+        pendingUndos: [
+          {
+            count: 2,
+            expiresAt: 100_000,
+            undoId: "423e4567-e89b-42d3-a456-426614174000",
+          },
+        ],
+        windows: [{ focused: true, tabCount: 2, windowId: 90 }],
       },
     });
   });

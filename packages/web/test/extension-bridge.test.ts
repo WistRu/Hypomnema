@@ -59,7 +59,7 @@ describe("local extension bridge", () => {
         message: {
           source: "tabhub-web",
           channel: "tabhub-extension-bridge",
-          version: 3,
+          version: 4,
           requestId: "probe-1",
           type: "probe",
         },
@@ -69,7 +69,7 @@ describe("local extension bridge", () => {
     target.respond({
       source: "tabhub-extension",
       channel: "tabhub-extension-bridge",
-      version: 3,
+      version: 4,
       requestId: "another-request",
       type: "probe",
       ok: true,
@@ -79,23 +79,41 @@ describe("local extension bridge", () => {
     target.respond({
       source: "tabhub-extension",
       channel: "tabhub-extension-bridge",
-      version: 3,
+      version: 4,
       requestId: "probe-1",
       type: "probe",
       ok: true,
       data: {
         available: true,
         browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+        controlWindowId: 7,
         installationId: "123e4567-e89b-42d3-a456-426614174000",
         browser: "chrome",
+        pendingUndos: [
+          {
+            count: 2,
+            expiresAt: 1_800_000_000_000,
+            undoId: "323e4567-e89b-42d3-a456-426614174000",
+          },
+        ],
+        windows: [{ focused: true, tabCount: 3, windowId: 7 }],
       },
     });
 
     await expect(pending).resolves.toEqual({
       available: true,
       browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      controlWindowId: 7,
       installationId: "123e4567-e89b-42d3-a456-426614174000",
       browser: "chrome",
+      pendingUndos: [
+        {
+          count: 2,
+          expiresAt: 1_800_000_000_000,
+          undoId: "323e4567-e89b-42d3-a456-426614174000",
+        },
+      ],
+      windows: [{ focused: true, tabCount: 3, windowId: 7 }],
     });
     expect(target.listeners.size).toBe(0);
   });
@@ -116,8 +134,11 @@ describe("local extension bridge", () => {
     await expect(pending).resolves.toEqual({
       available: false,
       browserSessionId: null,
+      controlWindowId: null,
       installationId: null,
       browser: null,
+      pendingUndos: [],
+      windows: [],
     });
     expect(target.listeners.size).toBe(0);
   });
@@ -135,15 +156,18 @@ describe("local extension bridge", () => {
     target.respond({
       source: "tabhub-extension",
       channel: "tabhub-extension-bridge",
-      version: 3,
+      version: 4,
       requestId: "probe-refresh-1",
       type: "probe",
       ok: true,
       data: {
         available: true,
         browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+        controlWindowId: 7,
         installationId: "123e4567-e89b-42d3-a456-426614174000",
         browser: null,
+        pendingUndos: [],
+        windows: [{ focused: true, tabCount: 3, windowId: 7 }],
       },
     });
     await expect(first).resolves.toMatchObject({ browser: null });
@@ -152,15 +176,18 @@ describe("local extension bridge", () => {
     target.respond({
       source: "tabhub-extension",
       channel: "tabhub-extension-bridge",
-      version: 3,
+      version: 4,
       requestId: "probe-refresh-2",
       type: "probe",
       ok: true,
       data: {
         available: true,
         browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+        controlWindowId: 7,
         installationId: "123e4567-e89b-42d3-a456-426614174000",
         browser: "chrome",
+        pendingUndos: [],
+        windows: [{ focused: true, tabCount: 3, windowId: 7 }],
       },
     });
 
@@ -194,7 +221,7 @@ describe("local extension bridge", () => {
           source: "tabhub-web",
           tabId: 42,
           type: "activate-tab",
-          version: 3,
+          version: 4,
         },
         targetOrigin: "http://127.0.0.1:7717",
       },
@@ -202,7 +229,7 @@ describe("local extension bridge", () => {
     target.respond({
       source: "tabhub-extension",
       channel: "tabhub-extension-bridge",
-      version: 3,
+      version: 4,
       requestId: "activate-1",
       type: "activate-tab",
       ok: true,
@@ -267,94 +294,266 @@ describe("local extension bridge", () => {
     expect(target.listeners.size).toBe(0);
   });
 
-  it("previews and closes only the requested exact URLs with explicit confirmation", async () => {
+  it("sends a scoped v4 close preview and parses its protected candidates", async () => {
     const target = new FakeBridgeWindow();
-    let nextId = 0;
     const bridge = createExtensionBridge({
       target,
       origin: "http://127.0.0.1:7717",
-      requestId: () => `request-${++nextId}`,
+      requestId: () => "tab-command-1",
     });
-
-    const preview = bridge.preview([
-      " https://example.com/exact ",
-      "https://example.com/exact",
-    ]);
-    expect(target.posted.at(-1)?.message).toMatchObject({
-      requestId: "request-1",
-      type: "preview-obvious-duplicates",
-      urls: ["https://example.com/exact"],
-    });
-    target.respond({
-      source: "tabhub-extension",
-      channel: "tabhub-extension-bridge",
-      version: 3,
-      requestId: "request-1",
-      type: "preview-obvious-duplicates",
-      ok: true,
-      data: {
-        browser: "chrome",
-        installationId: "123e4567-e89b-42d3-a456-426614174000",
-        previewId: "223e4567-e89b-42d3-a456-426614174000",
-        totalGroups: 1,
-        totalCloseCandidates: 2,
-        totalProtected: 1,
-      },
-    });
-    const previewResult = await preview;
-    expect(previewResult).toMatchObject({ totalCloseCandidates: 2 });
-
-    const close = bridge.close(previewResult.previewId);
-    expect(target.posted.at(-1)?.message).toMatchObject({
-      requestId: "request-2",
-      type: "close-obvious-duplicates",
-      confirmed: true,
-      previewId: previewResult.previewId,
-    });
-    target.respond({
-      source: "tabhub-extension",
-      channel: "tabhub-extension-bridge",
-      version: 3,
-      requestId: "request-2",
-      type: "close-obvious-duplicates",
-      ok: true,
-      data: {
-        browser: "chrome",
-        installationId: "123e4567-e89b-42d3-a456-426614174000",
-        closed: 2,
-        skipped: 1,
-        failed: 0,
-      },
-    });
-    await expect(close).resolves.toEqual({
+    const scope = {
       browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
       installationId: "123e4567-e89b-42d3-a456-426614174000",
-      closed: 2,
-      skipped: 1,
-      failed: 0,
+    };
+    const pending = bridge.command({
+      ...scope,
+      command: {
+        kind: "close-preview",
+        targets: [
+          {
+            tabId: 42,
+            expectedUrl: "https://example.com/exact",
+            keeper: {
+              tabId: 43,
+              expectedUrl: "https://example.com/exact",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(target.posted.at(-1)?.message).toMatchObject({
+      ...scope,
+      command: {
+        kind: "close-preview",
+        targets: [
+          {
+            expectedUrl: "https://example.com/exact",
+            keeper: {
+              expectedUrl: "https://example.com/exact",
+              tabId: 43,
+            },
+            tabId: 42,
+          },
+        ],
+      },
+      type: "tab-command",
+      version: 4,
+    });
+    target.respond({
+      source: "tabhub-extension",
+      channel: "tabhub-extension-bridge",
+      version: 4,
+      requestId: "tab-command-1",
+      type: "tab-command",
+      ok: true,
+      data: {
+        ...scope,
+        result: {
+          candidateTabIds: [42],
+          expiresAt: 1_800_000_000_000,
+          kind: "close-preview",
+          previewId: "323e4567-e89b-42d3-a456-426614174000",
+          requested: 1,
+          skipped: [],
+        },
+      },
+    });
+
+    await expect(pending).resolves.toMatchObject({
+      result: { candidateTabIds: [42], kind: "close-preview" },
     });
   });
 
-  it("surfaces a correlated extension rejection", async () => {
+  it("keeps a workspace restore pending beyond the ordinary command timeout", async () => {
+    vi.useFakeTimers();
     const target = new FakeBridgeWindow();
     const bridge = createExtensionBridge({
       target,
       origin: "http://127.0.0.1:7717",
-      requestId: () => "close-1",
+      requestId: () => "workspace-timeout",
+      timeouts: { command: 25, workspace: 50 },
+    });
+    const pending = bridge.command({
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      command: {
+        destination: { kind: "app-window" },
+        kind: "open-workspace",
+        tabs: [
+          { muted: false, pinned: false, url: "https://example.com/saved" },
+        ],
+      },
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+    });
+    const rejection = expect(pending).rejects.toThrow(/outcome is unknown/i);
+
+    await vi.advanceTimersByTimeAsync(25);
+    expect(target.listeners.size).toBe(1);
+    await vi.advanceTimersByTimeAsync(25);
+    await rejection;
+    expect(target.listeners.size).toBe(0);
+  });
+
+  it("rejects a close preview whose keeper is the target or a different URL", async () => {
+    const target = new FakeBridgeWindow();
+    const bridge = createExtensionBridge({
+      target,
+      origin: "http://127.0.0.1:7717",
+      requestId: () => "invalid-keeper",
+    });
+    const scope = {
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+    };
+
+    expect(() =>
+      bridge.command({
+        ...scope,
+        command: {
+          kind: "close-preview",
+          targets: [
+            {
+              expectedUrl: "https://example.com/exact",
+              keeper: {
+                expectedUrl: "https://example.com/exact",
+                tabId: 42,
+              },
+              tabId: 42,
+            },
+          ],
+        },
+      }),
+    ).toThrow(/keeper/i);
+
+    expect(() =>
+      bridge.command({
+        ...scope,
+        command: {
+          kind: "close-preview",
+          targets: [
+            {
+              expectedUrl: "https://example.com/exact",
+              keeper: {
+                expectedUrl: "https://example.com/different",
+                tabId: 43,
+              },
+              tabId: 42,
+            },
+          ],
+        },
+      }),
+    ).toThrow(/keeper/i);
+
+    expect(() =>
+      bridge.command({
+        ...scope,
+        command: {
+          kind: "close-preview",
+          targets: [
+            {
+              expectedUrl: "https://example.com/exact",
+              keeper: {
+                expectedUrl: "https://example.com/exact",
+                tabId: 43,
+              },
+              tabId: 42,
+            },
+            {
+              expectedUrl: "https://example.com/exact",
+              tabId: 43,
+            },
+          ],
+        },
+      }),
+    ).toThrow(/keeper/i);
+  });
+
+  it("rejects a valid receipt for a different command kind", async () => {
+    const target = new FakeBridgeWindow();
+    const bridge = createExtensionBridge({
+      target,
+      origin: "http://127.0.0.1:7717",
+      requestId: () => "tab-command-kind-mismatch",
+    });
+    const scope = {
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+    };
+    const pending = bridge.command({
+      ...scope,
+      command: {
+        kind: "set-pinned",
+        targets: [{ tabId: 42, expectedUrl: "https://example.com/exact" }],
+        value: true,
+      },
     });
 
-    const pending = bridge.close("123e4567-e89b-42d3-a456-426614174001");
     target.respond({
       source: "tabhub-extension",
       channel: "tabhub-extension-bridge",
-      version: 3,
-      requestId: "close-1",
-      type: "close-obvious-duplicates",
-      ok: false,
-      error: "Browser identity changed",
+      version: 4,
+      requestId: "tab-command-kind-mismatch",
+      type: "tab-command",
+      ok: true,
+      data: {
+        ...scope,
+        result: {
+          failed: [],
+          kind: "set-muted",
+          requested: 1,
+          skipped: [],
+          succeededTabIds: [42],
+        },
+      },
     });
 
-    await expect(pending).rejects.toThrow("Browser identity changed");
-    expect(target.listeners.size).toBe(0);
+    await expect(pending).rejects.toThrow(/different command/i);
+  });
+
+  it("returns a retry token only for Undo entries that were not recreated", async () => {
+    const target = new FakeBridgeWindow();
+    const bridge = createExtensionBridge({
+      target,
+      origin: "http://127.0.0.1:7717",
+      requestId: () => "undo-retry",
+    });
+    const scope = {
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+    };
+    const undoId = "423e4567-e89b-42d3-a456-426614174000";
+    const pending = bridge.command({
+      ...scope,
+      command: { kind: "undo-close", undoId },
+    });
+
+    target.respond({
+      source: "tabhub-extension",
+      channel: "tabhub-extension-bridge",
+      version: 4,
+      requestId: "undo-retry",
+      type: "tab-command",
+      ok: true,
+      data: {
+        ...scope,
+        result: {
+          failed: [{ error: "Window unavailable", tabId: 42 }],
+          kind: "undo-close",
+          requested: 2,
+          restoredTabIds: [101],
+          retry: { count: 1, expiresAt: 1_800_000_000_000, undoId },
+          skipped: [],
+        },
+      },
+    });
+
+    await expect(pending).resolves.toMatchObject({
+      result: { kind: "undo-close", retry: { count: 1, undoId } },
+    });
   });
 });

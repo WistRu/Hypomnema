@@ -1,11 +1,10 @@
 const BRIDGE_CHANNEL = "tabhub-extension-bridge" as const;
-const BRIDGE_VERSION = 3 as const;
+const BRIDGE_VERSION = 4 as const;
 
 type BridgeRequestType =
   | "probe"
   | "activate-tab"
-  | "preview-obvious-duplicates"
-  | "close-obvious-duplicates";
+  | "tab-command";
 
 interface BridgeWindow {
   addEventListener(
@@ -24,6 +23,9 @@ export interface ExtensionProbeAvailable {
   installationId: string;
   browserSessionId: string;
   browser: string | null;
+  controlWindowId: number;
+  pendingUndos: CloseUndoSummary[];
+  windows: BrowserWindowSummary[];
 }
 
 export interface ExtensionProbeUnavailable {
@@ -31,27 +33,120 @@ export interface ExtensionProbeUnavailable {
   installationId: null;
   browserSessionId: null;
   browser: null;
+  controlWindowId: null;
+  pendingUndos: [];
+  windows: [];
 }
 
 export type ExtensionProbe =
   | ExtensionProbeAvailable
   | ExtensionProbeUnavailable;
 
-export interface DuplicateClosePreview {
-  browser: string;
-  installationId: string;
-  previewId: string;
-  totalGroups: number;
-  totalCloseCandidates: number;
-  totalProtected: number;
+export interface BrowserWindowSummary {
+  focused: boolean;
+  tabCount: number;
+  windowId: number;
 }
 
-export interface DuplicateCloseResult {
+export interface PhysicalTabScope {
   browser: string;
+  browserSessionId: string;
   installationId: string;
-  closed: number;
-  skipped: number;
-  failed: number;
+}
+
+export interface PhysicalTabTarget {
+  expectedUrl: string;
+  tabId: number;
+}
+
+export interface ClosePreviewTarget extends PhysicalTabTarget {
+  keeper?: PhysicalTabTarget;
+}
+
+export type MoveDestination =
+  | { kind: "app-window" }
+  | { kind: "new-window" }
+  | { kind: "window"; windowId: number };
+
+export type TabCommand =
+  | { kind: "close-preview"; targets: ClosePreviewTarget[] }
+  | { confirmed: true; kind: "close"; previewId: string }
+  | { destination: MoveDestination; kind: "move"; targets: PhysicalTabTarget[] }
+  | { kind: "set-pinned"; targets: PhysicalTabTarget[]; value: boolean }
+  | { kind: "set-muted"; targets: PhysicalTabTarget[]; value: boolean }
+  | { kind: "discard"; targets: PhysicalTabTarget[] }
+  | { bypassCache?: boolean; kind: "reload"; targets: PhysicalTabTarget[] }
+  | { kind: "undo-close"; undoId: string }
+  | {
+      destination: Extract<MoveDestination, { kind: "app-window" | "new-window" }>;
+      kind: "open-workspace";
+      tabs: Array<{ muted: boolean; pinned: boolean; url: string }>;
+    };
+
+export interface TabCommandRequest extends PhysicalTabScope {
+  command: TabCommand;
+}
+
+export interface TabCommandSkip {
+  reason: string;
+  tabId: number;
+}
+
+export interface TabCommandFailure {
+  error: string;
+  tabId: number;
+}
+
+export interface CloseUndoSummary {
+  count: number;
+  expiresAt: number;
+  undoId: string;
+}
+
+export interface ClosePreviewResult {
+  candidateTabIds: number[];
+  expiresAt: number;
+  kind: "close-preview";
+  previewId: string;
+  requested: number;
+  skipped: TabCommandSkip[];
+}
+
+export interface TabMutationResult {
+  destinationWindowId?: number;
+  failed: TabCommandFailure[];
+  kind: "close" | "move" | "set-pinned" | "set-muted" | "discard" | "reload";
+  requested: number;
+  skipped: TabCommandSkip[];
+  succeededTabIds: number[];
+  undo?: CloseUndoSummary | null;
+}
+
+export interface UndoCloseResult {
+  failed: TabCommandFailure[];
+  kind: "undo-close";
+  requested: number;
+  retry?: CloseUndoSummary;
+  restoredTabIds: number[];
+  skipped: TabCommandSkip[];
+}
+
+export interface OpenWorkspaceResult {
+  destinationWindowId?: number;
+  failed: Array<{ error: string; index: number }>;
+  kind: "open-workspace";
+  openedTabIds: number[];
+  requested: number;
+}
+
+export type TabCommandResult =
+  | ClosePreviewResult
+  | TabMutationResult
+  | UndoCloseResult
+  | OpenWorkspaceResult;
+
+export interface TabCommandResponse extends PhysicalTabScope {
+  result: TabCommandResult;
 }
 
 export interface TabActivationTarget {
@@ -68,15 +163,14 @@ export interface TabActivationResult extends TabActivationTarget {
 export interface ExtensionBridge {
   probe(): Promise<ExtensionProbe>;
   activate(target: TabActivationTarget): Promise<TabActivationResult>;
-  preview(urls?: string[]): Promise<DuplicateClosePreview>;
-  close(previewId: string): Promise<DuplicateCloseResult>;
+  command(request: TabCommandRequest): Promise<TabCommandResponse>;
 }
 
 interface ExtensionBridgeOptions {
   target: BridgeWindow;
   origin: string;
   requestId?: () => string;
-  timeouts?: Partial<Record<"probe" | "activate" | "preview" | "close", number>>;
+  timeouts?: Partial<Record<"probe" | "activate" | "command" | "workspace", number>>;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -93,6 +187,8 @@ export class ExtensionBridgeTimeoutError extends ExtensionBridgeError {
     super(
       type === "activate-tab"
         ? "Tab switching timed out. The outcome is unknown and the switch may still complete."
+        : type === "tab-command"
+          ? "The browser action timed out. Its outcome is unknown and it may still complete."
         : `TabHub extension did not answer the ${type} request in time.`,
     );
     this.name = "ExtensionBridgeTimeoutError";
@@ -125,6 +221,16 @@ function isKnownBrowser(value: unknown): value is string {
   return typeof value === "string" && knownBrowsers.has(value);
 }
 
+function isWindowSummary(value: unknown): value is BrowserWindowSummary {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["focused", "tabCount", "windowId"]) &&
+    typeof value.focused === "boolean" &&
+    isNonNegativeInteger(value.tabCount) &&
+    isNonNegativeInteger(value.windowId)
+  );
+}
+
 function parseProbe(value: unknown): ExtensionProbeAvailable {
   if (
     !isRecord(value) ||
@@ -132,14 +238,23 @@ function parseProbe(value: unknown): ExtensionProbeAvailable {
       "available",
       "browser",
       "browserSessionId",
+      "controlWindowId",
       "installationId",
+      "pendingUndos",
+      "windows",
     ]) ||
     value.available !== true ||
     typeof value.browserSessionId !== "string" ||
     !uuidPattern.test(value.browserSessionId) ||
     typeof value.installationId !== "string" ||
     !uuidPattern.test(value.installationId) ||
-    (value.browser !== null && !isKnownBrowser(value.browser))
+    (value.browser !== null && !isKnownBrowser(value.browser)) ||
+    !isNonNegativeInteger(value.controlWindowId) ||
+    !Array.isArray(value.pendingUndos) ||
+    value.pendingUndos.length > 5 ||
+    !value.pendingUndos.every(isCloseUndoSummary) ||
+    !Array.isArray(value.windows) ||
+    !value.windows.every(isWindowSummary)
   ) {
     throw new ExtensionBridgeError("TabHub extension returned an invalid probe response.");
   }
@@ -149,71 +264,155 @@ function parseProbe(value: unknown): ExtensionProbeAvailable {
     browserSessionId: value.browserSessionId,
     installationId: value.installationId,
     browser: value.browser as string | null,
+    controlWindowId: value.controlWindowId,
+    pendingUndos: value.pendingUndos,
+    windows: value.windows,
   };
 }
 
-function parsePreview(value: unknown): DuplicateClosePreview {
-  if (
-    !isRecord(value) ||
-    !hasOnlyKeys(value, [
-      "browser",
-      "installationId",
-      "previewId",
-      "totalCloseCandidates",
-      "totalGroups",
-      "totalProtected",
-    ]) ||
-    !isKnownBrowser(value.browser) ||
-    typeof value.installationId !== "string" ||
-    !uuidPattern.test(value.installationId) ||
-    !isPreviewId(value.previewId) ||
-    !isNonNegativeInteger(value.totalGroups) ||
-    !isNonNegativeInteger(value.totalCloseCandidates) ||
-    !isNonNegativeInteger(value.totalProtected)
-  ) {
-    throw new ExtensionBridgeError(
-      "TabHub extension returned an invalid duplicate preview.",
-    );
-  }
-
-  return {
-    browser: value.browser,
-    installationId: value.installationId,
-    previewId: value.previewId,
-    totalGroups: value.totalGroups,
-    totalCloseCandidates: value.totalCloseCandidates,
-    totalProtected: value.totalProtected,
-  };
+function isTabCommandSkip(value: unknown): value is TabCommandSkip {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["reason", "tabId"]) &&
+    typeof value.reason === "string" &&
+    isNonNegativeInteger(value.tabId)
+  );
 }
 
-function parseClose(value: unknown): DuplicateCloseResult {
-  if (
-    !isRecord(value) ||
-    !hasOnlyKeys(value, [
-      "browser",
-      "closed",
-      "failed",
-      "installationId",
-      "skipped",
-    ]) ||
-    !isKnownBrowser(value.browser) ||
-    typeof value.installationId !== "string" ||
-    !uuidPattern.test(value.installationId) ||
-    !isNonNegativeInteger(value.closed) ||
-    !isNonNegativeInteger(value.skipped) ||
-    !isNonNegativeInteger(value.failed)
-  ) {
-    throw new ExtensionBridgeError(
-      "TabHub extension returned an invalid duplicate-close result.",
-    );
+function isTabCommandFailure(value: unknown): value is TabCommandFailure {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["error", "tabId"]) &&
+    typeof value.error === "string" &&
+    isNonNegativeInteger(value.tabId)
+  );
+}
+
+function isCloseUndoSummary(value: unknown): value is CloseUndoSummary {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["count", "expiresAt", "undoId"]) &&
+    isNonNegativeInteger(value.count) &&
+    isNonNegativeInteger(value.expiresAt) &&
+    isPreviewId(value.undoId)
+  );
+}
+
+function parseTabCommandResult(value: unknown): TabCommandResult {
+  if (!isRecord(value) || typeof value.kind !== "string") {
+    throw new ExtensionBridgeError("TabHub extension returned an invalid tab-command result.");
   }
 
+  if (value.kind === "close-preview") {
+    if (
+      !hasOnlyKeys(value, ["candidateTabIds", "expiresAt", "kind", "previewId", "requested", "skipped"]) ||
+      !Array.isArray(value.candidateTabIds) ||
+      !value.candidateTabIds.every(isNonNegativeInteger) ||
+      !isNonNegativeInteger(value.expiresAt) ||
+      !isPreviewId(value.previewId) ||
+      !isNonNegativeInteger(value.requested) ||
+      !Array.isArray(value.skipped) ||
+      !value.skipped.every(isTabCommandSkip)
+    ) {
+      throw new ExtensionBridgeError("TabHub extension returned an invalid close preview.");
+    }
+    return value as unknown as ClosePreviewResult;
+  }
+
+  if (value.kind === "undo-close") {
+    if (
+      !hasOnlyKeys(value, ["failed", "kind", "requested", "restoredTabIds", "retry", "skipped"]) ||
+      !Array.isArray(value.restoredTabIds) ||
+      !value.restoredTabIds.every(isNonNegativeInteger) ||
+      !isNonNegativeInteger(value.requested) ||
+      !Array.isArray(value.skipped) ||
+      !value.skipped.every(isTabCommandSkip) ||
+      !Array.isArray(value.failed) ||
+      !value.failed.every(isTabCommandFailure) ||
+      (value.retry !== undefined && !isCloseUndoSummary(value.retry))
+    ) {
+      throw new ExtensionBridgeError("TabHub extension returned an invalid close-undo result.");
+    }
+    return value as unknown as UndoCloseResult;
+  }
+
+  if (value.kind === "open-workspace") {
+    const isWorkspaceFailure = (failure: unknown) =>
+      isRecord(failure) &&
+      hasOnlyKeys(failure, ["error", "index"]) &&
+      typeof failure.error === "string" &&
+      isNonNegativeInteger(failure.index);
+    if (
+      !hasOnlyKeys(value, ["destinationWindowId", "failed", "kind", "openedTabIds", "requested"]) ||
+      (value.destinationWindowId !== undefined && !isNonNegativeInteger(value.destinationWindowId)) ||
+      !Array.isArray(value.openedTabIds) ||
+      !value.openedTabIds.every(isNonNegativeInteger) ||
+      !isNonNegativeInteger(value.requested) ||
+      !Array.isArray(value.failed) ||
+      !value.failed.every(isWorkspaceFailure)
+    ) {
+      throw new ExtensionBridgeError("TabHub extension returned an invalid workspace-open result.");
+    }
+    return value as unknown as OpenWorkspaceResult;
+  }
+
+  const mutationKinds = new Set([
+    "close",
+    "discard",
+    "move",
+    "reload",
+    "set-muted",
+    "set-pinned",
+  ]);
+  if (!mutationKinds.has(value.kind)) {
+    throw new ExtensionBridgeError("TabHub extension returned an unknown tab-command result.");
+  }
+  const allowed = [
+    "destinationWindowId",
+    "failed",
+    "kind",
+    "requested",
+    "skipped",
+    "succeededTabIds",
+    "undo",
+  ];
+  const undoValid =
+    value.undo === undefined || value.undo === null ||
+    isCloseUndoSummary(value.undo);
+  if (
+    !hasOnlyKeys(value, allowed) ||
+    !isNonNegativeInteger(value.requested) ||
+    !Array.isArray(value.succeededTabIds) ||
+    !value.succeededTabIds.every(isNonNegativeInteger) ||
+    !Array.isArray(value.skipped) ||
+    !value.skipped.every(isTabCommandSkip) ||
+    !Array.isArray(value.failed) ||
+    !value.failed.every(isTabCommandFailure) ||
+    (value.destinationWindowId !== undefined && !isNonNegativeInteger(value.destinationWindowId)) ||
+    !undoValid
+  ) {
+    throw new ExtensionBridgeError("TabHub extension returned an invalid mutation receipt.");
+  }
+  return value as unknown as TabMutationResult;
+}
+
+function parseTabCommandResponse(value: unknown): TabCommandResponse {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, ["browser", "browserSessionId", "installationId", "result"]) ||
+    !isKnownBrowser(value.browser) ||
+    typeof value.browserSessionId !== "string" ||
+    !uuidPattern.test(value.browserSessionId) ||
+    typeof value.installationId !== "string" ||
+    !uuidPattern.test(value.installationId)
+  ) {
+    throw new ExtensionBridgeError("TabHub extension returned an invalid tab-command response.");
+  }
   return {
     browser: value.browser,
+    browserSessionId: value.browserSessionId,
     installationId: value.installationId,
-    closed: value.closed,
-    skipped: value.skipped,
-    failed: value.failed,
+    result: parseTabCommandResult(value.result),
   };
 }
 
@@ -262,27 +461,105 @@ function activationTarget(target: TabActivationTarget): TabActivationTarget {
   return target;
 }
 
-function scopedUrls(urls: string[] | undefined): string[] | undefined {
-  if (urls === undefined) return undefined;
-  if (urls.length === 0) {
-    throw new ExtensionBridgeError("Select at least one exact URL to close.");
+function validateScope(scope: PhysicalTabScope): void {
+  if (
+    !isKnownBrowser(scope.browser) ||
+    !uuidPattern.test(scope.browserSessionId) ||
+    !uuidPattern.test(scope.installationId)
+  ) {
+    throw new ExtensionBridgeError("Invalid physical tab command scope.");
   }
+}
 
-  const distinct = [
-    ...new Set(
-      urls.map((url) => {
-        const trimmed = url.trim();
-        if (!URL.canParse(trimmed)) {
-          throw new ExtensionBridgeError(`Invalid duplicate URL: ${url}`);
-        }
-        return trimmed;
-      }),
-    ),
-  ];
-  if (distinct.length > 500) {
-    throw new ExtensionBridgeError("At most 500 exact duplicate URLs can be closed at once.");
+function validateTargets(targets: readonly PhysicalTabTarget[]): void {
+  if (targets.length < 1 || targets.length > 500) {
+    throw new ExtensionBridgeError("Select between 1 and 500 physical tabs.");
   }
-  return distinct;
+  const ids = targets.map(({ tabId }) => tabId);
+  if (!ids.every(isNonNegativeInteger) || new Set(ids).size !== ids.length) {
+    throw new ExtensionBridgeError("Physical tab targets must contain unique tab IDs.");
+  }
+  if (targets.some(({ expectedUrl }) => !URL.canParse(expectedUrl))) {
+    throw new ExtensionBridgeError("Physical tab targets require their current exact URL.");
+  }
+}
+
+function validateClosePreviewTargets(
+  targets: readonly ClosePreviewTarget[],
+): void {
+  validateTargets(targets);
+  const targetIds = new Set(targets.map(({ tabId }) => tabId));
+  for (const target of targets) {
+    if (target.keeper === undefined) continue;
+    const keeper = target.keeper;
+    if (
+      !isNonNegativeInteger(keeper.tabId) ||
+      !URL.canParse(keeper.expectedUrl) ||
+      keeper.tabId === target.tabId ||
+      targetIds.has(keeper.tabId) ||
+      keeper.expectedUrl !== target.expectedUrl
+    ) {
+      throw new ExtensionBridgeError(
+        "An exact-duplicate close keeper must be a different tab with the same exact URL.",
+      );
+    }
+  }
+}
+
+function validatedCommandRequest(request: TabCommandRequest): TabCommandRequest {
+  validateScope(request);
+  const { command } = request;
+  switch (command.kind) {
+    case "close-preview":
+      validateClosePreviewTargets(command.targets);
+      break;
+    case "close":
+      if (!command.confirmed || !isPreviewId(command.previewId)) {
+        throw new ExtensionBridgeError("Invalid confirmed close preview.");
+      }
+      break;
+    case "move":
+      validateTargets(command.targets);
+      if (
+        command.destination.kind === "window" &&
+        !isNonNegativeInteger(command.destination.windowId)
+      ) {
+        throw new ExtensionBridgeError("Invalid destination browser window.");
+      }
+      break;
+    case "set-pinned":
+    case "set-muted":
+      validateTargets(command.targets);
+      if (typeof command.value !== "boolean") {
+        throw new ExtensionBridgeError("Invalid tab state value.");
+      }
+      break;
+    case "discard":
+    case "reload":
+      validateTargets(command.targets);
+      break;
+    case "undo-close":
+      if (!isPreviewId(command.undoId)) {
+        throw new ExtensionBridgeError("Invalid close undo identifier.");
+      }
+      break;
+    case "open-workspace":
+      if (command.tabs.length < 1 || command.tabs.length > 500) {
+        throw new ExtensionBridgeError("A workspace must contain between 1 and 500 tabs.");
+      }
+      if (
+        command.tabs.some(
+          (tab) =>
+            !URL.canParse(tab.url) ||
+            typeof tab.pinned !== "boolean" ||
+            typeof tab.muted !== "boolean",
+        )
+      ) {
+        throw new ExtensionBridgeError("Invalid workspace tab.");
+      }
+      break;
+  }
+  return request;
 }
 
 function defaultRequestId(): string {
@@ -296,8 +573,8 @@ export function createExtensionBridge(
   const timeouts = {
     probe: options.timeouts?.probe ?? 2_000,
     activate: options.timeouts?.activate ?? 5_000,
-    preview: options.timeouts?.preview ?? 5_000,
-    close: options.timeouts?.close ?? 30_000,
+    command: options.timeouts?.command ?? 2 * 60_000,
+    workspace: options.timeouts?.workspace ?? 10 * 60_000,
   };
 
   function request<T>(
@@ -377,7 +654,10 @@ export function createExtensionBridge(
             available: false,
             browser: null,
             browserSessionId: null,
+            controlWindowId: null,
             installationId: null,
+            pendingUndos: [],
+            windows: [],
           };
         }
         throw error;
@@ -391,26 +671,27 @@ export function createExtensionBridge(
         { ...activationTarget(target) },
       );
     },
-    preview(urls) {
-      const scoped = scopedUrls(urls);
+    command(commandRequest) {
+      const validated = validatedCommandRequest(commandRequest);
       return request(
-        "preview-obvious-duplicates",
-        timeouts.preview,
-        parsePreview,
-        scoped === undefined ? {} : { urls: scoped },
-      );
-    },
-    close(previewId) {
-      if (!isPreviewId(previewId)) {
-        throw new ExtensionBridgeError("Invalid duplicate preview identifier.");
-      }
-      return request(
-        "close-obvious-duplicates",
-        timeouts.close,
-        parseClose,
+        "tab-command",
+        validated.command.kind === "open-workspace"
+          ? timeouts.workspace
+          : timeouts.command,
+        (value) => {
+          const response = parseTabCommandResponse(value);
+          if (response.result.kind !== validated.command.kind) {
+            throw new ExtensionBridgeError(
+              "TabHub extension returned a result for a different command.",
+            );
+          }
+          return response;
+        },
         {
-          confirmed: true,
-          previewId,
+          browser: validated.browser,
+          browserSessionId: validated.browserSessionId,
+          command: validated.command,
+          installationId: validated.installationId,
         },
       );
     },

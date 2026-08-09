@@ -20,15 +20,8 @@ import {
   type CaptureBatchResult,
 } from "../lib/content-capture";
 import {
-  closeObviousDuplicatesAndRefresh,
-  previewObviousDuplicates,
-  type DuplicateTabAdapter,
-} from "../lib/duplicate-tabs";
-import { createDuplicatePreviewRegistry } from "../lib/duplicate-preview-registry";
-import {
   isAllowedAppMessageSender,
   isExtensionRequest,
-  parseScopedDuplicateUrls,
   type AppExtensionResponse,
   type BridgeRequestType,
   type CaptureSummary,
@@ -36,6 +29,10 @@ import {
   type ExtensionRequest,
   type ExtensionStatus,
 } from "../lib/messages";
+import {
+  createPhysicalTabCommandExecutor,
+  type PhysicalTabCommandAdapter,
+} from "../lib/physical-tab-commands";
 import {
   appendPendingItems,
   compactPendingQueue,
@@ -70,11 +67,8 @@ const IDENTITY_REQUIRED_ERROR =
 let syncTail: Promise<void> = Promise.resolve();
 let tabEventTimer: ReturnType<typeof setTimeout> | undefined;
 const activationSequencer = createActivationSequencer();
+const tabCommandSequencer = createActivationSequencer();
 
-const duplicateTabAdapter: DuplicateTabAdapter = {
-  get: (tabId) => browser.tabs.get(tabId),
-  remove: (tabId) => browser.tabs.remove(tabId),
-};
 const tabActivationAdapter: TabActivationAdapter = {
   activate: (tabId) => browser.tabs.update(tabId, { active: true }),
   focusWindow: async (windowId) => {
@@ -86,10 +80,38 @@ const tabActivationAdapter: TabActivationAdapter = {
     await browser.windows.update(windowId, { state: "normal" });
   },
 };
-const duplicatePreviewRegistry = createDuplicatePreviewRegistry({
-  get: (key) => browser.storage.session.get(key),
-  remove: (key) => browser.storage.session.remove(key),
-  set: (items) => browser.storage.session.set(items),
+const physicalTabCommandAdapter: PhysicalTabCommandAdapter = {
+  createTab: (properties) =>
+    browser.tabs.create(
+      properties as Parameters<typeof browser.tabs.create>[0],
+    ),
+  createWindow: (properties) =>
+    browser.windows.create(
+      properties as Parameters<typeof browser.windows.create>[0],
+    ),
+  discardTab: (tabId) => browser.tabs.discard(tabId),
+  getTab: (tabId) => browser.tabs.get(tabId),
+  getWindow: (windowId) => browser.windows.get(windowId),
+  listWindows: () =>
+    browser.windows.getAll({ populate: true, windowTypes: ["normal"] }),
+  moveTabs: (tabIds, properties) =>
+    Array.isArray(tabIds)
+      ? browser.tabs.move(tabIds, properties)
+      : browser.tabs.move(tabIds, properties),
+  reloadTab: (tabId, properties) =>
+    properties === undefined
+      ? browser.tabs.reload(tabId)
+      : browser.tabs.reload(tabId, properties),
+  removeTab: (tabId) => browser.tabs.remove(tabId),
+  updateTab: (tabId, properties) => browser.tabs.update(tabId, properties),
+};
+const physicalTabCommandExecutor = createPhysicalTabCommandExecutor({
+  adapter: physicalTabCommandAdapter,
+  storage: {
+    get: (key) => browser.storage.session.get(key),
+    remove: (key) => browser.storage.session.remove(key),
+    set: (items) => browser.storage.session.set(items),
+  },
 });
 
 function serializeSync<T>(operation: () => Promise<T>): Promise<T> {
@@ -444,29 +466,16 @@ function bridgeTypeForRequest(
       return "probe";
     case "tabhub:app-activate-tab":
       return "activate-tab";
-    case "tabhub:app-preview-obvious-duplicates":
-      return "preview-obvious-duplicates";
-    case "tabhub:app-close-obvious-duplicates":
-      return "close-obvious-duplicates";
+    case "tabhub:app-tab-command":
+      return "tab-command";
     default:
       return undefined;
   }
 }
 
-function scopedUrls(request: {
-  urls?: string[];
-}): string[] | undefined {
-  const parsed = parseScopedDuplicateUrls(request.urls);
-
-  if (parsed === null) {
-    throw new Error("Invalid duplicate URL scope.");
-  }
-
-  return parsed;
-}
-
 async function handleAppRequest(
   request: Extract<ExtensionRequest, { type: `tabhub:app-${string}` }>,
+  sender: MessageSenderLike,
 ): Promise<AppExtensionResponse> {
   switch (request.type) {
     case "tabhub:app-probe": {
@@ -485,12 +494,35 @@ async function handleAppRequest(
         });
       }
 
+      const controlWindowId = sender.tab?.windowId;
+      if (
+        !Number.isInteger(controlWindowId) ||
+        (controlWindowId as number) < 0
+      ) {
+        throw new Error("TabHub could not identify its browser window.");
+      }
+      const [windows, pendingUndos] = await Promise.all([
+        physicalTabCommandExecutor.listWindows(),
+        browserIdentifier === undefined
+          ? Promise.resolve([])
+          : tabCommandSequencer.run(() =>
+              physicalTabCommandExecutor.listPendingUndos({
+                browser: browserIdentifier,
+                browserSessionId,
+                installationId,
+              }),
+            ),
+      ]);
+
       return {
         data: {
           available: true,
           browser: browserIdentifier ?? null,
           browserSessionId,
+          controlWindowId: controlWindowId as number,
           installationId,
+          pendingUndos,
+          windows,
         },
         ok: true,
         type: "probe",
@@ -538,69 +570,82 @@ async function handleAppRequest(
         };
       });
     }
-    case "tabhub:app-preview-obvious-duplicates":
-      return serializeSync(async () => {
-        const [browserIdentifier, installationId, tabs] = await Promise.all([
-          getBrowserIdentifier(),
-          getOrCreateInstallationId(),
-          browser.tabs.query({}),
-        ]);
-
+    case "tabhub:app-tab-command": {
+      return tabCommandSequencer.run(async () => {
+        const [browserIdentifier, installationId, browserSessionId] =
+          await Promise.all([
+            getBrowserIdentifier(),
+            getOrCreateInstallationId(),
+            getOrCreateBrowserSessionId(),
+          ]);
         if (browserIdentifier === undefined) {
           throw new Error(IDENTITY_REQUIRED_ERROR);
         }
+        const controlTabId = sender.tab?.id;
+        const controlWindowId = sender.tab?.windowId;
+        if (
+          !Number.isInteger(controlTabId) ||
+          (controlTabId as number) < 0 ||
+          !Number.isInteger(controlWindowId) ||
+          (controlWindowId as number) < 0
+        ) {
+          throw new Error(
+            "TabHub could not identify the browser tab controlling this action.",
+          );
+        }
 
-        const preview = previewObviousDuplicates(tabs, scopedUrls(request));
-        const previewId = await duplicatePreviewRegistry.issue(
-          { browser: browserIdentifier, installationId },
-          preview.plan,
+        const result = await physicalTabCommandExecutor.execute(
+          {
+            controlTabId: controlTabId as number,
+            controlWindowId: controlWindowId as number,
+            currentScope: {
+              browser: browserIdentifier,
+              browserSessionId,
+              installationId,
+            },
+          },
+          request,
         );
+
+        if (result.kind !== "close-preview") {
+          // Do not expose a completed mutation to the web app until the local
+          // catalog has observed the resulting physical order and flags. This
+          // keeps an immediate Save workspace authoritative after Move/Pin/etc.
+          try {
+            const synchronized = await captureAndSync(true);
+            if (
+              synchronized?.serverReachable !== true ||
+              synchronized.remaining.length > 0
+            ) {
+              scheduleTabEventSnapshot();
+            }
+          } catch (error) {
+            console.error("TabHub post-command snapshot failed", error);
+            scheduleTabEventSnapshot();
+          }
+        }
+
         return {
           data: {
             browser: browserIdentifier,
+            browserSessionId,
             installationId,
-            previewId,
-            totalCloseCandidates: preview.totalCloseCandidates,
-            totalGroups: preview.totalGroups,
-            totalProtected: preview.totalProtected,
+            result,
           },
           ok: true,
-          type: "preview-obvious-duplicates",
+          type: "tab-command",
         };
       });
-    case "tabhub:app-close-obvious-duplicates":
-      return serializeSync(async () => {
-        const [browserIdentifier, installationId] = await Promise.all([
-          getBrowserIdentifier(),
-          getOrCreateInstallationId(),
-        ]);
-
-        if (browserIdentifier === undefined) {
-          throw new Error(IDENTITY_REQUIRED_ERROR);
-        }
-
-        const plan = await duplicatePreviewRegistry.consume(
-          { browser: browserIdentifier, installationId },
-          request.previewId,
-        );
-        const result = await closeObviousDuplicatesAndRefresh(
-          duplicateTabAdapter,
-          async () => {
-            await captureAndSyncUnlocked(true);
-          },
-          plan,
-        );
-        return {
-          data: { browser: browserIdentifier, installationId, ...result },
-          ok: true,
-          type: "close-obvious-duplicates",
-        };
-      });
+    }
   }
 }
 
 interface MessageSenderLike {
-  tab?: { url?: string | undefined } | undefined;
+  tab?: {
+    id?: number | undefined;
+    url?: string | undefined;
+    windowId?: number | undefined;
+  } | undefined;
   url?: string | undefined;
 }
 
@@ -629,6 +674,7 @@ async function handleMessage(
           ExtensionRequest,
           { type: `tabhub:app-${string}` }
         >,
+        sender,
       );
     }
 

@@ -8,10 +8,14 @@ import {
   summaryEnqueueResponseSchema,
   summaryJobSchema,
   tabDetailResponseSchema,
+  tabInstanceBulkResponseSchema,
   tabInstanceListResponseSchema,
   tabLinkSchema,
   tabListResponseSchema,
   tagTreeResponseSchema,
+  workspaceDetailSchema,
+  workspaceListResponseSchema,
+  type CreateWorkspace,
   type CreateLink,
   type PatchLink,
   type PatchTab,
@@ -35,6 +39,7 @@ export interface OpenTabListFilters {
   browser: string;
   duplicatesOnly: boolean;
   page: number;
+  pageSize?: number;
   q: string;
 }
 
@@ -141,13 +146,63 @@ export async function fetchTabs(
   return parsed.data;
 }
 
+export async function fetchAllOpenTabs(
+  filters: Omit<OpenTabListFilters, "page" | "pageSize">,
+  signal?: AbortSignal,
+) {
+  const searchParams = new URLSearchParams();
+  if (filters.browser !== "all") {
+    searchParams.set("browser", filters.browser);
+  }
+  if (filters.duplicatesOnly) {
+    searchParams.set("duplicates_only", "true");
+  }
+  if (filters.q) {
+    searchParams.set("q", filters.q);
+  }
+
+  const query = searchParams.toString();
+  const payload = await requestJson(
+    `/api/tab-instances/bulk${query ? `?${query}` : ""}`,
+    {
+      headers: { Accept: "application/json" },
+      signal: signal ?? null,
+    },
+    "TabHub could not load all open tabs",
+    "TabHub returned an unreadable bulk open-tab list.",
+  );
+  const parsed = tabInstanceBulkResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected bulk open-tab list.");
+  }
+
+  return parsed.data.items;
+}
+
+export async function fetchAllDuplicateGroups(
+  filters: Omit<DuplicateGroupListFilters, "page">,
+  signal?: AbortSignal,
+) {
+  const items = [];
+  let page = 1;
+  let total = 0;
+  do {
+    const response = await fetchDuplicateGroups({ ...filters, page }, signal);
+    items.push(...response.items);
+    total = response.totalGroups;
+    if (response.items.length === 0) break;
+    page += 1;
+  } while (items.length < total);
+  return items;
+}
+
 export async function fetchOpenTabs(
   filters: OpenTabListFilters,
   signal?: AbortSignal,
 ) {
   const searchParams = new URLSearchParams({
     page: String(filters.page),
-    pageSize: "50",
+    pageSize: String(filters.pageSize ?? 50),
   });
 
   if (filters.browser !== "all") {
@@ -204,6 +259,71 @@ export async function fetchDuplicateGroups(
   }
 
   return parsed.data;
+}
+
+export async function fetchWorkspaces(signal?: AbortSignal) {
+  const payload = await requestJson(
+    "/api/workspaces",
+    { headers: { Accept: "application/json" }, signal: signal ?? null },
+    "TabHub could not load saved workspaces",
+    "TabHub returned unreadable saved workspaces.",
+  );
+  const parsed = workspaceListResponseSchema.safeParse(payload);
+  if (!parsed.success) throw new Error("TabHub returned unexpected saved workspaces.");
+  return parsed.data;
+}
+
+export async function fetchWorkspace(id: number, signal?: AbortSignal) {
+  const payload = await requestJson(
+    `/api/workspaces/${id}`,
+    { headers: { Accept: "application/json" }, signal: signal ?? null },
+    "TabHub could not load this workspace",
+    "TabHub returned an unreadable workspace.",
+  );
+  const parsed = workspaceDetailSchema.safeParse(payload);
+  if (!parsed.success) throw new Error("TabHub returned an unexpected workspace.");
+  return parsed.data;
+}
+
+export async function createWorkspace(input: CreateWorkspace) {
+  const payload = await requestJson(
+    "/api/workspaces",
+    {
+      body: JSON.stringify(input),
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      method: "POST",
+    },
+    "TabHub could not save this workspace",
+    "TabHub returned an unreadable workspace.",
+  );
+  const parsed = workspaceDetailSchema.safeParse(payload);
+  if (!parsed.success) throw new Error("TabHub returned an unexpected workspace.");
+  return parsed.data;
+}
+
+export async function renameWorkspace(id: number, name: string) {
+  const payload = await requestJson(
+    `/api/workspaces/${id}`,
+    {
+      body: JSON.stringify({ name }),
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      method: "PATCH",
+    },
+    "TabHub could not rename this workspace",
+    "TabHub returned an unreadable workspace.",
+  );
+  const parsed = workspaceDetailSchema.safeParse(payload);
+  if (!parsed.success) throw new Error("TabHub returned an unexpected workspace.");
+  return parsed.data;
+}
+
+export async function deleteWorkspace(id: number) {
+  await requestJson(
+    `/api/workspaces/${id}`,
+    { headers: { Accept: "application/json" }, method: "DELETE" },
+    "TabHub could not delete this workspace",
+    "TabHub returned an unreadable deletion result.",
+  );
 }
 
 export async function fetchTagTree(signal?: AbortSignal) {

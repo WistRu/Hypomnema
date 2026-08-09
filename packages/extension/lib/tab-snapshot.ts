@@ -11,10 +11,13 @@ import {
 
 export interface BrowserTabLike {
   active?: boolean | undefined;
+  audible?: boolean | undefined;
+  discarded?: boolean | undefined;
   favIconUrl?: string | undefined;
   id?: number | undefined;
   index: number;
   lastAccessed?: number | undefined;
+  mutedInfo?: { muted: boolean } | undefined;
   pendingUrl?: string | undefined;
   pinned?: boolean | undefined;
   title?: string | undefined;
@@ -52,6 +55,18 @@ export function toSnapshotTab(tab: BrowserTabLike): SnapshotTab | undefined {
 
   if (typeof tab.active === "boolean") {
     snapshotTab.active = tab.active;
+  }
+
+  if (typeof tab.audible === "boolean") {
+    snapshotTab.audible = tab.audible;
+  }
+
+  if (typeof tab.mutedInfo?.muted === "boolean") {
+    snapshotTab.muted = tab.mutedInfo.muted;
+  }
+
+  if (typeof tab.discarded === "boolean") {
+    snapshotTab.discarded = tab.discarded;
   }
 
   if (typeof tab.pinned === "boolean") {

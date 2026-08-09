@@ -31,6 +31,8 @@ import { registerEmbeddingRoutes } from "./embedding-routes.js";
 import { createGraphCatalog } from "./graph-catalog.js";
 import { registerGraphRoutes } from "./graph-routes.js";
 import { registerRequestSecurity } from "./request-security.js";
+import { createWorkspaceCatalog } from "./workspace-catalog.js";
+import { registerWorkspaceRoutes } from "./workspace-routes.js";
 
 export interface CreateAppOptions {
   databasePath: string;
@@ -89,6 +91,10 @@ export function createApp(options: CreateAppOptions): TabHubApp {
     options.clock,
   );
   const graphCatalog = createGraphCatalog(database.connection);
+  const workspaceCatalog = createWorkspaceCatalog(
+    database.connection,
+    options.clock,
+  );
   const summaryWorker =
     options.summaryProvider === undefined
       ? undefined
@@ -167,6 +173,7 @@ export function createApp(options: CreateAppOptions): TabHubApp {
   registerLinkRoutes(app, linkCatalog);
   registerEmbeddingRoutes(app, embeddingCatalog);
   registerGraphRoutes(app, graphCatalog);
+  registerWorkspaceRoutes(app, workspaceCatalog);
 
   return app;
 }

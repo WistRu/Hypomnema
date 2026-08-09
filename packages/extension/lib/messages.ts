@@ -1,6 +1,11 @@
-import { knownBrowserOptions, tabUrlMaxLength } from "@tabhub/shared";
-
-import { isDuplicatePreviewId } from "./duplicate-preview-registry";
+import { knownBrowserOptions } from "@tabhub/shared";
+import {
+  parsePhysicalTabCommand,
+  type PhysicalTabCloseUndoSummary,
+  type PhysicalTabCommand,
+  type PhysicalTabCommandResult,
+  type PhysicalWindowSummary,
+} from "./physical-tab-commands";
 import {
   isBrowserSessionId,
   isInstallationId,
@@ -23,35 +28,26 @@ export type ExtensionRequest =
       type: "tabhub:app-activate-tab";
     }
   | {
-      type: "tabhub:app-preview-obvious-duplicates";
-      urls?: string[];
-    }
-  | {
-      type: "tabhub:app-close-obvious-duplicates";
-      confirmed: true;
-      previewId: string;
+      browser: KnownBrowser;
+      browserSessionId: string;
+      command: PhysicalTabCommand;
+      installationId: string;
+      type: "tabhub:app-tab-command";
     };
 
 export type BridgeRequestType =
   | "probe"
   | "activate-tab"
-  | "preview-obvious-duplicates"
-  | "close-obvious-duplicates";
+  | "tab-command";
 
 export interface AppProbeData {
   available: true;
   browser: KnownBrowser | null;
   browserSessionId: string;
+  controlWindowId: number;
   installationId: string;
-}
-
-export interface AppDuplicatePreviewData {
-  browser: KnownBrowser;
-  installationId: string;
-  previewId: string;
-  totalCloseCandidates: number;
-  totalGroups: number;
-  totalProtected: number;
+  pendingUndos: PhysicalTabCloseUndoSummary[];
+  windows: PhysicalWindowSummary[];
 }
 
 export interface AppTabActivationData {
@@ -62,27 +58,17 @@ export interface AppTabActivationData {
   windowId: number;
 }
 
-export interface AppDuplicateCloseData {
+export interface AppTabCommandData {
   browser: KnownBrowser;
-  closed: number;
-  failed: number;
+  browserSessionId: string;
   installationId: string;
-  skipped: number;
+  result: PhysicalTabCommandResult;
 }
 
 export type AppExtensionResponse =
   | { data: AppProbeData; ok: true; type: "probe" }
   | { data: AppTabActivationData; ok: true; type: "activate-tab" }
-  | {
-      data: AppDuplicatePreviewData;
-      ok: true;
-      type: "preview-obvious-duplicates";
-    }
-  | {
-      data: AppDuplicateCloseData;
-      ok: true;
-      type: "close-obvious-duplicates";
-    }
+  | { data: AppTabCommandData; ok: true; type: "tab-command" }
   | { error: string; ok: false; type: BridgeRequestType };
 
 export interface CaptureSummary {
@@ -141,43 +127,6 @@ export function isValidBridgeRequestId(value: unknown): value is string {
   return typeof value === "string" && requestIdPattern.test(value);
 }
 
-/** `undefined` means omitted; `null` means supplied but invalid. */
-export function parseScopedDuplicateUrls(
-  value: unknown,
-): string[] | undefined | null {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!Array.isArray(value) || value.length < 1 || value.length > 500) {
-    return null;
-  }
-
-  const urls: string[] = [];
-  const seen = new Set<string>();
-
-  for (const candidate of value) {
-    if (typeof candidate !== "string") {
-      return null;
-    }
-
-    const url = candidate.trim();
-    if (
-      url.length === 0 ||
-      url.length > tabUrlMaxLength ||
-      !URL.canParse(url) ||
-      seen.has(url)
-    ) {
-      return null;
-    }
-
-    urls.push(url);
-    seen.add(url);
-  }
-
-  return urls;
-}
-
 export function isAllowedAppMessageSender(
   sender: AppMessageSenderLike,
 ): boolean {
@@ -234,20 +183,19 @@ export function isExtensionRequest(value: unknown): value is ExtensionRequest {
     );
   }
 
-  if (type === "tabhub:app-preview-obvious-duplicates") {
-    const urls = parseScopedDuplicateUrls(value.urls);
-    const urlsValid = value.urls === undefined || urls !== null;
-
+  if (type === "tabhub:app-tab-command") {
     return (
-      urlsValid && hasOnlyKeys(value, ["type", "urls"])
-    );
-  }
-
-  if (type === "tabhub:app-close-obvious-duplicates") {
-    return (
-      value.confirmed === true &&
-      isDuplicatePreviewId(value.previewId) &&
-      hasOnlyKeys(value, ["confirmed", "previewId", "type"])
+      isKnownBrowser(value.browser) &&
+      isBrowserSessionId(value.browserSessionId) &&
+      isInstallationId(value.installationId) &&
+      parsePhysicalTabCommand(value.command) !== undefined &&
+      hasOnlyKeys(value, [
+        "browser",
+        "browserSessionId",
+        "command",
+        "installationId",
+        "type",
+      ])
     );
   }
 
