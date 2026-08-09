@@ -59,7 +59,7 @@ describe("local extension bridge", () => {
         message: {
           source: "tabhub-web",
           channel: "tabhub-extension-bridge",
-          version: 2,
+          version: 3,
           requestId: "probe-1",
           type: "probe",
         },
@@ -69,7 +69,7 @@ describe("local extension bridge", () => {
     target.respond({
       source: "tabhub-extension",
       channel: "tabhub-extension-bridge",
-      version: 2,
+      version: 3,
       requestId: "another-request",
       type: "probe",
       ok: true,
@@ -79,12 +79,13 @@ describe("local extension bridge", () => {
     target.respond({
       source: "tabhub-extension",
       channel: "tabhub-extension-bridge",
-      version: 2,
+      version: 3,
       requestId: "probe-1",
       type: "probe",
       ok: true,
       data: {
         available: true,
+        browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
         installationId: "123e4567-e89b-42d3-a456-426614174000",
         browser: "chrome",
       },
@@ -92,6 +93,7 @@ describe("local extension bridge", () => {
 
     await expect(pending).resolves.toEqual({
       available: true,
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
       installationId: "123e4567-e89b-42d3-a456-426614174000",
       browser: "chrome",
     });
@@ -113,6 +115,7 @@ describe("local extension bridge", () => {
 
     await expect(pending).resolves.toEqual({
       available: false,
+      browserSessionId: null,
       installationId: null,
       browser: null,
     });
@@ -132,12 +135,13 @@ describe("local extension bridge", () => {
     target.respond({
       source: "tabhub-extension",
       channel: "tabhub-extension-bridge",
-      version: 2,
+      version: 3,
       requestId: "probe-refresh-1",
       type: "probe",
       ok: true,
       data: {
         available: true,
+        browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
         installationId: "123e4567-e89b-42d3-a456-426614174000",
         browser: null,
       },
@@ -148,12 +152,13 @@ describe("local extension bridge", () => {
     target.respond({
       source: "tabhub-extension",
       channel: "tabhub-extension-bridge",
-      version: 2,
+      version: 3,
       requestId: "probe-refresh-2",
       type: "probe",
       ok: true,
       data: {
         available: true,
+        browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
         installationId: "123e4567-e89b-42d3-a456-426614174000",
         browser: "chrome",
       },
@@ -161,6 +166,105 @@ describe("local extension bridge", () => {
 
     await expect(second).resolves.toMatchObject({ browser: "chrome" });
     expect(target.posted).toHaveLength(2);
+  });
+
+  it("activates one existing physical tab through a correlated request", async () => {
+    const target = new FakeBridgeWindow();
+    const bridge = createExtensionBridge({
+      target,
+      origin: "http://127.0.0.1:7717",
+      requestId: () => "activate-1",
+    });
+
+    const pending = bridge.activate({
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      tabId: 42,
+    });
+
+    expect(target.posted).toEqual([
+      {
+        message: {
+          browser: "chrome",
+          browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+          channel: "tabhub-extension-bridge",
+          installationId: "123e4567-e89b-42d3-a456-426614174000",
+          requestId: "activate-1",
+          source: "tabhub-web",
+          tabId: 42,
+          type: "activate-tab",
+          version: 3,
+        },
+        targetOrigin: "http://127.0.0.1:7717",
+      },
+    ]);
+    target.respond({
+      source: "tabhub-extension",
+      channel: "tabhub-extension-bridge",
+      version: 3,
+      requestId: "activate-1",
+      type: "activate-tab",
+      ok: true,
+      data: {
+        browser: "chrome",
+        browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+        installationId: "123e4567-e89b-42d3-a456-426614174000",
+        tabId: 42,
+        windowId: 7,
+      },
+    });
+
+    await expect(pending).resolves.toEqual({
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      tabId: 42,
+      windowId: 7,
+    });
+  });
+
+  it("rejects an invalid physical activation scope before posting", async () => {
+    const target = new FakeBridgeWindow();
+    const bridge = createExtensionBridge({
+      target,
+      origin: "http://127.0.0.1:7717",
+    });
+
+    await expect(
+      bridge.activate({
+        browser: "chrome",
+        browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+        installationId: "legacy:chrome",
+        tabId: 42,
+      }),
+    ).rejects.toThrow("Invalid physical tab activation target");
+    expect(target.posted).toEqual([]);
+  });
+
+  it("reports an activation timeout as an outcome that may still complete", async () => {
+    vi.useFakeTimers();
+    const target = new FakeBridgeWindow();
+    const bridge = createExtensionBridge({
+      target,
+      origin: "http://127.0.0.1:7717",
+      requestId: () => "activate-timeout",
+      timeouts: { activate: 25 },
+    });
+
+    const pending = bridge.activate({
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      tabId: 42,
+    });
+    const rejection = expect(pending).rejects.toThrow(
+      /outcome is unknown.*still complete/i,
+    );
+    await vi.advanceTimersByTimeAsync(25);
+
+    await rejection;
+    expect(target.listeners.size).toBe(0);
   });
 
   it("previews and closes only the requested exact URLs with explicit confirmation", async () => {
@@ -184,7 +288,7 @@ describe("local extension bridge", () => {
     target.respond({
       source: "tabhub-extension",
       channel: "tabhub-extension-bridge",
-      version: 2,
+      version: 3,
       requestId: "request-1",
       type: "preview-obvious-duplicates",
       ok: true,
@@ -210,7 +314,7 @@ describe("local extension bridge", () => {
     target.respond({
       source: "tabhub-extension",
       channel: "tabhub-extension-bridge",
-      version: 2,
+      version: 3,
       requestId: "request-2",
       type: "close-obvious-duplicates",
       ok: true,
@@ -243,7 +347,7 @@ describe("local extension bridge", () => {
     target.respond({
       source: "tabhub-extension",
       channel: "tabhub-extension-bridge",
-      version: 2,
+      version: 3,
       requestId: "close-1",
       type: "close-obvious-duplicates",
       ok: false,

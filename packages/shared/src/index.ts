@@ -24,6 +24,10 @@ export const installationIdSchema = z.string().uuid();
 
 export type InstallationId = z.infer<typeof installationIdSchema>;
 
+export const browserSessionIdSchema = z.string().uuid();
+
+export type BrowserSessionId = z.infer<typeof browserSessionIdSchema>;
+
 export const browserConfigSchema = z.object({
   browser: browserIdentifierSchema,
 });
@@ -54,10 +58,22 @@ export type SnapshotTab = z.infer<typeof snapshotTabSchema>;
 export const ingestSnapshotSchema = z
   .object({
     browser: browserIdentifierSchema,
+    browserSessionId: browserSessionIdSchema.optional(),
     installationId: installationIdSchema.optional(),
     tabs: z.array(snapshotTabSchema).max(10_000),
   })
   .superRefine((snapshot, context) => {
+    if (
+      snapshot.browserSessionId !== undefined &&
+      snapshot.installationId === undefined
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Browser session identity requires an installation identity",
+        path: ["browserSessionId"],
+      });
+    }
+
     if (snapshot.installationId !== undefined) {
       const seenTabIds = new Set<number>();
       snapshot.tabs.forEach((tab, index) => {
@@ -370,6 +386,7 @@ export const tabInstanceSchema = z.object({
   instanceId: z.number().int().positive(),
   canonicalTabId: tabIdSchema,
   installationId: z.string().min(1),
+  browserSessionId: browserSessionIdSchema.nullable().default(null),
   browserTabId: z.number().int().nonnegative().nullable(),
   url: z.string().trim().min(1),
   urlNormalized: z.string().trim().min(1),

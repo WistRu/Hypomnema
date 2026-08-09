@@ -2335,10 +2335,20 @@ tbody tr.is-selected {
   min-width: 0;
 }
 
-.physical-tab-title > button {
+.physical-tab-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.physical-tab-switch,
+.physical-tab-label {
   display: inline-block;
-  max-width: calc(100% - 42px);
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
+  margin: 0;
   border: 0;
   padding: 0;
   color: #dbe0e8;
@@ -2347,26 +2357,44 @@ tbody tr.is-selected {
   font-weight: 560;
   text-align: left;
   text-overflow: ellipsis;
-  vertical-align: middle;
   white-space: nowrap;
+}
+
+.physical-tab-switch {
   cursor: pointer;
 }
 
-.physical-tab-title > button:hover {
+.physical-tab-switch:hover:not(:disabled) {
   color: #8fa3ff;
 }
 
-.physical-tab-title > a {
-  margin-left: 7px;
+.physical-tab-switch:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.physical-tab-label {
+  color: #9aa4b3;
+}
+
+.physical-tab-details {
+  flex: 0 0 auto;
+  border: 0;
+  padding: 0;
   color: #707b8d;
+  background: transparent;
   font-size: 8px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  text-decoration: none;
   text-transform: uppercase;
+  cursor: pointer;
 }
 
-.physical-tab-title > span,
+.physical-tab-details:hover {
+  color: #9fb0ff;
+}
+
+.physical-tab-url,
 .physical-location {
   display: block;
   overflow: hidden;
@@ -2375,6 +2403,53 @@ tbody tr.is-selected {
   font-size: 9px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.physical-tab-action-state,
+.physical-tab-action-error {
+  display: block;
+  overflow: hidden;
+  margin-top: 3px;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.physical-tab-action-state {
+  color: #697587;
+}
+
+.physical-tab-action-error {
+  color: #f2a2a2;
+}
+
+.open-tab-bridge-status {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #202733;
+  padding: 7px 12px;
+  color: #818c9d;
+  background: #10151c;
+  font-size: 9px;
+}
+
+.open-tab-bridge-status button {
+  flex: 0 0 auto;
+  border: 1px solid #2b3545;
+  border-radius: 5px;
+  padding: 3px 7px;
+  color: #9ba8bc;
+  background: #171e29;
+  font-size: 8px;
+  cursor: pointer;
+}
+
+.open-tab-bridge-status button:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
 .physical-flags {

@@ -1,7 +1,11 @@
 import { snapshotTabFaviconUrlMaxLength } from "@tabhub/shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const storage = vi.hoisted(() => ({
+const localStorage = vi.hoisted(() => ({
+  get: vi.fn(),
+  set: vi.fn(),
+}));
+const sessionStorage = vi.hoisted(() => ({
   get: vi.fn(),
   set: vi.fn(),
 }));
@@ -9,7 +13,8 @@ const storage = vi.hoisted(() => ({
 vi.mock("wxt/browser", () => ({
   browser: {
     storage: {
-      local: storage,
+      local: localStorage,
+      session: sessionStorage,
     },
   },
 }));
@@ -19,6 +24,7 @@ import { createPendingSnapshot } from "./queue";
 import {
   BROWSER_CONFIG_VERSION,
   getBrowserIdentifier,
+  getOrCreateBrowserSessionId,
   getOrCreateInstallationId,
   readQueueState,
   writeIdentityAndQueueState,
@@ -26,18 +32,20 @@ import {
 
 describe("browser identity storage", () => {
   beforeEach(() => {
-    storage.get.mockReset();
-    storage.set.mockReset();
+    localStorage.get.mockReset();
+    localStorage.set.mockReset();
+    sessionStorage.get.mockReset();
+    sessionStorage.set.mockReset();
   });
 
   it("treats a legacy auto-default without an explicit marker as unconfigured", async () => {
-    storage.get.mockResolvedValue({ [STORAGE_KEYS.browser]: "chrome" });
+    localStorage.get.mockResolvedValue({ [STORAGE_KEYS.browser]: "chrome" });
 
     await expect(getBrowserIdentifier()).resolves.toBeUndefined();
   });
 
   it("returns an identity only when the explicit-choice marker is current", async () => {
-    storage.get.mockResolvedValue({
+    localStorage.get.mockResolvedValue({
       [STORAGE_KEYS.browser]: "edge",
       [STORAGE_KEYS.browserConfigured]: BROWSER_CONFIG_VERSION,
     });
@@ -46,11 +54,11 @@ describe("browser identity storage", () => {
   });
 
   it("writes the identity and explicit-choice marker together", async () => {
-    storage.set.mockResolvedValue(undefined);
+    localStorage.set.mockResolvedValue(undefined);
 
     await writeIdentityAndQueueState("yandex", [], []);
 
-    expect(storage.set).toHaveBeenCalledWith({
+    expect(localStorage.set).toHaveBeenCalledWith({
       [STORAGE_KEYS.browser]: "yandex",
       [STORAGE_KEYS.browserConfigured]: BROWSER_CONFIG_VERSION,
       [STORAGE_KEYS.deadLetters]: [],
@@ -59,7 +67,7 @@ describe("browser identity storage", () => {
   });
 
   it("persists the close-old/open-new transition in the supplied order", async () => {
-    storage.set.mockResolvedValue(undefined);
+    localStorage.set.mockResolvedValue(undefined);
     const closeOld = createPendingSnapshot(
       { browser: "chrome", tabs: [] },
       "close-old",
@@ -74,7 +82,7 @@ describe("browser identity storage", () => {
 
     await writeIdentityAndQueueState("edge", [closeOld, openNew], []);
 
-    expect(storage.set).toHaveBeenCalledWith(
+    expect(localStorage.set).toHaveBeenCalledWith(
       expect.objectContaining({
         [STORAGE_KEYS.browser]: "edge",
         [STORAGE_KEYS.pendingSnapshots]: [closeOld, openNew],
@@ -100,7 +108,7 @@ describe("browser identity storage", () => {
         ],
       },
     };
-    storage.get.mockResolvedValue({
+    localStorage.get.mockResolvedValue({
       [STORAGE_KEYS.deadLetters]: [],
       [STORAGE_KEYS.pendingSnapshots]: [legacyOversizedSnapshot],
     });
@@ -123,13 +131,15 @@ describe("browser identity storage", () => {
 
 describe("installation identity storage", () => {
   beforeEach(() => {
-    storage.get.mockReset();
-    storage.set.mockReset();
+    localStorage.get.mockReset();
+    localStorage.set.mockReset();
+    sessionStorage.get.mockReset();
+    sessionStorage.set.mockReset();
   });
 
   it("creates one stable UUID when concurrent callers find no stored identity", async () => {
-    storage.get.mockResolvedValue({});
-    storage.set.mockResolvedValue(undefined);
+    localStorage.get.mockResolvedValue({});
+    localStorage.set.mockResolvedValue(undefined);
 
     const [first, second] = await Promise.all([
       getOrCreateInstallationId(),
@@ -140,33 +150,87 @@ describe("installation identity storage", () => {
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
     expect(second).toBe(first);
-    expect(storage.get).toHaveBeenCalledTimes(1);
-    expect(storage.set).toHaveBeenCalledWith({
+    expect(localStorage.get).toHaveBeenCalledTimes(1);
+    expect(localStorage.set).toHaveBeenCalledWith({
       [STORAGE_KEYS.installationId]: first,
     });
   });
 
   it("reuses a valid stored installation UUID without rewriting storage", async () => {
     const installationId = "123e4567-e89b-42d3-a456-426614174000";
-    storage.get.mockResolvedValue({
+    localStorage.get.mockResolvedValue({
       [STORAGE_KEYS.installationId]: installationId,
     });
 
     await expect(getOrCreateInstallationId()).resolves.toBe(installationId);
-    expect(storage.set).not.toHaveBeenCalled();
+    expect(localStorage.set).not.toHaveBeenCalled();
   });
 
   it("replaces malformed stored installation identity", async () => {
-    storage.get.mockResolvedValue({
+    localStorage.get.mockResolvedValue({
       [STORAGE_KEYS.installationId]: "not-an-installation-uuid",
     });
-    storage.set.mockResolvedValue(undefined);
+    localStorage.set.mockResolvedValue(undefined);
 
     const installationId = await getOrCreateInstallationId();
 
     expect(installationId).not.toBe("not-an-installation-uuid");
-    expect(storage.set).toHaveBeenCalledWith({
+    expect(localStorage.set).toHaveBeenCalledWith({
       [STORAGE_KEYS.installationId]: installationId,
     });
+  });
+});
+
+describe("browser session identity storage", () => {
+  beforeEach(() => {
+    localStorage.get.mockReset();
+    localStorage.set.mockReset();
+    sessionStorage.get.mockReset();
+    sessionStorage.set.mockReset();
+  });
+
+  it("creates one UUID in session storage for concurrent startup paths", async () => {
+    sessionStorage.get.mockResolvedValue({});
+    sessionStorage.set.mockResolvedValue(undefined);
+
+    const [first, second] = await Promise.all([
+      getOrCreateBrowserSessionId(),
+      getOrCreateBrowserSessionId(),
+    ]);
+
+    expect(first).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(second).toBe(first);
+    expect(sessionStorage.get).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.set).toHaveBeenCalledWith({
+      [STORAGE_KEYS.browserSessionId]: first,
+    });
+    expect(localStorage.set).not.toHaveBeenCalled();
+  });
+
+  it("reuses a valid UUID for service-worker restarts in the same browser session", async () => {
+    const browserSessionId = "223e4567-e89b-42d3-a456-426614174000";
+    sessionStorage.get.mockResolvedValue({
+      [STORAGE_KEYS.browserSessionId]: browserSessionId,
+    });
+
+    await expect(getOrCreateBrowserSessionId()).resolves.toBe(browserSessionId);
+    expect(sessionStorage.set).not.toHaveBeenCalled();
+  });
+
+  it("replaces malformed browser-session identity without touching persistent storage", async () => {
+    sessionStorage.get.mockResolvedValue({
+      [STORAGE_KEYS.browserSessionId]: "not-a-session-uuid",
+    });
+    sessionStorage.set.mockResolvedValue(undefined);
+
+    const browserSessionId = await getOrCreateBrowserSessionId();
+
+    expect(browserSessionId).not.toBe("not-a-session-uuid");
+    expect(sessionStorage.set).toHaveBeenCalledWith({
+      [STORAGE_KEYS.browserSessionId]: browserSessionId,
+    });
+    expect(localStorage.set).not.toHaveBeenCalled();
   });
 });

@@ -6,9 +6,14 @@ import {
   parseScopedDuplicateUrls,
 } from "./messages";
 import { isDuplicatePreviewId } from "./duplicate-preview-registry";
+import {
+  isBrowserSessionId,
+  isInstallationId,
+  isKnownBrowser,
+} from "./storage";
 
 export const BRIDGE_CHANNEL = "tabhub-extension-bridge" as const;
-export const BRIDGE_VERSION = 2 as const;
+export const BRIDGE_VERSION = 3 as const;
 
 interface BridgeRequestBase {
   channel: typeof BRIDGE_CHANNEL;
@@ -20,6 +25,13 @@ interface BridgeRequestBase {
 export type BridgeRequest = BridgeRequestBase &
   (
     | { type: "probe" }
+    | {
+        browser: "chrome" | "edge" | "other" | "yandex";
+        browserSessionId: string;
+        installationId: string;
+        tabId: number;
+        type: "activate-tab";
+      }
     | { type: "preview-obvious-duplicates"; urls?: string[] }
     | {
         confirmed: true;
@@ -78,6 +90,38 @@ export function parseBridgeRequest(value: unknown): BridgeRequest | undefined {
     ])
       ? { ...base, type: "probe" }
       : undefined;
+  }
+
+  if (value.type === "activate-tab") {
+    if (
+      !isKnownBrowser(value.browser) ||
+      !isBrowserSessionId(value.browserSessionId) ||
+      !isInstallationId(value.installationId) ||
+      !Number.isInteger(value.tabId) ||
+      (value.tabId as number) < 0 ||
+      !hasOnlyKeys(value, [
+        "browser",
+        "browserSessionId",
+        "channel",
+        "installationId",
+        "requestId",
+        "source",
+        "tabId",
+        "type",
+        "version",
+      ])
+    ) {
+      return undefined;
+    }
+
+    return {
+      ...base,
+      browser: value.browser,
+      browserSessionId: value.browserSessionId as string,
+      installationId: value.installationId as string,
+      tabId: value.tabId as number,
+      type: "activate-tab",
+    };
   }
 
   if (
@@ -143,6 +187,14 @@ export function toAppExtensionRequest(
   switch (request.type) {
     case "probe":
       return { type: "tabhub:app-probe" };
+    case "activate-tab":
+      return {
+        browser: request.browser,
+        browserSessionId: request.browserSessionId,
+        installationId: request.installationId,
+        tabId: request.tabId,
+        type: "tabhub:app-activate-tab",
+      };
     case "preview-obvious-duplicates":
       return {
         type: "tabhub:app-preview-obvious-duplicates",

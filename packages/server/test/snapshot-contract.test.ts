@@ -52,6 +52,91 @@ describe("snapshot transport contract", () => {
     }
   });
 
+  it("preserves an optional browser session UUID on modern snapshots", () => {
+    const browserSessionId = "04f67f70-8f3b-4a60-a2a7-2b744b34d615";
+    const modernSnapshot = {
+      browser: "chrome" as const,
+      installationId: "8d279c3a-f258-4ce8-8cc2-82b2f444c5aa",
+      tabs: [
+        {
+          tabId: 41,
+          url: "https://example.com/session-contract",
+          windowId: 1,
+          index: 0,
+        },
+      ],
+    };
+
+    expect(ingestSnapshotSchema.safeParse(modernSnapshot).success).toBe(true);
+    expect(
+      ingestSnapshotSchema.parse({
+        ...modernSnapshot,
+        browserSessionId,
+      }),
+    ).toMatchObject({ browserSessionId });
+  });
+
+  it("rejects a malformed browser session ID", () => {
+    const parsed = ingestSnapshotSchema.safeParse({
+      browser: "chrome",
+      installationId: "99b309a7-65f4-4a5f-9ccc-7a9c25039ecf",
+      browserSessionId: "not-a-uuid",
+      tabs: [
+        {
+          tabId: 42,
+          url: "https://example.com/invalid-session-contract",
+          windowId: 1,
+          index: 0,
+        },
+      ],
+    });
+
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ path: ["browserSessionId"] }),
+        ]),
+      );
+    }
+  });
+
+  it.each([
+    {
+      browserSessionId: null,
+      installationId: "99b309a7-65f4-4a5f-9ccc-7a9c25039ecf",
+      label: "an explicit null session",
+    },
+    {
+      browserSessionId: "04f67f70-8f3b-4a60-a2a7-2b744b34d615",
+      installationId: undefined,
+      label: "a session without an installation",
+    },
+  ])("rejects $label", ({ browserSessionId, installationId }) => {
+    const parsed = ingestSnapshotSchema.safeParse({
+      browser: "chrome",
+      browserSessionId,
+      ...(installationId === undefined ? {} : { installationId }),
+      tabs: [
+        {
+          tabId: 43,
+          url: "https://example.com/invalid-session-scope",
+          windowId: 1,
+          index: 0,
+        },
+      ],
+    });
+
+    expect(parsed.success).toBe(false);
+    if (!parsed.success) {
+      expect(parsed.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ path: ["browserSessionId"] }),
+        ]),
+      );
+    }
+  });
+
   it("rejects duplicate native tab IDs in one modern snapshot atomically", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-duplicate-native-id-"));
     const app = createApp({

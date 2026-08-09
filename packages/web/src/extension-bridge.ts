@@ -1,8 +1,9 @@
 const BRIDGE_CHANNEL = "tabhub-extension-bridge" as const;
-const BRIDGE_VERSION = 2 as const;
+const BRIDGE_VERSION = 3 as const;
 
 type BridgeRequestType =
   | "probe"
+  | "activate-tab"
   | "preview-obvious-duplicates"
   | "close-obvious-duplicates";
 
@@ -21,12 +22,14 @@ interface BridgeWindow {
 export interface ExtensionProbeAvailable {
   available: true;
   installationId: string;
+  browserSessionId: string;
   browser: string | null;
 }
 
 export interface ExtensionProbeUnavailable {
   available: false;
   installationId: null;
+  browserSessionId: null;
   browser: null;
 }
 
@@ -51,8 +54,20 @@ export interface DuplicateCloseResult {
   failed: number;
 }
 
+export interface TabActivationTarget {
+  browser: string;
+  browserSessionId: string;
+  installationId: string;
+  tabId: number;
+}
+
+export interface TabActivationResult extends TabActivationTarget {
+  windowId: number;
+}
+
 export interface ExtensionBridge {
   probe(): Promise<ExtensionProbe>;
+  activate(target: TabActivationTarget): Promise<TabActivationResult>;
   preview(urls?: string[]): Promise<DuplicateClosePreview>;
   close(previewId: string): Promise<DuplicateCloseResult>;
 }
@@ -61,7 +76,7 @@ interface ExtensionBridgeOptions {
   target: BridgeWindow;
   origin: string;
   requestId?: () => string;
-  timeouts?: Partial<Record<"probe" | "preview" | "close", number>>;
+  timeouts?: Partial<Record<"probe" | "activate" | "preview" | "close", number>>;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -75,7 +90,11 @@ export class ExtensionBridgeError extends Error {
 
 export class ExtensionBridgeTimeoutError extends ExtensionBridgeError {
   constructor(type: BridgeRequestType) {
-    super(`TabHub extension did not answer the ${type} request in time.`);
+    super(
+      type === "activate-tab"
+        ? "Tab switching timed out. The outcome is unknown and the switch may still complete."
+        : `TabHub extension did not answer the ${type} request in time.`,
+    );
     this.name = "ExtensionBridgeTimeoutError";
   }
 }
@@ -109,8 +128,15 @@ function isKnownBrowser(value: unknown): value is string {
 function parseProbe(value: unknown): ExtensionProbeAvailable {
   if (
     !isRecord(value) ||
-    !hasOnlyKeys(value, ["available", "browser", "installationId"]) ||
+    !hasOnlyKeys(value, [
+      "available",
+      "browser",
+      "browserSessionId",
+      "installationId",
+    ]) ||
     value.available !== true ||
+    typeof value.browserSessionId !== "string" ||
+    !uuidPattern.test(value.browserSessionId) ||
     typeof value.installationId !== "string" ||
     !uuidPattern.test(value.installationId) ||
     (value.browser !== null && !isKnownBrowser(value.browser))
@@ -120,6 +146,7 @@ function parseProbe(value: unknown): ExtensionProbeAvailable {
 
   return {
     available: true,
+    browserSessionId: value.browserSessionId,
     installationId: value.installationId,
     browser: value.browser as string | null,
   };
@@ -190,6 +217,51 @@ function parseClose(value: unknown): DuplicateCloseResult {
   };
 }
 
+function parseActivation(value: unknown): TabActivationResult {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, [
+      "browser",
+      "browserSessionId",
+      "installationId",
+      "tabId",
+      "windowId",
+    ]) ||
+    !isKnownBrowser(value.browser) ||
+    typeof value.browserSessionId !== "string" ||
+    !uuidPattern.test(value.browserSessionId) ||
+    typeof value.installationId !== "string" ||
+    !uuidPattern.test(value.installationId) ||
+    !isNonNegativeInteger(value.tabId) ||
+    !isNonNegativeInteger(value.windowId)
+  ) {
+    throw new ExtensionBridgeError(
+      "TabHub extension returned an invalid tab-activation result.",
+    );
+  }
+
+  return {
+    browser: value.browser,
+    browserSessionId: value.browserSessionId,
+    installationId: value.installationId,
+    tabId: value.tabId,
+    windowId: value.windowId,
+  };
+}
+
+function activationTarget(target: TabActivationTarget): TabActivationTarget {
+  if (
+    !isKnownBrowser(target.browser) ||
+    !uuidPattern.test(target.browserSessionId) ||
+    !uuidPattern.test(target.installationId) ||
+    !isNonNegativeInteger(target.tabId)
+  ) {
+    throw new ExtensionBridgeError("Invalid physical tab activation target.");
+  }
+
+  return target;
+}
+
 function scopedUrls(urls: string[] | undefined): string[] | undefined {
   if (urls === undefined) return undefined;
   if (urls.length === 0) {
@@ -223,6 +295,7 @@ export function createExtensionBridge(
   const makeRequestId = options.requestId ?? defaultRequestId;
   const timeouts = {
     probe: options.timeouts?.probe ?? 2_000,
+    activate: options.timeouts?.activate ?? 5_000,
     preview: options.timeouts?.preview ?? 5_000,
     close: options.timeouts?.close ?? 30_000,
   };
@@ -300,10 +373,23 @@ export function createExtensionBridge(
         return await request("probe", timeouts.probe, parseProbe);
       } catch (error) {
         if (error instanceof ExtensionBridgeTimeoutError) {
-          return { available: false, installationId: null, browser: null };
+          return {
+            available: false,
+            browser: null,
+            browserSessionId: null,
+            installationId: null,
+          };
         }
         throw error;
       }
+    },
+    async activate(target) {
+      return request(
+        "activate-tab",
+        timeouts.activate,
+        parseActivation,
+        { ...activationTarget(target) },
+      );
     },
     preview(urls) {
       const scoped = scopedUrls(urls);

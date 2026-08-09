@@ -11,11 +11,38 @@ function baseRequest() {
     channel: "tabhub-extension-bridge",
     requestId: "request-1",
     source: "tabhub-web",
-    version: 2,
+    version: 3,
   };
 }
 
 describe("parseBridgeRequest", () => {
+  it("parses and scopes an exact physical-tab activation request", () => {
+    const parsed = parseBridgeRequest({
+      ...baseRequest(),
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      tabId: 42,
+      type: "activate-tab",
+    });
+
+    expect(parsed).toEqual({
+      ...baseRequest(),
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      tabId: 42,
+      type: "activate-tab",
+    });
+    expect(parsed && toAppExtensionRequest(parsed)).toEqual({
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      tabId: 42,
+      type: "tabhub:app-activate-tab",
+    });
+  });
+
   it("parses a strict confirmed close envelope and trims its unique URLs", () => {
     const parsed = parseBridgeRequest({
       ...baseRequest(),
@@ -38,6 +65,14 @@ describe("parseBridgeRequest", () => {
   });
 
   it.each([
+    {
+      ...baseRequest(),
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      tabId: -1,
+      type: "activate-tab",
+    },
     { ...baseRequest(), type: "close-obvious-duplicates" },
     {
       ...baseRequest(),
@@ -52,6 +87,7 @@ describe("parseBridgeRequest", () => {
       type: "close-obvious-duplicates",
     },
     { ...baseRequest(), extra: true, type: "probe" },
+    { ...baseRequest(), type: "probe", version: 2 },
     { ...baseRequest(), requestId: "spaces are rejected", type: "probe" },
     { ...baseRequest(), source: "untrusted-page", type: "probe" },
     {
@@ -74,6 +110,7 @@ describe("createBridgeResponse", () => {
         data: {
           available: true,
           browser: "chrome",
+          browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
           installationId: "123e4567-e89b-42d3-a456-426614174000",
         },
         ok: true,
@@ -87,6 +124,7 @@ describe("createBridgeResponse", () => {
       data: {
         available: true,
         browser: "chrome",
+        browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
         installationId: "123e4567-e89b-42d3-a456-426614174000",
       },
     });

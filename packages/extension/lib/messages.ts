@@ -1,7 +1,12 @@
 import { knownBrowserOptions, tabUrlMaxLength } from "@tabhub/shared";
 
 import { isDuplicatePreviewId } from "./duplicate-preview-registry";
-import type { KnownBrowser } from "./storage";
+import {
+  isBrowserSessionId,
+  isInstallationId,
+  isKnownBrowser,
+  type KnownBrowser,
+} from "./storage";
 
 export type ExtensionRequest =
   | { type: "tabhub:get-status" }
@@ -10,6 +15,13 @@ export type ExtensionRequest =
   | { type: "tabhub:capture-all" }
   | { type: "tabhub:browser-changed"; browser: KnownBrowser }
   | { type: "tabhub:app-probe" }
+  | {
+      browser: KnownBrowser;
+      browserSessionId: string;
+      installationId: string;
+      tabId: number;
+      type: "tabhub:app-activate-tab";
+    }
   | {
       type: "tabhub:app-preview-obvious-duplicates";
       urls?: string[];
@@ -22,12 +34,14 @@ export type ExtensionRequest =
 
 export type BridgeRequestType =
   | "probe"
+  | "activate-tab"
   | "preview-obvious-duplicates"
   | "close-obvious-duplicates";
 
 export interface AppProbeData {
   available: true;
   browser: KnownBrowser | null;
+  browserSessionId: string;
   installationId: string;
 }
 
@@ -40,6 +54,14 @@ export interface AppDuplicatePreviewData {
   totalProtected: number;
 }
 
+export interface AppTabActivationData {
+  browser: KnownBrowser;
+  browserSessionId: string;
+  installationId: string;
+  tabId: number;
+  windowId: number;
+}
+
 export interface AppDuplicateCloseData {
   browser: KnownBrowser;
   closed: number;
@@ -50,6 +72,7 @@ export interface AppDuplicateCloseData {
 
 export type AppExtensionResponse =
   | { data: AppProbeData; ok: true; type: "probe" }
+  | { data: AppTabActivationData; ok: true; type: "activate-tab" }
   | {
       data: AppDuplicatePreviewData;
       ok: true;
@@ -192,6 +215,23 @@ export function isExtensionRequest(value: unknown): value is ExtensionRequest {
 
   if (type === "tabhub:app-probe") {
     return hasOnlyKeys(value, ["type"]);
+  }
+
+  if (type === "tabhub:app-activate-tab") {
+    return (
+      isKnownBrowser(value.browser) &&
+      isBrowserSessionId(value.browserSessionId) &&
+      isInstallationId(value.installationId) &&
+      Number.isInteger(value.tabId) &&
+      (value.tabId as number) >= 0 &&
+      hasOnlyKeys(value, [
+        "browser",
+        "browserSessionId",
+        "installationId",
+        "tabId",
+        "type",
+      ])
+    );
   }
 
   if (type === "tabhub:app-preview-obvious-duplicates") {

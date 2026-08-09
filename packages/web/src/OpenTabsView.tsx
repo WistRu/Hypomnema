@@ -1,9 +1,18 @@
 import type { TabInstance } from "@tabhub/shared";
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
 
 import { fetchOpenTabs } from "./api";
 import { DuplicateReview } from "./DuplicateReview";
+import {
+  createWindowExtensionBridge,
+  ExtensionBridgeError,
+  type ExtensionProbe,
+} from "./extension-bridge";
+import {
+  tabActivationAvailability,
+  type TabActivationAvailability,
+} from "./open-tab-activation";
 import { clampPage, isTrulyEmptyPage } from "./pagination";
 
 const BROWSER_LABELS: Record<string, string> = {
@@ -41,11 +50,38 @@ function physicalLocation(tab: TabInstance): string {
   return `Window ${tab.windowId} | position ${tab.index + 1} | ${tabId}`;
 }
 
+function unavailableLabel(activation: Exclude<TabActivationAvailability, { kind: "ready" }>): string {
+  switch (activation.kind) {
+    case "checking":
+      return "Checking extension";
+    case "bridge-unavailable":
+      return "Extension unavailable";
+    case "identity-unconfigured":
+      return "Identity required";
+    case "missing-tab-id":
+      return "Waiting for snapshot";
+    case "other-installation":
+      return "Other installation";
+    case "waiting-for-current-session":
+      return "Waiting for current session";
+  }
+}
+
 export function OpenTabRow({
+  activation,
+  activationError,
+  activationInProgress = false,
+  isActivating = false,
   tab,
+  onActivateTab,
   onSelectCanonicalTab,
 }: {
+  activation: TabActivationAvailability;
+  activationError?: string | undefined;
+  activationInProgress?: boolean | undefined;
+  isActivating?: boolean | undefined;
   tab: TabInstance;
+  onActivateTab: (tab: TabInstance) => void;
   onSelectCanonicalTab: (id: number) => void;
 }) {
   const label = tab.title?.trim() || hostname(tab.url);
@@ -54,18 +90,44 @@ export function OpenTabRow({
     <tr>
       <td>
         <div className="physical-tab-title">
-          <button type="button" onClick={() => onSelectCanonicalTab(tab.canonicalTabId)}>
-            {label}
-          </button>
-          <a
-            aria-label={`Open ${label} in a new tab`}
-            href={tab.url}
-            rel="noreferrer"
-            target="_blank"
-          >
-            Open
-          </a>
-          <span dir="ltr" title={tab.url}>{tab.url}</span>
+          <div className="physical-tab-heading">
+            {activation.kind === "ready" ? (
+              <button
+                aria-label={`Switch to existing tab: ${label}`}
+                className="physical-tab-switch"
+                disabled={activationInProgress || isActivating}
+                title="Switch to this existing browser tab"
+                type="button"
+                onClick={() => onActivateTab(tab)}
+              >
+                {label}
+              </button>
+            ) : (
+              <span className="physical-tab-label" title={activation.message}>
+                {label}
+              </span>
+            )}
+            <button
+              className="physical-tab-details"
+              type="button"
+              onClick={() => onSelectCanonicalTab(tab.canonicalTabId)}
+            >
+              Details
+            </button>
+          </div>
+          <span className="physical-tab-url" dir="ltr" title={tab.url}>{tab.url}</span>
+          {activation.kind === "ready" ? (
+            isActivating ? <span className="physical-tab-action-state">Switching...</span> : null
+          ) : (
+            <span className="physical-tab-action-state" title={activation.message}>
+              {unavailableLabel(activation)}
+            </span>
+          )}
+          {activationError ? (
+            <span className="physical-tab-action-error" role="alert">
+              {activationError}
+            </span>
+          ) : null}
         </div>
       </td>
       <td>
@@ -107,7 +169,15 @@ export function OpenTabsView({
   const [duplicatesOnly, setDuplicatesOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const bridge = useMemo(() => createWindowExtensionBridge(), []);
   const q = useDebouncedValue(search, 300).trim();
+  const probeQuery = useQuery({
+    queryKey: ["extension-bridge", "probe"],
+    queryFn: () => bridge.probe(),
+    retry: false,
+    refetchOnWindowFocus: "always",
+    staleTime: 10_000,
+  });
   const openTabsQuery = useQuery({
     queryKey: ["tab-instances", { browser, duplicatesOnly, page, q }],
     queryFn: ({ signal }) =>
@@ -122,6 +192,38 @@ export function OpenTabsView({
         signal,
       ),
     refetchInterval: 15_000,
+  });
+  const activationProbe: ExtensionProbe | undefined = probeQuery.isError
+    ? {
+        available: false,
+        browser: null,
+        browserSessionId: null,
+        installationId: null,
+      }
+    : probeQuery.data;
+  const activationMutation = useMutation({
+    mutationFn: async (tab: TabInstance) => {
+      const availability = tabActivationAvailability(tab, activationProbe);
+      if (availability.kind !== "ready") {
+        throw new ExtensionBridgeError(availability.message);
+      }
+
+      const result = await bridge.activate(availability.target);
+      if (
+        result.browser !== availability.target.browser ||
+        result.browserSessionId !== availability.target.browserSessionId ||
+        result.installationId !== availability.target.installationId ||
+        result.tabId !== availability.target.tabId
+      ) {
+        throw new ExtensionBridgeError(
+          "The extension activated a different physical tab than requested.",
+        );
+      }
+      return result;
+    },
+    onError: async () => {
+      await Promise.all([openTabsQuery.refetch(), physicalCountQuery.refetch()]);
+    },
   });
   const tabs = openTabsQuery.data?.items ?? [];
   const totalPages = openTabsQuery.data
@@ -173,6 +275,24 @@ export function OpenTabsView({
       />
 
       <div className="table-panel physical-table-panel">
+        <div className="open-tab-bridge-status" role="status">
+          <span>
+            {probeQuery.isPending
+              ? "Checking the local TabHub extension..."
+              : activationProbe?.available && activationProbe.browser !== null
+                ? `Connected to ${browserLabel(activationProbe.browser)}. Click a tab title to switch to that existing tab.`
+                : activationProbe?.available
+                  ? "Choose this extension's browser identity before switching tabs."
+                  : "Open TabHub in the target browser and reload the updated extension to switch tabs."}
+          </span>
+          <button
+            disabled={probeQuery.isFetching}
+            type="button"
+            onClick={() => void probeQuery.refetch()}
+          >
+            {probeQuery.isFetching ? "Checking..." : "Re-check extension"}
+          </button>
+        </div>
         <div className="filter-bar">
           <label className="search-field physical-search-field">
             <span>Search open tab titles and URLs</span>
@@ -229,8 +349,21 @@ export function OpenTabsView({
             <tbody>
               {tabs.map((tab) => (
                 <OpenTabRow
+                  activation={tabActivationAvailability(tab, activationProbe)}
+                  activationInProgress={activationMutation.isPending}
+                  activationError={
+                    activationMutation.isError &&
+                    activationMutation.variables?.instanceId === tab.instanceId
+                      ? activationMutation.error.message
+                      : undefined
+                  }
+                  isActivating={
+                    activationMutation.isPending &&
+                    activationMutation.variables?.instanceId === tab.instanceId
+                  }
                   key={tab.instanceId}
                   tab={tab}
+                  onActivateTab={(target) => activationMutation.mutate(target)}
                   onSelectCanonicalTab={onSelectCanonicalTab}
                 />
               ))}

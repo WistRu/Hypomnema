@@ -27,7 +27,7 @@ describe("GET /api/health", () => {
       expect(healthResponseSchema.parse(response.json())).toEqual({
         status: "ok",
         database: "ok",
-        schemaVersion: 6,
+        schemaVersion: 7,
       });
     } finally {
       await app.close();
@@ -54,7 +54,7 @@ describe("GET /api/health", () => {
 
         expect(response.statusCode).toBe(200);
         expect(healthResponseSchema.parse(response.json()).schemaVersion).toBe(
-          6,
+          7,
         );
       } finally {
         await reopenedApp.close();
@@ -109,7 +109,7 @@ describe("GET /api/health", () => {
         method: "GET",
         url: "/api/health",
       });
-      expect(healthResponse.json().schemaVersion).toBe(6);
+      expect(healthResponse.json().schemaVersion).toBe(7);
 
       const physicalResponse = await app.inject({
         method: "GET",
@@ -206,7 +206,7 @@ describe("GET /api/health", () => {
     try {
       const response = await app.inject({ method: "GET", url: "/api/health" });
       expect(response.statusCode).toBe(200);
-      expect(response.json().schemaVersion).toBe(6);
+      expect(response.json().schemaVersion).toBe(7);
 
       const tags = await app.inject({ method: "GET", url: "/api/tags" });
       const paths = tags

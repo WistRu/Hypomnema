@@ -12,6 +12,7 @@ import {
 } from "./tab-snapshot";
 
 const INSTALLATION_ID = "123e4567-e89b-42d3-a456-426614174000";
+const BROWSER_SESSION_ID = "223e4567-e89b-42d3-a456-426614174000";
 
 describe("toSnapshotTab", () => {
   it("maps the fields accepted by the snapshot endpoint", () => {
@@ -42,7 +43,7 @@ describe("toSnapshotTab", () => {
 
   it("omits tabs whose URL is not visible to the extension", () => {
     expect(
-      buildSnapshot("edge", INSTALLATION_ID, [
+      buildSnapshot("edge", INSTALLATION_ID, BROWSER_SESSION_ID, [
         { index: 0, title: "Unavailable", windowId: 1 },
         {
           id: 7,
@@ -54,6 +55,7 @@ describe("toSnapshotTab", () => {
       ]),
     ).toEqual({
       browser: "edge",
+      browserSessionId: BROWSER_SESSION_ID,
       installationId: INSTALLATION_ID,
       tabs: [
         {
@@ -74,7 +76,7 @@ describe("toSnapshotTab", () => {
     const oversizedTitle = "t".repeat(snapshotTabTitleMaxLength + 100);
 
     expect(
-      buildSnapshot("chrome", INSTALLATION_ID, [
+      buildSnapshot("chrome", INSTALLATION_ID, BROWSER_SESSION_ID, [
         {
           favIconUrl: oversizedFavicon,
           id: 8,
@@ -100,6 +102,7 @@ describe("toSnapshotTab", () => {
       ]),
     ).toEqual({
       browser: "chrome",
+      browserSessionId: BROWSER_SESSION_ID,
       installationId: INSTALLATION_ID,
       tabs: [
         {
@@ -121,7 +124,7 @@ describe("toSnapshotTab", () => {
   });
 
   it("preserves physical duplicate tabs and their browser-local identities", () => {
-    const snapshot = buildSnapshot("chrome", INSTALLATION_ID, [
+    const snapshot = buildSnapshot("chrome", INSTALLATION_ID, BROWSER_SESSION_ID, [
       {
         active: true,
         id: 101,
@@ -160,7 +163,7 @@ describe("toSnapshotTab", () => {
 
   it("drops a URL-bearing record without a native tab ID from a modern snapshot", () => {
     expect(
-      buildSnapshot("chrome", INSTALLATION_ID, [
+      buildSnapshot("chrome", INSTALLATION_ID, BROWSER_SESSION_ID, [
         {
           index: 0,
           url: "https://example.com/not-yet-identifiable",
@@ -178,7 +181,7 @@ describe("toSnapshotTab", () => {
 
   it("uses a pending URL while a newly-created tab has no committed URL", () => {
     expect(
-      buildSnapshot("chrome", INSTALLATION_ID, [
+      buildSnapshot("chrome", INSTALLATION_ID, BROWSER_SESSION_ID, [
         {
           active: false,
           id: 303,
@@ -199,7 +202,7 @@ describe("toSnapshotTab", () => {
 
   it("prefers the pending URL over a stale committed URL during navigation", () => {
     expect(
-      buildSnapshot("chrome", INSTALLATION_ID, [
+      buildSnapshot("chrome", INSTALLATION_ID, BROWSER_SESSION_ID, [
         {
           active: true,
           id: 304,
@@ -220,7 +223,7 @@ describe("toSnapshotTab", () => {
   });
 
   it("accepts a captured redirect after the current snapshot observes the redirected URL", () => {
-    const snapshot = buildSnapshot("chrome", INSTALLATION_ID, [
+    const snapshot = buildSnapshot("chrome", INSTALLATION_ID, BROWSER_SESSION_ID, [
       {
         active: true,
         id: 404,
@@ -257,7 +260,12 @@ describe("toSnapshotTab", () => {
   });
 
   it("does not resurrect a captured tab absent from the current snapshot", () => {
-    const snapshot = buildSnapshot("chrome", INSTALLATION_ID, []);
+    const snapshot = buildSnapshot(
+      "chrome",
+      INSTALLATION_ID,
+      BROWSER_SESSION_ID,
+      [],
+    );
 
     expect(
       reconcileCapturedTabUrl(snapshot, {
@@ -271,7 +279,7 @@ describe("toSnapshotTab", () => {
   });
 
   it("does not attach captured content after the same native tab navigates elsewhere", () => {
-    const snapshot = buildSnapshot("chrome", INSTALLATION_ID, [
+    const snapshot = buildSnapshot("chrome", INSTALLATION_ID, BROWSER_SESSION_ID, [
       {
         id: 406,
         index: 2,
@@ -302,7 +310,7 @@ describe("toSnapshotTab", () => {
   });
 
   it("rejects captured content while the same native tab has a pending navigation", () => {
-    const snapshot = buildSnapshot("chrome", INSTALLATION_ID, [
+    const snapshot = buildSnapshot("chrome", INSTALLATION_ID, BROWSER_SESSION_ID, [
       {
         id: 407,
         index: 2,
@@ -345,12 +353,19 @@ describe("buildIdentityTransitionSnapshots", () => {
         "chrome",
         "edge",
         INSTALLATION_ID,
+        BROWSER_SESSION_ID,
         tabs,
       ),
     ).toEqual([
-      { browser: "chrome", installationId: INSTALLATION_ID, tabs: [] },
+      {
+        browser: "chrome",
+        browserSessionId: BROWSER_SESSION_ID,
+        installationId: INSTALLATION_ID,
+        tabs: [],
+      },
       {
         browser: "edge",
+        browserSessionId: BROWSER_SESSION_ID,
         installationId: INSTALLATION_ID,
         tabs: [
           {
@@ -371,11 +386,13 @@ describe("buildIdentityTransitionSnapshots", () => {
         undefined,
         "yandex",
         INSTALLATION_ID,
+        BROWSER_SESSION_ID,
         tabs,
       ),
     ).toEqual([
       {
         browser: "yandex",
+        browserSessionId: BROWSER_SESSION_ID,
         installationId: INSTALLATION_ID,
         tabs: [
           {

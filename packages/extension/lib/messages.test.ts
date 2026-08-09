@@ -24,8 +24,17 @@ describe("isExtensionRequest", () => {
     expect(isExtensionRequest(message)).toBe(false);
   });
 
-  it("accepts probe, scoped preview, and explicitly-confirmed close requests", () => {
+  it("accepts probe, activation, scoped preview, and explicitly-confirmed close requests", () => {
     expect(isExtensionRequest({ type: "tabhub:app-probe" })).toBe(true);
+    expect(
+      isExtensionRequest({
+        browser: "chrome",
+        browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+        installationId: "123e4567-e89b-42d3-a456-426614174000",
+        tabId: 42,
+        type: "tabhub:app-activate-tab",
+      }),
+    ).toBe(true);
     expect(
       isExtensionRequest({
         type: "tabhub:app-preview-obvious-duplicates",
@@ -42,6 +51,48 @@ describe("isExtensionRequest", () => {
   });
 
   it.each([
+    {
+      browser: "firefox",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      tabId: 42,
+      type: "tabhub:app-activate-tab",
+    },
+    {
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "not-an-installation-id",
+      tabId: 42,
+      type: "tabhub:app-activate-tab",
+    },
+    {
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      tabId: -1,
+      type: "tabhub:app-activate-tab",
+    },
+    {
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      tabId: 7,
+      type: "tabhub:app-activate-tab",
+      unexpected: true,
+    },
+    {
+      browser: "chrome",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      tabId: 7,
+      type: "tabhub:app-activate-tab",
+    },
+    {
+      browser: "chrome",
+      browserSessionId: "not-a-browser-session-id",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      tabId: 7,
+      type: "tabhub:app-activate-tab",
+    },
     { type: "tabhub:app-close-obvious-duplicates" },
     { confirmed: false, type: "tabhub:app-close-obvious-duplicates" },
     {
@@ -63,7 +114,7 @@ describe("isExtensionRequest", () => {
       type: "tabhub:app-preview-obvious-duplicates",
       urls: ["https://example.com", "https://example.com"],
     },
-  ])("rejects unsafe duplicate action request: %#", (message) => {
+  ])("rejects an unsafe app action request: %#", (message) => {
     expect(isExtensionRequest(message)).toBe(false);
   });
 });

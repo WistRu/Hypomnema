@@ -80,10 +80,12 @@ export function toSnapshotTab(tab: BrowserTabLike): SnapshotTab | undefined {
 export function buildSnapshot(
   browser: BrowserIdentifier,
   installationId: string,
+  browserSessionId: string,
   tabs: readonly BrowserTabLike[],
 ): IngestSnapshot {
   return {
     browser,
+    browserSessionId,
     installationId,
     tabs: tabs.flatMap((tab) => {
       const snapshotTab = toSnapshotTab(tab);
@@ -129,14 +131,22 @@ export function buildIdentityTransitionSnapshots(
   previousBrowser: BrowserIdentifier | undefined,
   nextBrowser: BrowserIdentifier,
   installationId: string,
+  browserSessionId: string,
   tabs: readonly BrowserTabLike[],
 ): IngestSnapshot[] {
   const snapshots: IngestSnapshot[] = [];
 
   if (previousBrowser !== undefined && previousBrowser !== nextBrowser) {
-    snapshots.push({ browser: previousBrowser, installationId, tabs: [] });
+    snapshots.push({
+      browser: previousBrowser,
+      browserSessionId,
+      installationId,
+      tabs: [],
+    });
   }
 
-  snapshots.push(buildSnapshot(nextBrowser, installationId, tabs));
+  snapshots.push(
+    buildSnapshot(nextBrowser, installationId, browserSessionId, tabs),
+  );
   return snapshots;
 }

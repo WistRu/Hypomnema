@@ -25,6 +25,7 @@ const knownBrowsers = new Set<string>(knownBrowserOptions);
 const installationUuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let installationIdentityInFlight: Promise<string> | undefined;
+let browserSessionIdentityInFlight: Promise<string> | undefined;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -33,6 +34,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function isKnownBrowser(value: unknown): value is KnownBrowser {
   return typeof value === "string" && knownBrowsers.has(value);
 }
+
+export function isInstallationId(value: unknown): value is string {
+  return typeof value === "string" && installationUuidPattern.test(value);
+}
+
+export const isBrowserSessionId = isInstallationId;
 
 /**
  * A browser value is trusted only when accompanied by the explicit-choice
@@ -59,8 +66,7 @@ async function loadOrCreateInstallationId(): Promise<string> {
   const existing = stored[STORAGE_KEYS.installationId];
 
   if (
-    typeof existing === "string" &&
-    installationUuidPattern.test(existing)
+    isInstallationId(existing)
   ) {
     return existing;
   }
@@ -92,6 +98,50 @@ export function getOrCreateInstallationId(): Promise<string> {
     () => {
       if (installationIdentityInFlight === operation) {
         installationIdentityInFlight = undefined;
+      }
+    },
+  );
+  return operation;
+}
+
+async function loadOrCreateBrowserSessionId(): Promise<string> {
+  const stored = await browser.storage.session.get(
+    STORAGE_KEYS.browserSessionId,
+  );
+  const existing = stored[STORAGE_KEYS.browserSessionId];
+
+  if (isBrowserSessionId(existing)) {
+    return existing;
+  }
+
+  const browserSessionId = crypto.randomUUID();
+  await browser.storage.session.set({
+    [STORAGE_KEYS.browserSessionId]: browserSessionId,
+  });
+  return browserSessionId;
+}
+
+/**
+ * Browser-session identity survives MV3 service-worker suspension but is not
+ * persisted beyond the browser session. This prevents a persisted native tab
+ * ID from targeting a newly-reused ID after a browser restart.
+ */
+export function getOrCreateBrowserSessionId(): Promise<string> {
+  if (browserSessionIdentityInFlight !== undefined) {
+    return browserSessionIdentityInFlight;
+  }
+
+  const operation = loadOrCreateBrowserSessionId();
+  browserSessionIdentityInFlight = operation;
+  void operation.then(
+    () => {
+      if (browserSessionIdentityInFlight === operation) {
+        browserSessionIdentityInFlight = undefined;
+      }
+    },
+    () => {
+      if (browserSessionIdentityInFlight === operation) {
+        browserSessionIdentityInFlight = undefined;
       }
     },
   );

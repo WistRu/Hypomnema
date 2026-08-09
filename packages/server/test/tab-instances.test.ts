@@ -116,6 +116,167 @@ describe("physical tab instances", () => {
     }
   });
 
+  it("round-trips and updates browser session identity for a modern physical tab", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-instance-session-"));
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+    });
+    const installationId = "b0b28810-ce8a-481f-9015-1a3468ff93c6";
+    const firstBrowserSessionId = "c3829c8a-63be-4b9c-9fb2-7f0f86a91a37";
+    const secondBrowserSessionId = "0d8d01c7-a1f5-4543-a3c8-39995d77890e";
+
+    try {
+      const firstIngest = await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          installationId,
+          browserSessionId: firstBrowserSessionId,
+          tabs: [
+            {
+              tabId: 42,
+              url: "https://example.com/session-round-trip",
+              title: "First browser session",
+              windowId: 1,
+              index: 0,
+            },
+          ],
+        },
+      });
+      expect(firstIngest.statusCode).toBe(200);
+
+      const firstPhysical = await app.inject({
+        method: "GET",
+        url: "/api/tab-instances?pageSize=50",
+      });
+      expect(firstPhysical.json()).toMatchObject({
+        total: 1,
+        items: [
+          expect.objectContaining({
+            installationId,
+            browserTabId: 42,
+            browserSessionId: firstBrowserSessionId,
+          }),
+        ],
+      });
+
+      const secondIngest = await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          installationId,
+          browserSessionId: secondBrowserSessionId,
+          tabs: [
+            {
+              tabId: 42,
+              url: "https://example.com/session-round-trip",
+              title: "Second browser session",
+              windowId: 2,
+              index: 3,
+            },
+          ],
+        },
+      });
+      expect(secondIngest.statusCode).toBe(200);
+
+      const secondPhysical = await app.inject({
+        method: "GET",
+        url: "/api/tab-instances?pageSize=50",
+      });
+      expect(secondPhysical.json()).toMatchObject({
+        total: 1,
+        items: [
+          expect.objectContaining({
+            installationId,
+            browserTabId: 42,
+            browserSessionId: secondBrowserSessionId,
+            title: "Second browser session",
+            windowId: 2,
+            index: 3,
+          }),
+        ],
+      });
+      expect(JSON.stringify(secondPhysical.json())).not.toContain(
+        firstBrowserSessionId,
+      );
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("exposes null browser session identity for legacy and tokenless modern snapshots", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-null-session-"));
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+    });
+    const installationId = "683cb0e6-ea45-4fe6-b60c-fd827fea0c93";
+
+    try {
+      const legacyIngest = await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "edge",
+          tabs: [
+            {
+              url: "https://example.com/legacy-null-session",
+              windowId: 1,
+              index: 0,
+            },
+          ],
+        },
+      });
+      const modernIngest = await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          installationId,
+          tabs: [
+            {
+              tabId: 91,
+              url: "https://example.com/modern-null-session",
+              windowId: 1,
+              index: 0,
+            },
+          ],
+        },
+      });
+      expect(legacyIngest.statusCode).toBe(200);
+      expect(modernIngest.statusCode).toBe(200);
+
+      const physical = await app.inject({
+        method: "GET",
+        url: "/api/tab-instances?pageSize=50",
+      });
+      expect(physical.json()).toMatchObject({
+        total: 2,
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            installationId: "legacy:edge",
+            browserTabId: null,
+            url: "https://example.com/legacy-null-session",
+            browserSessionId: null,
+          }),
+          expect.objectContaining({
+            installationId,
+            browserTabId: 91,
+            url: "https://example.com/modern-null-session",
+            browserSessionId: null,
+          }),
+        ]),
+      });
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("replaces only one installation snapshot and reconciles canonical open state across installations", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-instance-sources-"));
     let now = new Date("2026-08-09T10:00:00.000Z");

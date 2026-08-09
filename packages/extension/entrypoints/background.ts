@@ -2,6 +2,11 @@ import { browser } from "wxt/browser";
 import { defineBackground } from "wxt/utils/define-background";
 
 import { isServerReachable, postContent, postSnapshot } from "../lib/api";
+import { createActivationSequencer } from "../lib/activation-sequencer";
+import {
+  activateTabForScope,
+  type TabActivationAdapter,
+} from "../lib/activate-tab";
 import {
   EXTRACT_CONTENT_SCRIPT_FILE,
   RETRY_ALARM_NAME,
@@ -44,6 +49,7 @@ import {
 } from "../lib/queue";
 import {
   getBrowserIdentifier,
+  getOrCreateBrowserSessionId,
   getOrCreateInstallationId,
   readQueueState,
   writeIdentityAndQueueState,
@@ -63,10 +69,22 @@ const IDENTITY_REQUIRED_ERROR =
 
 let syncTail: Promise<void> = Promise.resolve();
 let tabEventTimer: ReturnType<typeof setTimeout> | undefined;
+const activationSequencer = createActivationSequencer();
 
 const duplicateTabAdapter: DuplicateTabAdapter = {
   get: (tabId) => browser.tabs.get(tabId),
   remove: (tabId) => browser.tabs.remove(tabId),
+};
+const tabActivationAdapter: TabActivationAdapter = {
+  activate: (tabId) => browser.tabs.update(tabId, { active: true }),
+  focusWindow: async (windowId) => {
+    await browser.windows.update(windowId, { focused: true });
+  },
+  get: (tabId) => browser.tabs.get(tabId),
+  getWindow: (windowId) => browser.windows.get(windowId),
+  restoreWindow: async (windowId) => {
+    await browser.windows.update(windowId, { state: "normal" });
+  },
 };
 const duplicatePreviewRegistry = createDuplicatePreviewRegistry({
   get: (key) => browser.storage.session.get(key),
@@ -131,10 +149,12 @@ async function appendAndFlushUnlocked(
 async function captureAndSyncUnlocked(
   requireConfigured = false,
 ): Promise<DrainQueueResult | undefined> {
-  const [browserIdentifier, installationId] = await Promise.all([
-    getBrowserIdentifier(),
-    getOrCreateInstallationId(),
-  ]);
+  const [browserIdentifier, installationId, browserSessionId] =
+    await Promise.all([
+      getBrowserIdentifier(),
+      getOrCreateInstallationId(),
+      getOrCreateBrowserSessionId(),
+    ]);
 
   if (browserIdentifier === undefined) {
     if (requireConfigured) {
@@ -145,7 +165,12 @@ async function captureAndSyncUnlocked(
   }
 
   const tabs = await browser.tabs.query({});
-  const snapshot = buildSnapshot(browserIdentifier, installationId, tabs);
+  const snapshot = buildSnapshot(
+    browserIdentifier,
+    installationId,
+    browserSessionId,
+    tabs,
+  );
   return appendAndFlushUnlocked([createPendingSnapshot(snapshot)]);
 }
 
@@ -159,16 +184,24 @@ function changeBrowserIdentity(
   nextBrowser: KnownBrowser,
 ): Promise<DrainQueueResult> {
   return serializeSync(async () => {
-    const [previousBrowser, tabs, state, installationId] = await Promise.all([
+    const [
+      previousBrowser,
+      tabs,
+      state,
+      installationId,
+      browserSessionId,
+    ] = await Promise.all([
       getBrowserIdentifier(),
       browser.tabs.query({}),
       readQueueState(),
       getOrCreateInstallationId(),
+      getOrCreateBrowserSessionId(),
     ]);
     const transition = buildIdentityTransitionSnapshots(
       previousBrowser,
       nextBrowser,
       installationId,
+      browserSessionId,
       tabs,
     ).map((snapshot) => createPendingSnapshot(snapshot));
     const pending = appendPendingItems(state.pending, transition);
@@ -233,10 +266,12 @@ function addCapturedUrlsToSnapshot(
 async function captureContentUnlocked(
   mode: "current" | "all",
 ): Promise<ExtensionResponse> {
-  const [browserIdentifier, installationId] = await Promise.all([
-    getBrowserIdentifier(),
-    getOrCreateInstallationId(),
-  ]);
+  const [browserIdentifier, installationId, browserSessionId] =
+    await Promise.all([
+      getBrowserIdentifier(),
+      getOrCreateInstallationId(),
+      getOrCreateBrowserSessionId(),
+    ]);
 
   if (browserIdentifier === undefined) {
     throw new Error(IDENTITY_REQUIRED_ERROR);
@@ -265,6 +300,7 @@ async function captureContentUnlocked(
   const snapshot = buildSnapshot(
     browserIdentifier,
     installationId,
+    browserSessionId,
     currentTabs,
   );
   const reconciledTabIds = addCapturedUrlsToSnapshot(
@@ -406,6 +442,8 @@ function bridgeTypeForRequest(
   switch (request.type) {
     case "tabhub:app-probe":
       return "probe";
+    case "tabhub:app-activate-tab":
+      return "activate-tab";
     case "tabhub:app-preview-obvious-duplicates":
       return "preview-obvious-duplicates";
     case "tabhub:app-close-obvious-duplicates":
@@ -432,10 +470,12 @@ async function handleAppRequest(
 ): Promise<AppExtensionResponse> {
   switch (request.type) {
     case "tabhub:app-probe": {
-      const [browserIdentifier, installationId] = await Promise.all([
-        getBrowserIdentifier(),
-        getOrCreateInstallationId(),
-      ]);
+      const [browserIdentifier, installationId, browserSessionId] =
+        await Promise.all([
+          getBrowserIdentifier(),
+          getOrCreateInstallationId(),
+          getOrCreateBrowserSessionId(),
+        ]);
 
       if (browserIdentifier !== undefined) {
         // Enqueue this before answering so a following preview is serialized
@@ -449,11 +489,54 @@ async function handleAppRequest(
         data: {
           available: true,
           browser: browserIdentifier ?? null,
+          browserSessionId,
           installationId,
         },
         ok: true,
         type: "probe",
       };
+    }
+    case "tabhub:app-activate-tab": {
+      return activationSequencer.run(async () => {
+        const [browserIdentifier, installationId, browserSessionId] =
+          await Promise.all([
+            getBrowserIdentifier(),
+            getOrCreateInstallationId(),
+            getOrCreateBrowserSessionId(),
+          ]);
+
+        if (browserIdentifier === undefined) {
+          throw new Error(IDENTITY_REQUIRED_ERROR);
+        }
+        let result;
+        try {
+          result = await activateTabForScope(
+            tabActivationAdapter,
+            { browser: browserIdentifier, browserSessionId, installationId },
+            request,
+          );
+        } catch (error) {
+          // Refresh stale physical rows in the background. Activation itself
+          // never waits behind snapshot uploads or offline queue draining.
+          void captureAndSync(true).catch((refreshError: unknown) => {
+            console.error(
+              "TabHub activation-failure snapshot failed",
+              refreshError,
+            );
+          });
+          throw error;
+        }
+        return {
+          data: {
+            browser: browserIdentifier,
+            browserSessionId,
+            installationId,
+            ...result,
+          },
+          ok: true,
+          type: "activate-tab",
+        };
+      });
     }
     case "tabhub:app-preview-obvious-duplicates":
       return serializeSync(async () => {
@@ -533,7 +616,7 @@ async function handleMessage(
 
   if (bridgeType !== undefined && !isAllowedAppMessageSender(sender)) {
     return {
-      error: "Duplicate actions are available only from the local TabHub app.",
+      error: "Browser actions are available only from the local TabHub app.",
       ok: false,
       type: bridgeType,
     };

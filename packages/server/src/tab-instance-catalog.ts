@@ -51,6 +51,7 @@ interface TabInstanceRow {
   instance_id: number;
   canonical_tab_id: number;
   installation_id: string;
+  browser_session_id: string | null;
   browser_tab_id: number | null;
   url: string;
   url_normalized: string;
@@ -106,6 +107,7 @@ function mapInstanceRow(row: TabInstanceRow, tagPaths: string[]): TabInstance {
     instanceId: row.instance_id,
     canonicalTabId: row.canonical_tab_id,
     installationId: row.installation_id,
+    browserSessionId: row.browser_session_id,
     browserTabId: row.browser_tab_id,
     url: row.url,
     urlNormalized: row.url_normalized,
@@ -172,6 +174,7 @@ export function createTabInstanceCatalog(
       tab_id,
       installation_id,
       instance_key,
+      browser_session_id,
       browser_tab_id,
       url,
       title,
@@ -187,6 +190,7 @@ export function createTabInstanceCatalog(
       @tabId,
       @installationId,
       @instanceKey,
+      @browserSessionId,
       @browserTabId,
       @url,
       @title,
@@ -201,6 +205,7 @@ export function createTabInstanceCatalog(
     )
     ON CONFLICT (installation_id, instance_key) DO UPDATE SET
       tab_id = excluded.tab_id,
+      browser_session_id = excluded.browser_session_id,
       browser_tab_id = excluded.browser_tab_id,
       url = excluded.url,
       title = excluded.title,
@@ -239,6 +244,7 @@ export function createTabInstanceCatalog(
       tab_instances.id AS instance_id,
       tabs.id AS canonical_tab_id,
       tab_instances.installation_id,
+      tab_instances.browser_session_id,
       tab_instances.browser_tab_id,
       tab_instances.url,
       tabs.url_normalized,
@@ -369,6 +375,7 @@ export function createTabInstanceCatalog(
           tabId: canonical.id,
           installationId,
           instanceKey: instanceKey(tab),
+          browserSessionId: snapshot.browserSessionId ?? null,
           browserTabId: tab.tabId ?? null,
           url: tab.url,
           title: tab.title ?? null,
@@ -416,6 +423,7 @@ export function createTabInstanceCatalog(
             tab_instances.id AS instance_id,
             tabs.id AS canonical_tab_id,
             tab_instances.installation_id,
+            tab_instances.browser_session_id,
             tab_instances.browser_tab_id,
             tab_instances.url,
             tabs.url_normalized,
