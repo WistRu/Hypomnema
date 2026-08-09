@@ -457,7 +457,7 @@ describe("physical tab command executor", () => {
     });
   });
 
-  it("previews close from live exact URLs while protecting active, pinned, and control tabs", async () => {
+  it("previews active tabs while protecting pinned and control tabs", async () => {
     const browserAdapter = adapter();
     vi.mocked(browserAdapter.getTab).mockImplementation(async (tabId) => {
       if (tabId === 46) throw new Error("No tab");
@@ -500,13 +500,12 @@ describe("physical tab command executor", () => {
         },
       ),
     ).resolves.toEqual({
-      candidateTabIds: [41],
+      candidateTabIds: [41, 42],
       expiresAt: 301_000,
       kind: "close-preview",
       previewId: "323e4567-e89b-42d3-a456-426614174000",
       requested: 6,
       skipped: [
-        { reason: "active-protected", tabId: 42 },
         { reason: "pinned-protected", tabId: 43 },
         { reason: "control-tab-protected", tabId: 44 },
         { reason: "url-changed", tabId: 45 },
@@ -520,7 +519,10 @@ describe("physical tab command executor", () => {
         ...CURRENT_SCOPE,
         expiresAt: 301_000,
         previewId: "323e4567-e89b-42d3-a456-426614174000",
-        targets: [{ tabId: 41, expectedUrl: "https://example.com/41" }],
+        targets: [
+          { tabId: 41, expectedUrl: "https://example.com/41" },
+          { tabId: 42, expectedUrl: "https://example.com/42" },
+        ],
         version: 1,
       },
     });
@@ -778,12 +780,11 @@ describe("physical tab command executor", () => {
       requested: 5,
       skipped: [
         { reason: "url-changed", tabId: 42 },
-        { reason: "active-protected", tabId: 43 },
         { reason: "pinned-protected", tabId: 44 },
         { reason: "control-tab-protected", tabId: 900 },
       ],
-      succeededTabIds: [41],
-      undo: { count: 1, expiresAt: 602_000, undoId },
+      succeededTabIds: [41, 43],
+      undo: { count: 2, expiresAt: 602_000, undoId },
     });
 
     expect(events[0]).toBe("journal");

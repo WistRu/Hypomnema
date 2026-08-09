@@ -83,7 +83,7 @@ export function duplicateGroupView(
   } else if (connectedInstallationId !== group.installationId) {
     reason = `Open TabHub in ${browserLabel(group.browser)} to close these duplicates.`;
   } else if (closeCandidateCount === 0) {
-    reason = "Every extra copy is active or pinned, so TabHub will keep it open.";
+    reason = "Every extra copy is pinned, so TabHub will keep it open.";
   }
 
   return {

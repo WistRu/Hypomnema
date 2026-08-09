@@ -365,8 +365,8 @@ export function createTabInstanceCatalog(
       AND tabs.browser = ?
       AND tab_instances.url = ?
     ORDER BY
-      tab_instances.active DESC,
       tab_instances.pinned DESC,
+      tab_instances.active DESC,
       COALESCE(tab_instances.last_accessed, -1) DESC,
       tab_instances.window_id,
       tab_instances.tab_index,
@@ -569,7 +569,7 @@ export function createTabInstanceCatalog(
             tab_instances.url,
             COUNT(*) AS count,
             SUM(
-              CASE WHEN tab_instances.active = 1 OR tab_instances.pinned = 1
+              CASE WHEN tab_instances.pinned = 1
                 THEN 1 ELSE 0 END
             ) AS protected_count
           FROM tab_instances
@@ -620,14 +620,12 @@ export function createTabInstanceCatalog(
             mapInstanceRow(row, tagPathsByTab.get(row.canonical_tab_id) ?? []),
           );
           const protectedInstances = instances.filter(
-            (instance) => instance.active || instance.pinned,
+            (instance) => instance.pinned,
           );
-          const keeper = instances[0]!;
+          const keeper = protectedInstances[0] ?? instances[0]!;
           const candidates =
             protectedInstances.length > 0
-              ? instances.filter(
-                  (instance) => !instance.active && !instance.pinned,
-                )
+              ? instances.filter((instance) => !instance.pinned)
               : instances.slice(1);
 
           return {

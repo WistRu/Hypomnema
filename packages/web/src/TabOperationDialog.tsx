@@ -45,7 +45,7 @@ export function TabOperationDialog({
         </h3>
         <div>
           {closing ? (
-            <p>Active, pinned, changed, TabHub control tabs, and exact-copy keepers are protected and rechecked immediately before closing.</p>
+            <p>Pinned, changed, TabHub control tabs, and exact-copy keepers are protected and rechecked immediately before closing.</p>
           ) : (
             <p>Reloading can discard unsaved form edits and in-page state. The TabHub control tab is protected.</p>
           )}

@@ -152,7 +152,7 @@ function identifiedTab(tab: DuplicateTabLike): IdentifiedTab | undefined {
 }
 
 function isProtected(tab: DuplicateTabLike): boolean {
-  return tab.active === true || tab.pinned === true;
+  return tab.pinned === true;
 }
 
 function recentFirst(left: IdentifiedTab, right: IdentifiedTab): number {
@@ -219,7 +219,9 @@ function closurePlan(
     }
 
     const protectedTabs = siblings.filter(isProtected).sort(keeperFirst);
-    const unprotectedTabs = siblings.filter((tab) => !isProtected(tab)).sort(recentFirst);
+    const unprotectedTabs = siblings
+      .filter((tab) => !isProtected(tab))
+      .sort(keeperFirst);
     const keeper = protectedTabs[0] ?? unprotectedTabs[0];
 
     if (keeper === undefined) {
@@ -279,7 +281,7 @@ async function readCurrentTab(
 /**
  * Close only live, exact duplicate copies. Every target and its retained
  * keeper are re-read at the destructive boundary, so stale server/UI state
- * can never turn a now-unique, active, pinned, or navigated tab into a target.
+ * can never turn a now-unique, pinned, or navigated tab into a target.
  */
 export async function closeObviousDuplicates(
   adapter: DuplicateTabAdapter,
@@ -304,7 +306,6 @@ export async function closeObviousDuplicates(
         currentTarget === undefined ||
         exactTabUrl(keeper) !== group.exactUrl ||
         exactTabUrl(currentTarget) !== group.exactUrl ||
-        currentTarget.active === true ||
         currentTarget.pinned === true
       ) {
         skipped += 1;

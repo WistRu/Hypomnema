@@ -897,8 +897,8 @@ describe("physical tab instances", () => {
         totalGroups: 1,
         totalTabsInGroups: 4,
         totalDuplicateCopies: 3,
-        totalCloseCandidates: 2,
-        totalProtected: 2,
+        totalCloseCandidates: 3,
+        totalProtected: 1,
         page: 1,
         pageSize: 50,
         items: [
@@ -929,13 +929,13 @@ describe("physical tab instances", () => {
           instance.instanceId,
         ]),
       );
-      expect(group.keeperInstanceId).toBe(instanceIdByBrowserTabId.get(1));
+      expect(group.keeperInstanceId).toBe(instanceIdByBrowserTabId.get(2));
       expect(group.candidateInstanceIds).toEqual([
+        instanceIdByBrowserTabId.get(1),
         instanceIdByBrowserTabId.get(3),
         instanceIdByBrowserTabId.get(4),
       ]);
       expect(group.protectedInstanceIds).toEqual([
-        instanceIdByBrowserTabId.get(1),
         instanceIdByBrowserTabId.get(2),
       ]);
     } finally {

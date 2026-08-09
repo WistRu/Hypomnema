@@ -109,7 +109,8 @@ function recentFirst(left: TabInstance, right: TabInstance): number {
 
 /**
  * Return only live close candidates while retaining one exact-URL keeper.
- * Active and pinned copies are protected and are never candidates.
+ * Pinned copies are protected. An active copy is preferred as the keeper when
+ * no pinned copy exists, but can close when another protected keeper exists.
  */
 export function extraExactCopyPlan(
   tabs: readonly TabInstance[],
@@ -126,15 +127,17 @@ export function extraExactCopyPlan(
   for (const group of groups.values()) {
     if (group.length < 2) continue;
     const protectedTabs = group
-      .filter((tab) => tab.active || tab.pinned)
+      .filter((tab) => tab.pinned)
       .sort((left, right) =>
         Number(right.active) - Number(left.active) ||
-        Number(right.pinned) - Number(left.pinned) ||
         recentFirst(left, right),
       );
     const unprotected = group
-      .filter((tab) => !tab.active && !tab.pinned)
-      .sort(recentFirst);
+      .filter((tab) => !tab.pinned)
+      .sort(
+        (left, right) =>
+          Number(right.active) - Number(left.active) || recentFirst(left, right),
+      );
     const keeper = protectedTabs[0] ?? unprotected[0];
     if (keeper !== undefined) {
       plan.push(

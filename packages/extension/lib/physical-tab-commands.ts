@@ -826,11 +826,6 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
 
           if (tab.id !== target.tabId) {
             skipped.push({ reason: "missing", tabId: target.tabId });
-          } else if (tab.active === true) {
-            skipped.push({
-              reason: "active-protected",
-              tabId: target.tabId,
-            });
           } else if (tab.pinned === true) {
             skipped.push({
               reason: "pinned-protected",
@@ -928,11 +923,6 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
 
           if (tab.id !== target.tabId) {
             result.skipped.push({ reason: "missing", tabId: target.tabId });
-          } else if (tab.active === true) {
-            result.skipped.push({
-              reason: "active-protected",
-              tabId: target.tabId,
-            });
           } else if (tab.pinned === true) {
             result.skipped.push({
               reason: "pinned-protected",
@@ -1005,13 +995,6 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
           if (liveTarget.id !== target.originalTabId) {
             result.skipped.push({
               reason: "missing",
-              tabId: target.originalTabId,
-            });
-            continue;
-          }
-          if (liveTarget.active === true) {
-            result.skipped.push({
-              reason: "active-protected",
               tabId: target.originalTabId,
             });
             continue;

@@ -115,7 +115,7 @@ describe("previewObviousDuplicates", () => {
     });
   });
 
-  it("protects every active or pinned duplicate instead of choosing it as a close target", () => {
+  it("protects pinned duplicates while allowing active copies to close", () => {
     const preview = previewObviousDuplicates([
       tab(10, "https://example.com/same", { active: true }),
       tab(11, "https://example.com/same", { pinned: true }),
@@ -128,15 +128,15 @@ describe("previewObviousDuplicates", () => {
         groups: [
           {
             exactUrl: "https://example.com/same",
-            keeperTabId: 10,
-            protectedCount: 2,
-            targetTabIds: [13, 12],
+            keeperTabId: 11,
+            protectedCount: 1,
+            targetTabIds: [10, 13, 12],
           },
         ],
       },
-      totalCloseCandidates: 2,
+      totalCloseCandidates: 3,
       totalGroups: 1,
-      totalProtected: 2,
+      totalProtected: 1,
     });
   });
 
@@ -238,7 +238,7 @@ describe("closeObviousDuplicates", () => {
     expect(adapter.get).toHaveBeenCalledWith(30);
   });
 
-  it("preserves protected copies and skips a target that became active", async () => {
+  it("retains one active keeper but closes a target that later became active", async () => {
     const tabs = [
       tab(40, "https://same.example", { active: true }),
       tab(41, "https://same.example"),
@@ -255,15 +255,17 @@ describe("closeObviousDuplicates", () => {
     });
 
     await expect(closeObviousDuplicates(adapter, closePlan(tabs))).resolves.toEqual({
-      closed: 1,
+      closed: 2,
       failed: 0,
-      skipped: 2,
+      skipped: 0,
     });
-    expect(adapter.remove).toHaveBeenCalledTimes(1);
+    expect(adapter.get.mock.calls[0]).toEqual([40]);
+    expect(adapter.remove).toHaveBeenCalledTimes(2);
+    expect(adapter.remove).toHaveBeenCalledWith(41);
     expect(adapter.remove).toHaveBeenCalledWith(42);
   });
 
-  it("uses active, then pinned, then recency as the retained witness", async () => {
+  it("uses pinned before active and recency as the retained witness", async () => {
     const tabs = [
       tab(43, "https://same.example", {
         active: true,
@@ -279,7 +281,8 @@ describe("closeObviousDuplicates", () => {
 
     await closeObviousDuplicates(adapter, closePlan(tabs));
 
-    expect(adapter.get.mock.calls[0]).toEqual([43]);
+    expect(adapter.get.mock.calls[0]).toEqual([44]);
+    expect(adapter.remove).toHaveBeenCalledWith(43);
     expect(adapter.remove).toHaveBeenCalledWith(45);
   });
 

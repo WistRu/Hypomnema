@@ -48,7 +48,7 @@ function tab(
 }
 
 describe("open-tab smart selection", () => {
-  it("selects only safe extra copies after retaining active, pinned, or newest keeper", () => {
+  it("can select active copies after retaining pinned or newest keeper", () => {
     const exact = "https://example.com/watch?v=exact";
     const active = tab(1, exact, { active: true, lastAccessed: 10 });
     const pinned = tab(2, exact, { pinned: true, lastAccessed: 20 });
@@ -64,7 +64,7 @@ describe("open-tab smart selection", () => {
         secondUrlOlder,
         secondUrlNewest,
       ]).map(({ instanceId }) => instanceId),
-    ).toEqual([3, 5]);
+    ).toEqual([1, 3, 5]);
 
     expect(
       extraExactCopyPlan([
@@ -75,7 +75,8 @@ describe("open-tab smart selection", () => {
         secondUrlNewest,
       ]).map(({ candidate, keeper }) => [candidate.instanceId, keeper.instanceId]),
     ).toEqual([
-      [3, 1],
+      [1, 2],
+      [3, 2],
       [5, 4],
     ]);
   });
