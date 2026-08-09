@@ -8,20 +8,20 @@
   </head>
   <body>
     <main>
-      <p class="eyebrow">TabHub</p>
-      <h1>Browser identity</h1>
-      <p class="description">
+      <p id="options-brand" class="eyebrow">TabHub</p>
+      <h1 id="options-heading">Browser identity</h1>
+      <p id="options-description" class="description">
         Choose the browser where this copy of TabHub is installed. This label
         keeps tabs from different browsers separate.
       </p>
 
-      <label for="browser-select">Browser</label>
+      <label id="browser-label" for="browser-select">Browser</label>
       <select id="browser-select">
-        <option value="" disabled selected>Choose this browser…</option>
-        <option value="chrome">Chrome</option>
-        <option value="yandex">Yandex Browser</option>
-        <option value="edge">Microsoft Edge</option>
-        <option value="other">Other Chromium browser</option>
+        <option id="browser-option-placeholder" value="" disabled selected>Choose this browser…</option>
+        <option id="browser-option-chrome" value="chrome">Chrome</option>
+        <option id="browser-option-yandex" value="yandex">Yandex Browser</option>
+        <option id="browser-option-edge" value="edge">Microsoft Edge</option>
+        <option id="browser-option-other" value="other">Other Chromium browser</option>
       </select>
       <p id="save-status" class="save-status" role="status" aria-live="polite"></p>
     </main>

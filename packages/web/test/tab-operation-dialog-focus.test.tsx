@@ -23,6 +23,18 @@ vi.mock("../src/modal-dialog", () => ({
   activateModalDialog: modalMocks.activate,
 }));
 
+vi.mock("../src/i18n", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../src/i18n")>();
+  return {
+    ...original,
+    useI18n: () => ({
+      formatNumber: (value: number) => String(value),
+      t: (key: string, params: Record<string, number | string> = {}) =>
+        original.translate("en", key, params),
+    }),
+  };
+});
+
 import { TabOperationDialog } from "../src/TabOperationDialog";
 
 describe("TabOperationDialog focus", () => {

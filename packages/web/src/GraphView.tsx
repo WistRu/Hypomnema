@@ -15,6 +15,7 @@ import { type CSSProperties, type ReactNode, useEffect, useMemo, useState } from
 
 import { fetchGraph } from "./api";
 import { layoutGraphNodes, reachableFollowsBranch } from "./graph-model";
+import { useI18n } from "./i18n";
 
 type GraphColorMode = "status" | "browser";
 type FlowData = Record<string, unknown> & {
@@ -32,6 +33,25 @@ const STATUS_COLORS: Record<GraphNode["status"], string> = {
   in_progress: "#d6ad62",
   done: "#58c98c",
   archived: "#78818e",
+};
+
+const BROWSER_LABELS: Record<string, string> = {
+  chrome: "Chrome",
+  edge: "Edge",
+  yandex: "Yandex",
+};
+
+function browserLabel(browser: string, t: (key: string) => string): string {
+  const normalized = browser.toLowerCase();
+  return BROWSER_LABELS[normalized] ??
+    (normalized === "other" ? t("Other") : browser);
+}
+
+const STATUS_LABELS: Record<GraphNode["status"], string> = {
+  inbox: "inbox",
+  in_progress: "in progress",
+  done: "done",
+  archived: "archived",
 };
 
 const BROWSER_COLORS: Record<string, string> = {
@@ -85,6 +105,7 @@ function GraphState({
 }
 
 export default function GraphView({ rootTag, onSelectTab }: GraphViewProps) {
+  const { errorMessage, formatNumber, t } = useI18n();
   const [colorMode, setColorMode] = useState<GraphColorMode>("status");
   const [branchRootId, setBranchRootId] = useState<number | null>(null);
   const graphQuery = useQuery({
@@ -93,8 +114,8 @@ export default function GraphView({ rootTag, onSelectTab }: GraphViewProps) {
   });
   const graph = graphQuery.data;
   const layout = useMemo(
-    () => layoutGraphNodes(graph?.nodes ?? [], rootTag),
-    [graph?.nodes, rootTag],
+    () => layoutGraphNodes(graph?.nodes ?? [], rootTag, t),
+    [graph?.nodes, rootTag, t],
   );
   const visibleIds = useMemo(
     () => new Set((graph?.nodes ?? []).map((node) => node.id)),
@@ -127,7 +148,10 @@ export default function GraphView({ rootTag, onSelectTab }: GraphViewProps) {
         label: (
           <div className="graph-group-label">
             <strong>{group.label}</strong>
-            <span>{group.count.toLocaleString()} tabs</span>
+            <span>{t("{count} tabs", {
+              count: formatNumber(group.count),
+              rawCount: group.count,
+            })}</span>
           </div>
         ),
       },
@@ -142,6 +166,7 @@ export default function GraphView({ rootTag, onSelectTab }: GraphViewProps) {
     const tabNodes: FlowNode<FlowData>[] = layout.nodes.map((positioned) => {
       const node = positioned.node;
       const accent = nodeAccent(node, colorMode);
+      const statusLabel = t(STATUS_LABELS[node.status]);
       const branchActive = activeBranchRoot !== null;
       const inBranch = reachable.has(node.id);
       const classNames = [
@@ -168,9 +193,9 @@ export default function GraphView({ rootTag, onSelectTab }: GraphViewProps) {
                 {displayTitle(node)}
               </div>
               <div className="graph-node-meta">
-                <span>{node.status.replace("_", " ")}</span>
-                <span>{node.browser}</span>
-                <span>{node.isOpen ? "open" : "closed"}</span>
+                <span>{statusLabel}</span>
+                <span>{browserLabel(node.browser, t)}</span>
+                <span>{node.isOpen ? t("open") : t("closed")}</span>
               </div>
               <div className="graph-node-topic" title={positioned.groupKey}>
                 {positioned.groupKey}
@@ -187,12 +212,16 @@ export default function GraphView({ rootTag, onSelectTab }: GraphViewProps) {
         targetPosition: Position.Left,
         className: classNames,
         style,
-        ariaLabel: `${displayTitle(node)}, ${node.status.replace("_", " ")}, importance ${node.importance}`,
+        ariaLabel: t("{title}, {status}, importance {importance}", {
+          importance: formatNumber(node.importance),
+          status: statusLabel,
+          title: displayTitle(node),
+        }),
       };
     });
 
     return [...groupNodes, ...tabNodes];
-  }, [activeBranchRoot, colorMode, layout.groups, layout.nodes, reachable]);
+  }, [activeBranchRoot, colorMode, formatNumber, layout.groups, layout.nodes, reachable, t]);
 
   const flowEdges = useMemo<FlowEdge[]>(() => {
     const branchActive = activeBranchRoot !== null;
@@ -236,68 +265,81 @@ export default function GraphView({ rootTag, onSelectTab }: GraphViewProps) {
   const selectedRoot = graph?.nodes.find((node) => node.id === activeBranchRoot);
 
   return (
-    <section className="graph-panel" aria-label="Tab knowledge graph">
+    <section className="graph-panel" aria-label={t("Tab knowledge graph")}>
       <header className="graph-toolbar">
         <div className="graph-metrics">
-          <strong>{graph?.nodes.length.toLocaleString() ?? "-"} nodes</strong>
-          <span>{graph?.edges.length.toLocaleString() ?? "-"} links</span>
-          <span>{layout.groups.length.toLocaleString()} topic groups</span>
+          <strong>{t("{count} nodes", {
+            count: graph ? formatNumber(graph.nodes.length) : "-",
+            rawCount: graph?.nodes.length ?? 0,
+          })}</strong>
+          <span>{t("{count} links", {
+            count: graph ? formatNumber(graph.edges.length) : "-",
+            rawCount: graph?.edges.length ?? 0,
+          })}</span>
+          <span>{t("{count} topic groups", {
+            count: formatNumber(layout.groups.length),
+            rawCount: layout.groups.length,
+          })}</span>
         </div>
-        <div className="graph-color-switch" aria-label="Graph color mode" role="group">
-          <span>Color by</span>
+        <div className="graph-color-switch" aria-label={t("Graph color mode")} role="group">
+          <span>{t("Color by")}</span>
           <button
             aria-pressed={colorMode === "status"}
             type="button"
             onClick={() => setColorMode("status")}
           >
-            Status
+            {t("Status")}
           </button>
           <button
             aria-pressed={colorMode === "browser"}
             type="button"
             onClick={() => setColorMode("browser")}
           >
-            Browser
+            {t("Browser")}
           </button>
         </div>
         {activeBranchRoot !== null ? (
           <div className="branch-selection" role="status">
             <span>
-              Branch from {selectedRoot ? displayTitle(selectedRoot) : `#${activeBranchRoot}`}
-              {" | "}
-              {reachable.size.toLocaleString()} nodes
+              {t("Branch from {title} | {count} nodes", {
+                count: formatNumber(reachable.size),
+                rawCount: reachable.size,
+                title: selectedRoot
+                  ? displayTitle(selectedRoot)
+                  : `#${formatNumber(activeBranchRoot)}`,
+              })}
             </span>
             <button type="button" onClick={() => setBranchRootId(null)}>
-              Clear branch
+              {t("Clear branch")}
             </button>
           </div>
         ) : (
-          <p className="graph-hint">Select a node to trace its outgoing follows branch.</p>
+          <p className="graph-hint">{t("Select a node to trace its outgoing follows branch.")}</p>
         )}
       </header>
 
       <div className="graph-canvas">
         {graphQuery.isPending ? (
-          <GraphState title="Loading graph" detail="Reading tabs, topics, and links..." />
+          <GraphState title={t("Loading graph")} detail={t("Reading tabs, topics, and links...")} />
         ) : null}
         {graphQuery.isError ? (
           <GraphState
-            title="Couldn't load graph"
-            detail={graphQuery.error.message}
+            title={t("Couldn't load graph")}
+            detail={errorMessage(graphQuery.error)}
             action={
               <button type="button" onClick={() => void graphQuery.refetch()}>
-                Try again
+                {t("Try again")}
               </button>
             }
           />
         ) : null}
         {graphQuery.isSuccess && graph?.nodes.length === 0 ? (
           <GraphState
-            title={rootTag ? "No tabs in this topic" : "No graph nodes yet"}
+            title={rootTag ? t("No tabs in this topic") : t("No graph nodes yet")}
             detail={
               rootTag
-                ? "Choose another topic or assign tabs to this branch."
-                : "Capture tabs to start building the knowledge graph."
+                ? t("Choose another topic or assign tabs to this branch.")
+                : t("Capture tabs to start building the knowledge graph.")
             }
           />
         ) : null}

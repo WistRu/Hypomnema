@@ -10,6 +10,7 @@ import {
   tabsFromHostname,
   tabsInPhysicalOrder,
   tabsOlderThan,
+  workspaceSelectionsForTabs,
 } from "../src/open-tab-selection";
 
 function tab(
@@ -48,6 +49,20 @@ function tab(
 }
 
 describe("open-tab smart selection", () => {
+  it("preserves all 2,001 selected physical occurrences for workspace saving", () => {
+    const selected = Array.from({ length: 2_001 }, (_, index) =>
+      tab(index + 1, `https://example.com/tab/${index + 1}`),
+    );
+
+    const selections = workspaceSelectionsForTabs(selected);
+
+    expect(selections).toHaveLength(2_001);
+    expect(selections.at(-1)).toMatchObject({
+      browserTabId: 2_001,
+      instanceId: 2_001,
+    });
+  });
+
   it("can select active copies after retaining pinned or newest keeper", () => {
     const exact = "https://example.com/watch?v=exact";
     const active = tab(1, exact, { active: true, lastAccessed: 10 });

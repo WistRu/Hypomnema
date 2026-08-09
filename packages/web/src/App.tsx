@@ -38,6 +38,7 @@ import {
   type OpenFilter,
 } from "./api";
 import { OpenTabsView } from "./OpenTabsView";
+import { useI18n, type TranslationParams } from "./i18n";
 import {
   shouldRefreshLibrary,
   type WorkspaceView,
@@ -54,24 +55,22 @@ const CurrentTimeContext = createContext(Date.now());
 const BROWSER_LABELS: Record<string, string> = {
   chrome: "Chrome",
   edge: "Edge",
-  other: "Other",
   yandex: "Yandex",
 };
 
-const STATUS_LABELS: Record<TabStatus, string> = {
+const STATUS_LABEL_KEYS: Record<TabStatus, string> = {
   inbox: "Inbox",
   in_progress: "In progress",
   done: "Done",
   archived: "Archived",
 };
 
-const STATUS_OPTIONS = Object.entries(STATUS_LABELS) as Array<[
-  TabStatus,
-  string,
-]>;
-
-function browserLabel(browser: string) {
-  return BROWSER_LABELS[browser.toLowerCase()] ?? browser;
+function browserLabel(
+  browser: string,
+  t: (key: string, params?: TranslationParams) => string,
+) {
+  const normalized = browser.toLowerCase();
+  return BROWSER_LABELS[normalized] ?? (normalized === "other" ? t("Other") : browser);
 }
 
 function hostname(url: string) {
@@ -82,38 +81,39 @@ function hostname(url: string) {
   }
 }
 
-function formatAge(value: string, now: number) {
+function formatAge(
+  value: string,
+  now: number,
+  t: (key: string, params?: TranslationParams) => string,
+) {
   const timestamp = new Date(value).getTime();
-  if (Number.isNaN(timestamp)) return "Unknown";
+  if (Number.isNaN(timestamp)) return t("Unknown");
 
   const elapsed = Math.max(0, now - timestamp);
   const minute = 60_000;
   const hour = minute * 60;
   const day = hour * 24;
 
-  if (elapsed < minute) return "Just now";
-  if (elapsed < hour) return `${Math.floor(elapsed / minute)}m ago`;
-  if (elapsed < day) return `${Math.floor(elapsed / hour)}h ago`;
-  if (elapsed < day * 30) return `${Math.floor(elapsed / day)}d ago`;
-  if (elapsed < day * 365) return `${Math.floor(elapsed / (day * 30))}mo ago`;
-  return `${Math.floor(elapsed / (day * 365))}y ago`;
-}
-
-function fullDate(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : new Intl.DateTimeFormat(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short",
-      }).format(date);
+  if (elapsed < minute) return t("Just now");
+  if (elapsed < hour) return t("{count}m ago", { count: Math.floor(elapsed / minute) });
+  if (elapsed < day) return t("{count}h ago", { count: Math.floor(elapsed / hour) });
+  if (elapsed < day * 30) return t("{count}d ago", { count: Math.floor(elapsed / day) });
+  if (elapsed < day * 365) {
+    return t("{count}mo ago", { count: Math.floor(elapsed / (day * 30)) });
+  }
+  return t("{count}y ago", { count: Math.floor(elapsed / (day * 365)) });
 }
 
 function RelativeAge({ value }: { value: string }) {
   const now = useContext(CurrentTimeContext);
+  const { formatDate, t } = useI18n();
+  const date = new Date(value);
+  const title = Number.isNaN(date.getTime())
+    ? value
+    : formatDate(date, { dateStyle: "medium", timeStyle: "short" });
   return (
-    <time dateTime={value} title={fullDate(value)}>
-      {formatAge(value, now)}
+    <time dateTime={value} title={title}>
+      {formatAge(value, now, t)}
     </time>
   );
 }
@@ -130,18 +130,20 @@ function useDebouncedValue(value: string, delay: number) {
 }
 
 function BrowserBadge({ browser }: { browser: string }) {
+  const { t } = useI18n();
   const normalized = browser.toLowerCase();
   return (
     <span className="browser-badge">
       <span className={`browser-dot browser-${normalized}`} aria-hidden="true" />
-      <span>{browserLabel(browser)}</span>
+      <span>{browserLabel(browser, t)}</span>
     </span>
   );
 }
 
 function Importance({ level }: { level: number }) {
+  const { t } = useI18n();
   return (
-    <span className="importance" aria-label={`Importance ${level} of 3`}>
+    <span className="importance" aria-label={t("Importance {level} of 3", { level })}>
       {[1, 2, 3].map((step) => (
         <span
           aria-hidden="true"
@@ -188,6 +190,7 @@ function SelectionCheckbox({
 function SummaryDisclosure({ summary }: { summary: string }) {
   const [expanded, setExpanded] = useState(false);
   const summaryId = useId();
+  const { t } = useI18n();
 
   return (
     <div className={expanded ? "summary-disclosure is-expanded" : "summary-disclosure"}>
@@ -201,7 +204,7 @@ function SummaryDisclosure({ summary }: { summary: string }) {
           setExpanded((current) => !current);
         }}
       >
-        {expanded ? "Collapse" : "Expand"}
+        {expanded ? t("Collapse") : t("Expand")}
       </button>
     </div>
   );
@@ -209,6 +212,7 @@ function SummaryDisclosure({ summary }: { summary: string }) {
 
 function SummaryAction({ tab }: { tab: TabListItem }) {
   const queryClient = useQueryClient();
+  const { errorMessage: localizeError, t } = useI18n();
   const [jobId, setJobId] = useState<number | null>(null);
   const feedbackId = useId();
   const tabLabel = tab.title?.trim() || hostname(tab.url);
@@ -239,28 +243,32 @@ function SummaryAction({ tab }: { tab: TabListItem }) {
     }
   }, [job?.id, job?.status, queryClient, tab.id]);
 
-  const pollingError = jobQuery.isError ? jobQuery.error.message : null;
+  const pollingError = jobQuery.isError ? localizeError(jobQuery.error) : null;
   const errorMessage = enqueueMutation.isError
-    ? enqueueMutation.error.message
+    ? localizeError(enqueueMutation.error)
     : job?.status === "failed"
-      ? job.error ?? "TabHub could not create this summary."
+      ? job.error
+        ? localizeError(new Error(job.error))
+        : t("TabHub could not create this summary.")
       : pollingError;
   const statusMessage = enqueueMutation.isPending
-    ? "Requesting summary"
+    ? t("Requesting summary")
     : jobStatus === "queued"
-      ? "Summary queued"
+      ? t("Summary queued")
       : jobStatus === "running"
-        ? "Creating summary"
+        ? t("Creating summary")
         : jobStatus === "succeeded"
-          ? "Summary ready"
+          ? t("Summary ready")
           : null;
   const isActive = jobStatus === "queued" || jobStatus === "running";
   const isStatusRetry = pollingError !== null && jobId !== null;
-  const defaultLabel = hasSummary ? "Refresh short summary" : "Create short summary";
+  const defaultLabel = hasSummary
+    ? t("Refresh short summary")
+    : t("Create short summary");
   const buttonLabel = isStatusRetry
-    ? "Check summary status"
+    ? t("Check summary status")
     : errorMessage
-      ? "Retry short summary"
+      ? t("Retry short summary")
       : defaultLabel;
   const feedback = errorMessage ?? statusMessage;
 
@@ -268,7 +276,7 @@ function SummaryAction({ tab }: { tab: TabListItem }) {
     <div className="summary-action" onClick={(event) => event.stopPropagation()}>
       <button
         aria-describedby={feedback ? feedbackId : undefined}
-        aria-label={`${buttonLabel} for ${tabLabel}`}
+        aria-label={t("{action} for {tab}", { action: buttonLabel, tab: tabLabel })}
         disabled={enqueueMutation.isPending || (isActive && !isStatusRetry)}
         type="button"
         onClick={() => {
@@ -304,6 +312,7 @@ function TagBranch({
   selectedPath: string;
   onSelect: (path: string) => void;
 }) {
+  const { formatNumber } = useI18n();
   return (
     <ul>
       {nodes.map((node) => (
@@ -316,7 +325,7 @@ function TagBranch({
             onClick={() => onSelect(node.path)}
           >
             <span>{node.name}</span>
-            <strong>{node.tabCount.toLocaleString()}</strong>
+            <strong>{formatNumber(node.tabCount)}</strong>
           </button>
           {node.children.length > 0 ? (
             <TagBranch
@@ -360,6 +369,8 @@ function SearchIcon() {
 
 export function App() {
   const queryClient = useQueryClient();
+  const { errorMessage: localizeError, formatNumber, locale, setLocale, t } =
+    useI18n();
   const [view, setView] = useState<WorkspaceView>("open");
   const [browser, setBrowser] = useState("all");
   const [openState, setOpenState] = useState<OpenFilter>("all");
@@ -373,6 +384,10 @@ export function App() {
   const [bulkStatus, setBulkStatus] = useState<TabStatus>("in_progress");
   const [bulkTag, setBulkTag] = useState("");
   const [activeTabId, setActiveTabId] = useState<number | null>(null);
+  const statusOptions = Object.entries(STATUS_LABEL_KEYS).map(([value, key]) => [
+    value as TabStatus,
+    t(key),
+  ] as const);
   const debouncedSearch = useDebouncedValue(search, 300);
   const q = debouncedSearch.trim();
   const libraryFilters: LibraryTabFilters = {
@@ -394,7 +409,7 @@ export function App() {
 
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [browser, importance, openState, q, status, tag]);
+  }, [libraryFilterKey]);
 
   const tabsQuery = useQuery({
     queryKey: ["tabs", { browser, importance, openState, page, q, status, tag }],
@@ -474,21 +489,23 @@ export function App() {
         <SelectionCheckbox
           checked={allVisibleSelected}
           indeterminate={someVisibleSelected}
-          label="Select all tabs on this page"
+          label={t("Select all tabs on this page")}
           onChange={setPageSelected}
         />
       ),
       cell: ({ row }) => (
         <SelectionCheckbox
           checked={selectedIds.has(row.original.id)}
-          label={`Select ${row.original.title?.trim() || hostname(row.original.url)}`}
+          label={t("Select {tab}", {
+            tab: row.original.title?.trim() || hostname(row.original.url),
+          })}
           onChange={(checked) => setTabSelected(row.original.id, checked)}
           onClick={(event) => event.stopPropagation()}
         />
       ),
     }),
     columnHelper.accessor("title", {
-      header: "Tab",
+      header: t("Tab"),
       cell: ({ row }) => {
         const tabItem = row.original;
         return (
@@ -496,7 +513,7 @@ export function App() {
             <div className="tab-title-line">
               <button
                 className="tab-open-button"
-                title="Open tab details"
+                title={t("Open tab details")}
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
@@ -506,14 +523,16 @@ export function App() {
                 {tabItem.title?.trim() || hostname(tabItem.url)}
               </button>
               <a
-                aria-label={`Open ${tabItem.title?.trim() || hostname(tabItem.url)} in browser`}
+                aria-label={t("Open {tab} in browser", {
+                  tab: tabItem.title?.trim() || hostname(tabItem.url),
+                })}
                 href={tabItem.url}
                 rel="noreferrer"
                 target="_blank"
                 title={tabItem.url}
                 onClick={(event) => event.stopPropagation()}
               >
-                Open
+                {t("Open in browser")}
               </a>
             </div>
             <span>{hostname(tabItem.url)} | #{tabItem.id}</span>
@@ -526,7 +545,7 @@ export function App() {
       },
     }),
     columnHelper.accessor("tagPaths", {
-      header: "Tags",
+      header: t("Tags"),
       cell: ({ getValue }) => {
         const paths = getValue();
         if (paths.length === 0) return <span className="no-row-tags">-</span>;
@@ -536,38 +555,42 @@ export function App() {
             {paths.slice(0, 2).map((path) => (
               <span key={path}>{path}</span>
             ))}
-            {paths.length > 2 ? <strong>+{paths.length - 2}</strong> : null}
+            {paths.length > 2 ? <strong>+{formatNumber(paths.length - 2)}</strong> : null}
           </div>
         );
       },
     }),
     columnHelper.accessor("browser", {
-      header: "Browser",
+      header: t("Browser"),
       cell: ({ getValue }) => <BrowserBadge browser={getValue()} />,
     }),
     columnHelper.accessor("status", {
-      header: "Status",
+      header: t("Status"),
       cell: ({ getValue }) => {
         const status = getValue();
-        return <span className={`status status-${status}`}>{STATUS_LABELS[status]}</span>;
+        return (
+          <span className={`status status-${status}`}>
+            {t(STATUS_LABEL_KEYS[status])}
+          </span>
+        );
       },
     }),
     columnHelper.accessor("importance", {
-      header: "Importance",
+      header: t("Importance"),
       cell: ({ getValue }) => <Importance level={getValue()} />,
     }),
     columnHelper.accessor("isOpen", {
-      header: "State",
+      header: t("State"),
       cell: ({ getValue }) => (
         <span className={getValue() ? "open-state is-open" : "open-state"}>
           <span aria-hidden="true" />
-          {getValue() ? "Open" : "Closed"}
+          {getValue() ? t("Open") : t("Closed")}
         </span>
       ),
     }),
     columnHelper.accessor("firstSeenAt", {
       id: "age",
-      header: "Age",
+      header: t("Age"),
       cell: ({ getValue }) => <RelativeAge value={getValue()} />,
     }),
   ]);
@@ -628,10 +651,10 @@ export function App() {
       : "ready";
   const connectionLabel =
     connectionState === "error"
-      ? "API unavailable"
+      ? t("API unavailable")
       : connectionState === "pending"
-        ? "Connecting"
-        : "Local collection";
+        ? t("Connecting")
+        : t("Local collection");
   const bulkError = bulkStatusMutation.error ?? bulkTagMutation.error;
   const bulkBusy =
     selectAllLibraryMutation.isPending ||
@@ -661,71 +684,84 @@ export function App() {
             <Mark />
             <div>
               <h1>TabHub</h1>
-              <p>Your browsers, one workspace</p>
+              <p>{t("Your browsers, one workspace")}</p>
             </div>
           </div>
-          <div className={`connection-status is-${connectionState}`} role="status">
-            <span aria-hidden="true" />
-            {connectionLabel}
+          <div className="app-header-actions">
+            <label className="language-select">
+              <span>{t("Language")}</span>
+              <select
+                aria-label={t("Language")}
+                value={locale}
+                onChange={(event) => setLocale(event.target.value as "en" | "ru")}
+              >
+                <option lang="en" value="en">{t("English")}</option>
+                <option lang="ru" value="ru">{t("Russian")}</option>
+              </select>
+            </label>
+            <div className={`connection-status is-${connectionState}`} role="status">
+              <span aria-hidden="true" />
+              {connectionLabel}
+            </div>
           </div>
         </header>
 
         <main>
           <section className="list-heading" aria-labelledby="tab-list-title">
             <div>
-              <p className="eyebrow">Workspace</p>
+              <p className="eyebrow">{t("Workspace")}</p>
               <div className="title-row">
                 <h2 id="tab-list-title">
                   {view === "open"
-                    ? "Open tabs"
+                    ? t("Open tabs")
                     : view === "graph"
-                      ? tag || "Knowledge graph"
-                      : tag || "Library"}
+                      ? tag || t("Knowledge graph")
+                      : tag || t("Library")}
                 </h2>
                 {view === "library" && tabsQuery.data ? (
-                  <span>{tabsQuery.data.total.toLocaleString()}</span>
+                  <span>{formatNumber(tabsQuery.data.total)}</span>
                 ) : null}
               </div>
               <p>
                 {view === "open"
-                  ? "Every physical browser tab, including repeated URLs."
+                  ? t("Every physical browser tab, including repeated URLs.")
                   : view === "graph"
                   ? tag
-                    ? `Directed links under ${tag} and its descendants.`
-                    : "Explore relationships across every captured tab."
+                    ? t("Directed links under {tag} and its descendants.", { tag })
+                    : t("Explore relationships across every captured tab.")
                   : tag
-                    ? `Tabs filed under ${tag} and its descendants.`
-                    : "Tabs captured from every connected browser."}
+                    ? t("Tabs filed under {tag} and its descendants.", { tag })
+                    : t("Tabs captured from every connected browser.")}
               </p>
             </div>
             <div className="heading-actions">
               {view === "library" && tabsQuery.isFetching && !tabsQuery.isPending ? (
                 <span className="refresh-status" role="status">
                   <span aria-hidden="true" />
-                  Refreshing
+                  {t("Refreshing")}
                 </span>
               ) : null}
-              <div className="view-switch" aria-label="Workspace view" role="group">
+              <div className="view-switch" aria-label={t("Workspace view")} role="group">
                 <button
                   aria-pressed={view === "open"}
                   type="button"
                   onClick={() => selectView("open")}
                 >
-                  Open tabs
+                  {t("Open tabs")}
                 </button>
                 <button
                   aria-pressed={view === "library"}
                   type="button"
                   onClick={() => selectView("library")}
                 >
-                  Library
+                  {t("Library")}
                 </button>
                 <button
                   aria-pressed={view === "graph"}
                   type="button"
                   onClick={() => selectView("graph")}
                 >
-                  Graph
+                  {t("Graph")}
                 </button>
               </div>
             </div>
@@ -736,12 +772,12 @@ export function App() {
               <aside className="tag-sidebar" aria-labelledby="tag-tree-title">
               <div className="sidebar-heading">
                 <div>
-                  <p>Organize</p>
-                  <h2 id="tag-tree-title">Topics</h2>
+                  <p>{t("Organize")}</p>
+                  <h2 id="tag-tree-title">{t("Topics")}</h2>
                 </div>
                 {tagsQuery.isFetching ? <span className="mini-spinner" aria-hidden="true" /> : null}
               </div>
-              <nav aria-label="Filter tabs by topic">
+              <nav aria-label={t("Filter tabs by topic")}>
                 <button
                   aria-current={!tag ? "page" : undefined}
                   className={!tag ? "all-tags-button is-active" : "all-tags-button"}
@@ -751,7 +787,7 @@ export function App() {
                     setPage(1);
                   }}
                 >
-                  <span>All tabs</span>
+                  <span>{t("All tabs")}</span>
                 </button>
                 {tagsQuery.data?.items.length ? (
                   <TagBranch
@@ -763,17 +799,21 @@ export function App() {
                     }}
                   />
                 ) : null}
-                {tagsQuery.isPending ? <p className="sidebar-state">Loading topics...</p> : null}
+                {tagsQuery.isPending ? (
+                  <p className="sidebar-state">{t("Loading topics...")}</p>
+                ) : null}
                 {tagsQuery.isError ? (
                   <div className="sidebar-state is-error" role="alert">
-                    <span>{tagsQuery.error.message}</span>
+                    <span>{localizeError(tagsQuery.error)}</span>
                     <button type="button" onClick={() => void tagsQuery.refetch()}>
-                      Retry
+                      {t("Retry")}
                     </button>
                   </div>
                 ) : null}
                 {tagsQuery.isSuccess && tagsQuery.data.items.length === 0 ? (
-                  <p className="sidebar-state">Assign a tag to start your topic tree.</p>
+                  <p className="sidebar-state">
+                    {t("Assign a tag to start your topic tree.")}
+                  </p>
                 ) : null}
               </nav>
               </aside>
@@ -782,19 +822,19 @@ export function App() {
             {view === "open" ? (
               <OpenTabsView onSelectCanonicalTab={setActiveTabId} />
             ) : view === "library" ? (
-              <section className="table-panel" aria-label="Browser tabs">
+              <section className="table-panel" aria-label={t("Browser tabs")}>
               <div className="filter-bar">
                 <div className="filter-label">
                   <FilterIcon />
-                  <span>Filters</span>
+                  <span>{t("Filters")}</span>
                 </div>
                 <label className="search-field">
-                  <span>Search tab titles and content</span>
+                  <span>{t("Search tab titles and content")}</span>
                   <SearchIcon />
                   <input
                     autoComplete="off"
                     maxLength={500}
-                    placeholder="Search titles and content"
+                    placeholder={t("Search titles and content")}
                     type="search"
                     value={search}
                     onChange={(event) => {
@@ -804,7 +844,7 @@ export function App() {
                   />
                 </label>
                 <label>
-                  <span>Browser</span>
+                  <span>{t("Browser")}</span>
                   <select
                     value={browser}
                     onChange={(event) => {
@@ -812,16 +852,16 @@ export function App() {
                       setPage(1);
                     }}
                   >
-                    <option value="all">All browsers</option>
+                    <option value="all">{t("All browsers")}</option>
                     {knownBrowserOptions.map((browserOption) => (
                       <option key={browserOption} value={browserOption}>
-                        {browserLabel(browserOption)}
+                        {browserLabel(browserOption, t)}
                       </option>
                     ))}
                   </select>
                 </label>
                 <label>
-                  <span>Tab state</span>
+                  <span>{t("Tab state")}</span>
                   <select
                     value={openState}
                     onChange={(event) => {
@@ -829,13 +869,13 @@ export function App() {
                       setPage(1);
                     }}
                   >
-                    <option value="all">Open &amp; closed</option>
-                    <option value="open">Open only</option>
-                    <option value="closed">Closed only</option>
+                    <option value="all">{t("Open & closed")}</option>
+                    <option value="open">{t("Open only")}</option>
+                    <option value="closed">{t("Closed only")}</option>
                   </select>
                 </label>
                 <label>
-                  <span>Workflow status</span>
+                  <span>{t("Workflow status")}</span>
                   <select
                     value={status}
                     onChange={(event) => {
@@ -843,8 +883,8 @@ export function App() {
                       setPage(1);
                     }}
                   >
-                    <option value="all">All statuses</option>
-                    {STATUS_OPTIONS.map(([value, label]) => (
+                    <option value="all">{t("All statuses")}</option>
+                    {statusOptions.map(([value, label]) => (
                       <option key={value} value={value}>
                         {label}
                       </option>
@@ -852,7 +892,7 @@ export function App() {
                   </select>
                 </label>
                 <label>
-                  <span>Importance</span>
+                  <span>{t("Importance")}</span>
                   <select
                     value={importance}
                     onChange={(event) => {
@@ -863,26 +903,30 @@ export function App() {
                       setPage(1);
                     }}
                   >
-                    <option value="all">Any importance</option>
-                    <option value="0">0 - Unrated</option>
-                    <option value="1">1 - Low</option>
-                    <option value="2">2 - Medium</option>
-                    <option value="3">3 - High</option>
+                    <option value="all">{t("Any importance")}</option>
+                    <option value="0">{t("0 - Unrated")}</option>
+                    <option value="1">{t("1 - Low")}</option>
+                    <option value="2">{t("2 - Medium")}</option>
+                    <option value="3">{t("3 - High")}</option>
                   </select>
                 </label>
                 {hasFilters ? (
                   <button className="clear-button" type="button" onClick={clearFilters}>
-                    Clear filters
+                    {t("Clear filters")}
                   </button>
                 ) : null}
                 <p className="result-count">
                   {tabsQuery.isError
-                    ? "Collection unavailable"
+                    ? t("Collection unavailable")
                     : tabsQuery.data
                       ? tabsQuery.data.total > 0
-                        ? `${firstVisible.toLocaleString()}-${lastVisible.toLocaleString()} of ${tabsQuery.data.total.toLocaleString()}`
-                        : "0 tabs"
-                      : "Loading collection"}
+                        ? t("{first}-{last} of {total}", {
+                            first: formatNumber(firstVisible),
+                            last: formatNumber(lastVisible),
+                            total: formatNumber(tabsQuery.data.total),
+                          })
+                        : t("0 tabs")
+                      : t("Loading collection")}
                 </p>
                 <button
                   className="clear-button"
@@ -899,26 +943,28 @@ export function App() {
                     })
                   }
                 >
-                  All filtered results
+                  {t("All filtered results")}
                 </button>
                 {selectAllLibraryMutation.isError ? (
                   <span className="bulk-error" role="alert">
-                    {selectAllLibraryMutation.error.message}
+                    {localizeError(selectAllLibraryMutation.error)}
                   </span>
                 ) : null}
               </div>
 
               {selectedIds.size > 0 ? (
-                <div className="bulk-toolbar" aria-label="Bulk tab actions">
-                  <strong>{selectedIds.size.toLocaleString()} selected</strong>
+                <div className="bulk-toolbar" aria-label={t("Bulk tab actions")}>
+                  <strong>
+                    {t("{count} selected", { count: formatNumber(selectedIds.size) })}
+                  </strong>
                   <label>
-                    <span>Status</span>
+                    <span>{t("Status")}</span>
                     <select
                       disabled={bulkBusy}
                       value={bulkStatus}
                       onChange={(event) => setBulkStatus(event.target.value as TabStatus)}
                     >
-                      {STATUS_OPTIONS.map(([value, label]) => (
+                      {statusOptions.map(([value, label]) => (
                         <option key={value} value={value}>
                           {label}
                         </option>
@@ -930,7 +976,7 @@ export function App() {
                     type="button"
                     onClick={() => bulkStatusMutation.mutate()}
                   >
-                    Apply status
+                    {t("Apply status")}
                   </button>
                   <form
                     onSubmit={(event) => {
@@ -939,18 +985,18 @@ export function App() {
                     }}
                   >
                     <label>
-                      <span>Tag path</span>
+                      <span>{t("Tag path")}</span>
                       <input
                         disabled={bulkBusy}
                         maxLength={2_048}
-                        placeholder="Research/AI"
+                        placeholder={t("Research/AI")}
                         required
                         value={bulkTag}
                         onChange={(event) => setBulkTag(event.target.value)}
                       />
                     </label>
                     <button disabled={bulkBusy || !bulkTag.trim()} type="submit">
-                      Assign tag
+                      {t("Assign tag")}
                     </button>
                   </form>
                   <button
@@ -959,11 +1005,11 @@ export function App() {
                     type="button"
                     onClick={() => setSelectedIds(new Set())}
                   >
-                    Clear
+                    {t("Clear")}
                   </button>
                   {bulkError ? (
                     <span className="bulk-error" role="alert">
-                      {bulkError.message}
+                      {localizeError(bulkError)}
                     </span>
                   ) : null}
                 </div>
@@ -971,7 +1017,9 @@ export function App() {
 
               <div className="table-scroll" ref={tableScrollRef}>
                 <table aria-rowcount={tableRows.length + 1} className="virtual-table">
-                  <caption className="sr-only">Tabs collected from connected browsers</caption>
+                  <caption className="sr-only">
+                    {t("Tabs collected from connected browsers")}
+                  </caption>
                   <thead>
                     {table.getHeaderGroups().map((headerGroup) => (
                       <tr key={headerGroup.id}>
@@ -1025,8 +1073,8 @@ export function App() {
                   <div className="state-panel loading-state" role="status">
                     <div className="spinner" aria-hidden="true" />
                     <div>
-                      <strong>Loading your tabs</strong>
-                      <span>Reading the local collection...</span>
+                      <strong>{t("Loading your tabs")}</strong>
+                      <span>{t("Reading the local collection...")}</span>
                     </div>
                   </div>
                 ) : null}
@@ -1035,11 +1083,11 @@ export function App() {
                   <div className="state-panel error-state" role="alert">
                     <div className="state-icon" aria-hidden="true">!</div>
                     <div>
-                      <strong>Couldn't load tabs</strong>
-                      <span>{tabsQuery.error.message}</span>
+                      <strong>{t("Couldn't load tabs")}</strong>
+                      <span>{localizeError(tabsQuery.error)}</span>
                     </div>
                     <button type="button" onClick={() => void tabsQuery.refetch()}>
-                      Try again
+                      {t("Try again")}
                     </button>
                   </div>
                 ) : null}
@@ -1052,17 +1100,19 @@ export function App() {
                     </div>
                     <div>
                       <strong>
-                        {hasAppliedFilters ? "No tabs match these filters" : "No tabs yet"}
+                        {hasAppliedFilters
+                          ? t("No tabs match these filters")
+                          : t("No tabs yet")}
                       </strong>
                       <span>
                         {hasAppliedFilters
-                          ? "Try another search, topic, browser, or tab state."
-                          : "Connect a browser extension to fill this workspace."}
+                          ? t("Try another search, topic, browser, or tab state.")
+                          : t("Connect a browser extension to fill this workspace.")}
                       </span>
                     </div>
                     {hasFilters ? (
                       <button type="button" onClick={clearFilters}>
-                        Clear filters
+                        {t("Clear filters")}
                       </button>
                     ) : null}
                   </div>
@@ -1070,10 +1120,12 @@ export function App() {
               </div>
 
               {tabsQuery.data && tabsQuery.data.total > 0 ? (
-                <nav className="pagination" aria-label="Tab list pages">
+                <nav className="pagination" aria-label={t("Tab list pages")}>
                   <p>
-                    Page <strong>{tabsQuery.data.page.toLocaleString()}</strong> of{" "}
-                    {totalPages.toLocaleString()}
+                    {t("Page {page} of {total}", {
+                      page: formatNumber(tabsQuery.data.page),
+                      total: formatNumber(totalPages),
+                    })}
                   </p>
                   <div>
                     <button
@@ -1082,14 +1134,14 @@ export function App() {
                       onClick={() => setPage((current) => Math.max(1, current - 1))}
                     >
                       <span aria-hidden="true">&lt;-</span>
-                      Previous
+                      {t("Previous")}
                     </button>
                     <button
                       disabled={tabsQuery.data.page >= totalPages || tabsQuery.isFetching}
                       type="button"
                       onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
                     >
-                      Next
+                      {t("Next")}
                       <span aria-hidden="true">-&gt;</span>
                     </button>
                   </div>
@@ -1099,12 +1151,12 @@ export function App() {
             ) : (
               <Suspense
                 fallback={
-                  <section className="graph-panel" aria-label="Tab knowledge graph">
+                  <section className="graph-panel" aria-label={t("Tab knowledge graph")}>
                     <div className="graph-canvas">
                       <div className="graph-state" role="status">
                         <div className="graph-state-mark" aria-hidden="true" />
-                        <strong>Loading graph view</strong>
-                        <span>Preparing the interactive canvas...</span>
+                        <strong>{t("Loading graph view")}</strong>
+                        <span>{t("Preparing the interactive canvas...")}</span>
                       </div>
                     </div>
                   </section>

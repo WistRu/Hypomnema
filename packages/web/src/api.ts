@@ -7,6 +7,9 @@ import {
   setStatusResponseSchema,
   summaryEnqueueResponseSchema,
   summaryJobSchema,
+  tabCommandRelayConnectedScopesResponseSchema,
+  tabCommandRelayHttpRequestSchema,
+  tabCommandRelayHttpResponseSchema,
   tabBulkIdsResponseSchema,
   tabDetailResponseSchema,
   tabInstanceBulkResponseSchema,
@@ -20,6 +23,9 @@ import {
   type CreateLink,
   type PatchLink,
   type PatchTab,
+  type TabCommandRelayErrorCode,
+  type TabCommandRelayHttpRequest,
+  type TabCommandRelayResult,
   type TabImportance,
   type TabStatus,
 } from "@tabhub/shared";
@@ -49,11 +55,137 @@ export interface OpenTabListFilters {
 export interface DuplicateGroupListFilters {
   browser: string;
   page: number;
+  q?: string;
 }
 
 export type PatchTabDetails = PatchTab;
 export type CreateTabLink = CreateLink;
 export type PatchTabLink = PatchLink;
+
+export class TabCommandRelayClientError extends Error {
+  readonly code: TabCommandRelayErrorCode;
+  readonly outcome: "not-sent" | "unknown";
+
+  constructor(
+    message: string,
+    options: {
+      code: TabCommandRelayErrorCode;
+      outcome: "not-sent" | "unknown";
+    },
+  ) {
+    super(message);
+    this.name = "TabCommandRelayClientError";
+    this.code = options.code;
+    this.outcome = options.outcome;
+  }
+}
+
+export function isRelayedTabCommandOutcomeUnknown(
+  error: unknown,
+): error is TabCommandRelayClientError {
+  return (
+    error instanceof TabCommandRelayClientError && error.outcome === "unknown"
+  );
+}
+
+function unknownRelayOutcomeError(
+  message: string,
+  code: TabCommandRelayErrorCode = "INVALID_COMMAND_RECEIPT",
+): TabCommandRelayClientError {
+  return new TabCommandRelayClientError(message, {
+    code,
+    outcome: "unknown",
+  });
+}
+
+function hasExactRelayTargetPartition(
+  targets: readonly { tabId: number }[],
+  result: {
+    failed: readonly { tabId: number }[];
+    requested: number;
+    skipped: readonly { tabId: number }[];
+    succeededTabIds: readonly number[];
+  },
+): boolean {
+  if (result.requested !== targets.length) return false;
+  const expectedIds = new Set(targets.map(({ tabId }) => tabId));
+  const actualIds = [
+    ...result.succeededTabIds,
+    ...result.skipped.map(({ tabId }) => tabId),
+    ...result.failed.map(({ tabId }) => tabId),
+  ];
+  return (
+    actualIds.length === targets.length &&
+    new Set(actualIds).size === actualIds.length &&
+    actualIds.every((tabId) => expectedIds.has(tabId))
+  );
+}
+
+function isCorrelatedRelayResult(
+  command: TabCommandRelayHttpRequest["command"],
+  result: TabCommandRelayResult,
+): boolean {
+  switch (command.kind) {
+    case "get-browser-state":
+      return result.kind === "get-browser-state";
+    case "activate-tab":
+      return result.kind === "activate-tab" && result.tabId === command.tabId;
+    case "close-preview":
+      return (
+        result.kind === "close-preview" &&
+        hasExactRelayTargetPartition(command.targets, {
+          failed: [],
+          requested: result.requested,
+          skipped: result.skipped,
+          succeededTabIds: result.candidateTabIds,
+        })
+      );
+    case "close":
+      return result.kind === "close";
+    case "undo-close":
+      return result.kind === "undo-close";
+    case "set-pinned":
+      return (
+        result.kind === "set-pinned" &&
+        hasExactRelayTargetPartition(command.targets, result)
+      );
+    case "set-muted":
+      return (
+        result.kind === "set-muted" &&
+        hasExactRelayTargetPartition(command.targets, result)
+      );
+    case "discard":
+      return (
+        result.kind === "discard" &&
+        hasExactRelayTargetPartition(command.targets, result)
+      );
+    case "reload":
+      return (
+        result.kind === "reload" &&
+        hasExactRelayTargetPartition(command.targets, result)
+      );
+    case "move":
+      return (
+        result.kind === "move" &&
+        hasExactRelayTargetPartition(command.targets, result) &&
+        (command.destination.kind !== "window" ||
+          result.destinationWindowId === undefined ||
+          result.destinationWindowId === command.destination.windowId)
+      );
+    case "open-workspace": {
+      if (result.kind !== "open-workspace") return false;
+      const failedIndices = result.failed.map(({ index }) => index);
+      return (
+        result.requested === command.tabs.length &&
+        result.openedTabIds.length <= command.tabs.length &&
+        new Set(result.openedTabIds).size === result.openedTabIds.length &&
+        new Set(failedIndices).size === failedIndices.length &&
+        failedIndices.every((index) => index < command.tabs.length) &&
+        result.openedTabIds.length + failedIndices.length >= command.tabs.length
+      );
+    }
+  }
+}
 
 function appendLibraryTabFilters(
   searchParams: URLSearchParams,
@@ -275,6 +407,9 @@ export async function fetchDuplicateGroups(
   if (filters.browser !== "all") {
     searchParams.set("browser", filters.browser);
   }
+  if (filters.q) {
+    searchParams.set("q", filters.q);
+  }
 
   const payload = await requestJson(
     `/api/duplicate-groups?${searchParams.toString()}`,
@@ -291,6 +426,100 @@ export async function fetchDuplicateGroups(
   }
 
   return parsed.data;
+}
+
+export async function fetchConnectedTabCommandScopes(signal?: AbortSignal) {
+  const payload = await requestJson(
+    "/api/tab-command-relay/scopes",
+    {
+      headers: { Accept: "application/json" },
+      signal: signal ?? null,
+    },
+    "TabHub could not read connected browser sessions",
+    "TabHub returned unreadable connected browser sessions.",
+  );
+  const parsed = tabCommandRelayConnectedScopesResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned unexpected connected browser sessions.");
+  }
+  return parsed.data.items;
+}
+
+export async function executeRelayedTabCommand(
+  request: TabCommandRelayHttpRequest,
+  signal?: AbortSignal,
+): Promise<TabCommandRelayResult> {
+  const validatedRequest = tabCommandRelayHttpRequestSchema.safeParse(request);
+  if (!validatedRequest.success) {
+    throw new Error("Invalid addressed browser command.");
+  }
+
+  let response: Response;
+  try {
+    response = await fetch("/api/tab-command-relay/commands", {
+      body: JSON.stringify(validatedRequest.data),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+      signal: signal ?? null,
+    });
+  } catch {
+    throw unknownRelayOutcomeError(
+      "TabHub could not confirm the browser-command result.",
+      "EXTENSION_DISCONNECTED",
+    );
+  }
+  let payload: unknown;
+  try {
+    payload = await responsePayload(
+      response,
+      "TabHub returned an unreadable browser-command result.",
+    );
+  } catch {
+    throw unknownRelayOutcomeError(
+      "TabHub returned an unreadable browser-command result.",
+    );
+  }
+  const parsed = tabCommandRelayHttpResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw unknownRelayOutcomeError(
+      "TabHub returned an unexpected browser-command result.",
+    );
+  }
+  if (!parsed.data.ok) {
+    throw new TabCommandRelayClientError(parsed.data.message, {
+      code: parsed.data.error,
+      outcome: parsed.data.outcome,
+    });
+  }
+  if (!response.ok) {
+    throw unknownRelayOutcomeError(
+      `TabHub returned a successful browser-command result with HTTP ${response.status}.`,
+    );
+  }
+  if (
+    parsed.data.scope.browser !== validatedRequest.data.browser ||
+    parsed.data.scope.browserSessionId !==
+      validatedRequest.data.browserSessionId ||
+    parsed.data.scope.installationId !== validatedRequest.data.installationId
+  ) {
+    throw unknownRelayOutcomeError(
+      "TabHub returned a browser-command receipt for a different browser session.",
+    );
+  }
+  if (
+    !isCorrelatedRelayResult(
+      validatedRequest.data.command,
+      parsed.data.result,
+    )
+  ) {
+    throw unknownRelayOutcomeError(
+      "TabHub returned a result that does not match the browser command.",
+    );
+  }
+  return parsed.data.result;
 }
 
 export async function fetchWorkspaces(signal?: AbortSignal) {

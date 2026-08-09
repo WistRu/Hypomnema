@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isAllowedAppMessageSender,
+  isAllowedAppPageUrl,
   isExtensionRequest,
 } from "./messages";
 
@@ -171,5 +172,16 @@ describe("isAllowedAppMessageSender", () => {
     "chrome-extension://abc/popup.html",
   ])("rejects non-app message senders: %s", (url) => {
     expect(isAllowedAppMessageSender({ tab: { url } })).toBe(false);
+  });
+});
+
+describe("isAllowedAppPageUrl", () => {
+  it("recognizes every local TabHub page that relay commands must protect", () => {
+    expect(isAllowedAppPageUrl("http://127.0.0.1:7717/app/")).toBe(true);
+    expect(isAllowedAppPageUrl("http://localhost:7717/app/?view=open")).toBe(
+      true,
+    );
+    expect(isAllowedAppPageUrl("https://example.com/app/")).toBe(false);
+    expect(isAllowedAppPageUrl(undefined)).toBe(false);
   });
 });

@@ -1,3 +1,9 @@
+import {
+  tabCommandRelayResultSchema,
+  type TabCommandRelayCommand,
+  type TabCommandRelayResult,
+  type TabCommandScope,
+} from "@tabhub/shared";
 import { browser } from "wxt/browser";
 import { defineBackground } from "wxt/utils/define-background";
 
@@ -8,12 +14,17 @@ import {
   type TabActivationAdapter,
 } from "../lib/activate-tab";
 import {
+  readBrowserState,
+  type BrowserStateSource,
+} from "../lib/browser-state";
+import {
   EXTRACT_CONTENT_SCRIPT_FILE,
   RETRY_ALARM_NAME,
   RETRY_INTERVAL_MINUTES,
   SNAPSHOT_ALARM_NAME,
   SNAPSHOT_INTERVAL_MINUTES,
   TAB_EVENT_DEBOUNCE_MS,
+  TAB_COMMAND_RELAY_WEBSOCKET_ENDPOINT,
 } from "../lib/constants";
 import {
   captureEligibleTabs,
@@ -21,6 +32,7 @@ import {
 } from "../lib/content-capture";
 import {
   isAllowedAppMessageSender,
+  isAllowedAppPageUrl,
   isExtensionRequest,
   type AppExtensionResponse,
   type BridgeRequestType,
@@ -31,6 +43,7 @@ import {
 } from "../lib/messages";
 import {
   createPhysicalTabCommandExecutor,
+  parsePhysicalTabCommand,
   type PhysicalTabCommandAdapter,
 } from "../lib/physical-tab-commands";
 import {
@@ -55,6 +68,10 @@ import {
 } from "../lib/storage";
 import { registerTabEventSnapshots } from "../lib/tab-event-snapshots";
 import {
+  createBrowserTabCommandRelaySocket,
+  createTabCommandRelayAgent,
+} from "../lib/tab-command-relay-agent";
+import {
   buildIdentityTransitionSnapshots,
   buildSnapshot,
   reconcileCapturedTabUrl,
@@ -66,7 +83,6 @@ const IDENTITY_REQUIRED_ERROR =
 
 let syncTail: Promise<void> = Promise.resolve();
 let tabEventTimer: ReturnType<typeof setTimeout> | undefined;
-const activationSequencer = createActivationSequencer();
 const tabCommandSequencer = createActivationSequencer();
 
 const tabActivationAdapter: TabActivationAdapter = {
@@ -112,6 +128,23 @@ const physicalTabCommandExecutor = createPhysicalTabCommandExecutor({
     remove: (key) => browser.storage.session.remove(key),
     set: (items) => browser.storage.session.set(items),
   },
+});
+const browserStateSource: BrowserStateSource = {
+  listPendingUndos: (scope) =>
+    physicalTabCommandExecutor.listPendingUndos(scope),
+  listWindows: () => physicalTabCommandExecutor.listWindows(),
+};
+const tabCommandRelayAgent = createTabCommandRelayAgent({
+  createSocket: createBrowserTabCommandRelaySocket,
+  execute: executeRelayedTabCommand,
+  getScope: currentTabCommandScope,
+  relayUrl: TAB_COMMAND_RELAY_WEBSOCKET_ENDPOINT,
+  sequenceLiveCommand: (operation) => tabCommandSequencer.run(operation),
+  storage: {
+    get: (key) => browser.storage.session.get(key),
+    set: (items) => browser.storage.session.set(items),
+  },
+  onError: (error) => console.error("TabHub command relay failed", error),
 });
 
 function serializeSync<T>(operation: () => Promise<T>): Promise<T> {
@@ -200,6 +233,135 @@ function captureAndSync(
   requireConfigured = false,
 ): Promise<DrainQueueResult | undefined> {
   return serializeSync(() => captureAndSyncUnlocked(requireConfigured));
+}
+
+async function currentTabCommandScope(): Promise<
+  TabCommandScope | undefined
+> {
+  const browserIdentifier = await getBrowserIdentifier();
+  if (browserIdentifier === undefined) return undefined;
+  const [installationId, browserSessionId] = await Promise.all([
+    getOrCreateInstallationId(),
+    getOrCreateBrowserSessionId(),
+  ]);
+  return {
+    browser: browserIdentifier,
+    browserSessionId,
+    installationId,
+  };
+}
+
+function sameTabCommandScope(
+  left: TabCommandScope,
+  right: TabCommandScope,
+): boolean {
+  return (
+    left.browser === right.browser &&
+    left.browserSessionId === right.browserSessionId &&
+    left.installationId === right.installationId
+  );
+}
+
+function currentBrowserState(scope: TabCommandScope | undefined) {
+  // This is a read-only, point-in-time view. Keeping it outside the physical
+  // mutation queue prevents a long workspace/close operation from making the
+  // relay's short state timeout expire before the read even starts.
+  return readBrowserState(browserStateSource, scope);
+}
+
+async function executeRelayedTabCommand(
+  requestedScope: TabCommandScope,
+  relayCommand: TabCommandRelayCommand,
+): Promise<TabCommandRelayResult> {
+  if (relayCommand.kind === "get-browser-state") {
+    const currentScope = await currentTabCommandScope();
+    if (currentScope === undefined) {
+      throw new Error(IDENTITY_REQUIRED_ERROR);
+    }
+    if (!sameTabCommandScope(currentScope, requestedScope)) {
+      throw new Error(
+        "That command belongs to a different browser installation or session.",
+      );
+    }
+    return tabCommandRelayResultSchema.parse({
+      kind: "get-browser-state",
+      ...(await currentBrowserState(currentScope)),
+    });
+  }
+
+  if (relayCommand.kind === "activate-tab") {
+    const currentScope = await currentTabCommandScope();
+    if (currentScope === undefined) {
+      throw new Error(IDENTITY_REQUIRED_ERROR);
+    }
+    try {
+      const result = await activateTabForScope(
+        tabActivationAdapter,
+        currentScope,
+        { ...requestedScope, tabId: relayCommand.tabId },
+      );
+      return tabCommandRelayResultSchema.parse({
+        kind: "activate-tab",
+        ...result,
+      });
+    } catch (error) {
+      void captureAndSync(true).catch((refreshError: unknown) => {
+        console.error(
+          "TabHub relayed activation-failure snapshot failed",
+          refreshError,
+        );
+      });
+      throw error;
+    }
+  }
+
+  const command = parsePhysicalTabCommand(relayCommand);
+  if (command === undefined) {
+    throw new Error("The relay command is not a supported browser action.");
+  }
+
+  const [currentScope, tabs] = await Promise.all([
+    currentTabCommandScope(),
+    browser.tabs.query({}),
+  ]);
+  if (currentScope === undefined) {
+    throw new Error(IDENTITY_REQUIRED_ERROR);
+  }
+  const protectedTabIds = tabs.flatMap((tab) =>
+    tab.id !== undefined &&
+    (isAllowedAppPageUrl(tab.url) || isAllowedAppPageUrl(tab.pendingUrl))
+      ? [tab.id]
+      : [],
+  );
+  const result = await physicalTabCommandExecutor.execute(
+    {
+      currentScope,
+      protectedTabIds,
+    },
+    {
+      ...requestedScope,
+      command,
+    },
+  );
+
+  if (result.kind !== "close-preview") {
+    // A result is exposed only after the local catalog has had a chance to
+    // observe the mutation, matching the same-page bridge semantics.
+    try {
+      const synchronized = await captureAndSync(true);
+      if (
+        synchronized?.serverReachable !== true ||
+        synchronized.remaining.length > 0
+      ) {
+        scheduleTabEventSnapshot();
+      }
+    } catch (error) {
+      console.error("TabHub post-relay-command snapshot failed", error);
+      scheduleTabEventSnapshot();
+    }
+  }
+
+  return tabCommandRelayResultSchema.parse(result);
 }
 
 function changeBrowserIdentity(
@@ -501,18 +663,15 @@ async function handleAppRequest(
       ) {
         throw new Error("TabHub could not identify its browser window.");
       }
-      const [windows, pendingUndos] = await Promise.all([
-        physicalTabCommandExecutor.listWindows(),
+      const scope =
         browserIdentifier === undefined
-          ? Promise.resolve([])
-          : tabCommandSequencer.run(() =>
-              physicalTabCommandExecutor.listPendingUndos({
-                browser: browserIdentifier,
-                browserSessionId,
-                installationId,
-              }),
-            ),
-      ]);
+          ? undefined
+          : {
+              browser: browserIdentifier,
+              browserSessionId,
+              installationId,
+            };
+      const { pendingUndos, windows } = await currentBrowserState(scope);
 
       return {
         data: {
@@ -529,7 +688,7 @@ async function handleAppRequest(
       };
     }
     case "tabhub:app-activate-tab": {
-      return activationSequencer.run(async () => {
+      return tabCommandSequencer.run(async () => {
         const [browserIdentifier, installationId, browserSessionId] =
           await Promise.all([
             getBrowserIdentifier(),
@@ -687,9 +846,14 @@ async function handleMessage(
         return captureContent("current");
       case "tabhub:capture-all":
         return captureContent("all");
-      case "tabhub:browser-changed":
-        await changeBrowserIdentity(message.browser);
+      case "tabhub:browser-changed": {
+        try {
+          await changeBrowserIdentity(message.browser);
+        } finally {
+          tabCommandRelayAgent.restart();
+        }
         return { ok: true, status: await getStatus() };
+      }
     }
   } catch (error) {
     if (bridgeType !== undefined) {
@@ -723,6 +887,7 @@ async function handleMessage(
 }
 
 async function initializeWorker(): Promise<void> {
+  tabCommandRelayAgent.start();
   await ensureAlarms();
   await flushPending();
   await captureAndSync();
@@ -747,6 +912,7 @@ export default defineBackground(() => {
 
   browser.runtime.onStartup.addListener(() => {
     void (async () => {
+      tabCommandRelayAgent.restart();
       await ensureAlarms();
       await captureAndSync();
     })().catch((error: unknown) => {

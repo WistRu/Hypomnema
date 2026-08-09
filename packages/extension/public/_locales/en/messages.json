@@ -1,0 +1,238 @@
+{
+  "extensionName": {
+    "message": "TabHub"
+  },
+  "extensionDescription": {
+    "message": "Keep this browser's open tabs synchronized with TabHub."
+  },
+  "popupHeading": {
+    "message": "Tab capture"
+  },
+  "popupServerLabel": {
+    "message": "Server"
+  },
+  "popupUnsyncedTabsLabel": {
+    "message": "Unsynced tabs"
+  },
+  "popupQueuedOperationsLabel": {
+    "message": "Queued operations"
+  },
+  "popupChecking": {
+    "message": "Checking…"
+  },
+  "popupCaptureCurrentButton": {
+    "message": "Capture current tab"
+  },
+  "popupCaptureAllButton": {
+    "message": "Capture all eligible tabs"
+  },
+  "popupSnapshotButton": {
+    "message": "Snapshot now"
+  },
+  "popupBrowserSettingsButton": {
+    "message": "Browser settings"
+  },
+  "popupServerAvailable": {
+    "message": "Available"
+  },
+  "popupServerUnavailable": {
+    "message": "Unavailable"
+  },
+  "popupServerAvailableTitle": {
+    "message": "TabHub server available"
+  },
+  "popupServerUnavailableTitle": {
+    "message": "TabHub server unavailable"
+  },
+  "popupChooseBrowserIdentity": {
+    "message": "Choose this browser's identity in Browser settings before capturing tabs."
+  },
+  "popupWaitingToRetry": {
+    "message": "$TAB_COUNT$ unique tabs across $OPERATION_COUNT$ queued operations are waiting to retry.",
+    "placeholders": {
+      "tab_count": {
+        "content": "$1",
+        "example": "3"
+      },
+      "operation_count": {
+        "content": "$2",
+        "example": "4"
+      }
+    }
+  },
+  "popupAllSynchronized": {
+    "message": "All queued items are synchronized."
+  },
+  "popupCaptureNone": {
+    "message": "Captured 0 of $REQUESTED$; skipped $SKIPPED$. No content was sent.",
+    "placeholders": {
+      "requested": {
+        "content": "$1",
+        "example": "5"
+      },
+      "skipped": {
+        "content": "$2",
+        "example": "5"
+      }
+    }
+  },
+  "popupCaptureQueued": {
+    "message": "Captured $CAPTURED$ of $REQUESTED$; skipped $SKIPPED$. $QUEUED$ saved locally for automatic retry.",
+    "placeholders": {
+      "captured": {
+        "content": "$1",
+        "example": "4"
+      },
+      "requested": {
+        "content": "$2",
+        "example": "5"
+      },
+      "skipped": {
+        "content": "$3",
+        "example": "1"
+      },
+      "queued": {
+        "content": "$4",
+        "example": "2"
+      }
+    }
+  },
+  "popupCaptureSynchronized": {
+    "message": "Captured $CAPTURED$ of $REQUESTED$; skipped $SKIPPED$. Content synchronized.",
+    "placeholders": {
+      "captured": {
+        "content": "$1",
+        "example": "4"
+      },
+      "requested": {
+        "content": "$2",
+        "example": "5"
+      },
+      "skipped": {
+        "content": "$3",
+        "example": "1"
+      }
+    }
+  },
+  "popupSnapshotSavedForRetry": {
+    "message": "Snapshot saved locally; retry is automatic."
+  },
+  "popupActionFailed": {
+    "message": "Extension action failed."
+  },
+  "popupCapturingCurrent": {
+    "message": "Capturing current tab…"
+  },
+  "popupCurrentCaptured": {
+    "message": "Current tab captured."
+  },
+  "popupCapturingAll": {
+    "message": "Capturing eligible tabs…"
+  },
+  "popupAllCaptured": {
+    "message": "Eligible tabs captured."
+  },
+  "popupTakingSnapshot": {
+    "message": "Taking snapshot…"
+  },
+  "popupSnapshotSynchronized": {
+    "message": "Snapshot synchronized."
+  },
+  "popupCouldNotReadStatus": {
+    "message": "Could not read extension status."
+  },
+  "optionsDocumentTitle": {
+    "message": "TabHub settings"
+  },
+  "optionsHeading": {
+    "message": "Browser identity"
+  },
+  "optionsDescription": {
+    "message": "Choose the browser where this copy of TabHub is installed. This label keeps tabs from different browsers separate."
+  },
+  "optionsBrowserLabel": {
+    "message": "Browser"
+  },
+  "optionsChooseBrowser": {
+    "message": "Choose this browser…"
+  },
+  "browserChrome": {
+    "message": "Chrome"
+  },
+  "browserYandex": {
+    "message": "Yandex Browser"
+  },
+  "browserEdge": {
+    "message": "Microsoft Edge"
+  },
+  "browserOther": {
+    "message": "Other Chromium browser"
+  },
+  "optionsSavedDiscardedWithError": {
+    "message": "Saved, but an unsendable operation was discarded. $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "Upload rejected"
+      }
+    }
+  },
+  "optionsSavedDiscarded": {
+    "message": "Saved, but an unsendable operation was discarded. Check the extension popup for the rejected upload."
+  },
+  "optionsSavedPendingWithError": {
+    "message": "Saved locally. $COUNT$ queued operations will retry automatically. Last error: $ERROR$",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      },
+      "error": {
+        "content": "$2",
+        "example": "Server unavailable"
+      }
+    }
+  },
+  "optionsSavedPending": {
+    "message": "Saved locally. $COUNT$ queued operations will retry automatically.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "optionsSavedSynchronized": {
+    "message": "Saved. This browser is synchronized."
+  },
+  "optionsSavedIdentityChanged": {
+    "message": "Saved. The previous identity was closed and this browser is synchronized."
+  },
+  "optionsUnsupportedBrowserSelection": {
+    "message": "Unsupported browser selection"
+  },
+  "optionsCouldNotSave": {
+    "message": "Could not save the setting."
+  },
+  "extensionErrorSnapshotUpload": {
+    "message": "Snapshot upload failed (HTTP $STATUS$).",
+    "placeholders": {
+      "status": {
+        "content": "$1",
+        "example": "503"
+      }
+    }
+  },
+  "extensionErrorContentUpload": {
+    "message": "Content upload failed (HTTP $STATUS$).",
+    "placeholders": {
+      "status": {
+        "content": "$1",
+        "example": "429"
+      }
+    }
+  },
+  "extensionErrorOfflineQueueFull": {
+    "message": "TabHub's offline queue is full. Reconnect the local server and retry."
+  }
+}

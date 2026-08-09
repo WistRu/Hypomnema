@@ -29,18 +29,39 @@ export interface DuplicateCloseConfirmation {
   protectedCount: number;
 }
 
-function browserLabel(browser: string): string {
+export type DuplicateModelTranslator = (
+  key: string,
+  params?: Record<string, number | string>,
+) => string;
+
+function translate(
+  t: DuplicateModelTranslator | undefined,
+  key: string,
+  params: Record<string, number | string> = {},
+): string {
+  if (t) return t(key, params);
+  return key.replace(/\{(\w+)\}/g, (match, name: string) =>
+    Object.hasOwn(params, name) ? String(params[name]) : match,
+  );
+}
+
+function browserLabel(
+  browser: string,
+  t: DuplicateModelTranslator | undefined,
+): string {
   switch (browser) {
     case "chrome":
-      return "Chrome";
+      return translate(t, "Chrome");
     case "edge":
-      return "Edge";
+      return translate(t, "Edge");
     case "yandex":
-      return "Yandex";
+      return translate(t, "Yandex");
+    case "other":
+      return translate(t, "another browser");
     default:
       return browser.length > 0
         ? `${browser[0]!.toUpperCase()}${browser.slice(1)}`
-        : "this browser";
+        : translate(t, "this browser");
   }
 }
 
@@ -74,16 +95,22 @@ export function duplicateReviewSummary(
 export function duplicateGroupView(
   group: DuplicateGroup,
   connectedInstallationId: string | null,
+  t?: DuplicateModelTranslator,
 ): DuplicateGroupView {
   const closeCandidateCount = group.candidateInstanceIds.length;
   let reason: string | null = null;
 
   if (connectedInstallationId === null) {
-    reason = "TabHub extension is not connected to this page.";
+    reason = translate(t, "TabHub extension is not connected to this page.");
   } else if (connectedInstallationId !== group.installationId) {
-    reason = `Open TabHub in ${browserLabel(group.browser)} to close these duplicates.`;
+    reason = translate(t, "Open TabHub in {browser} to close these duplicates.", {
+      browser: browserLabel(group.browser, t),
+    });
   } else if (closeCandidateCount === 0) {
-    reason = "Every extra copy is pinned, so TabHub will keep it open.";
+    reason = translate(
+      t,
+      "Every extra copy is pinned, so TabHub will keep it open.",
+    );
   }
 
   return {

@@ -10,23 +10,23 @@
     <main>
       <header>
         <div>
-          <p class="eyebrow">TabHub</p>
-          <h1>Tab capture</h1>
+          <p id="popup-brand" class="eyebrow">TabHub</p>
+          <h1 id="popup-heading">Tab capture</h1>
         </div>
         <span id="status-dot" class="status-dot pending" aria-hidden="true"></span>
       </header>
 
       <section class="status-card" aria-live="polite">
         <div>
-          <span class="label">Server</span>
+          <span id="server-label" class="label">Server</span>
           <strong id="server-status">Checking…</strong>
         </div>
         <div>
-          <span class="label">Unsynced tabs</span>
+          <span id="pending-label" class="label">Unsynced tabs</span>
           <strong id="pending-count">—</strong>
         </div>
         <div>
-          <span class="label">Queued operations</span>
+          <span id="pending-operations-label" class="label">Queued operations</span>
           <strong id="pending-operations">—</strong>
         </div>
       </section>

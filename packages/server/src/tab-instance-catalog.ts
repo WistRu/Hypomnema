@@ -28,6 +28,7 @@ export interface TabInstanceCatalog {
   listAllInstances(input: FilterTabInstancesInput): TabInstanceBulkResponse;
   listDuplicateGroups(input: {
     browser: string | undefined;
+    q?: string | undefined;
     page: number;
     pageSize: number;
   }): DuplicateGroupListResponse;
@@ -558,9 +559,30 @@ export function createTabInstanceCatalog(
 
     listDuplicateGroups(input) {
       const readSnapshot = connection.transaction(() => {
-        const browserPredicate =
-          input.browser === undefined ? "" : "WHERE browser = ?";
-        const parameters = input.browser === undefined ? [] : [input.browser];
+        const predicates: string[] = [];
+        const parameters: string[] = [];
+        if (input.browser !== undefined) {
+          predicates.push("tabs.browser = ?");
+          parameters.push(input.browser);
+        }
+        const whereClause =
+          predicates.length === 0 ? "" : `WHERE ${predicates.join(" AND ")}`;
+        let searchHavingClause = "";
+        if (input.q !== undefined) {
+          const escaped = input.q
+            .replaceAll("\\", "\\\\")
+            .replaceAll("%", "\\%")
+            .replaceAll("_", "\\_");
+          searchHavingClause = `
+            AND SUM(
+              CASE WHEN
+                tab_instances.url LIKE ? ESCAPE '\\'
+                OR COALESCE(tab_instances.title, '') LIKE ? ESCAPE '\\'
+              THEN 1 ELSE 0 END
+            ) > 0
+          `;
+          parameters.push(`%${escaped}%`, `%${escaped}%`);
+        }
         const groupedQuery = `
         WITH grouped AS (
           SELECT
@@ -574,12 +596,13 @@ export function createTabInstanceCatalog(
             ) AS protected_count
           FROM tab_instances
           JOIN tabs ON tabs.id = tab_instances.tab_id
-          ${browserPredicate}
+          ${whereClause}
           GROUP BY
             tab_instances.installation_id,
             tabs.browser,
             tab_instances.url
           HAVING COUNT(*) > 1
+          ${searchHavingClause}
         )`;
         const totals = connection
           .prepare(`

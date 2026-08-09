@@ -6,6 +6,20 @@ import type {
   ExtensionResponse,
   ExtensionStatus,
 } from "../../lib/messages";
+import { localizedExtensionError } from "../../lib/localized-error";
+
+const uiLocale = browser.i18n.getMessage("@@ui_locale");
+const documentLocale = /^ru(?:[-_]|$)/i.test(uiLocale) ? "ru" : "en";
+const numberFormatter = new Intl.NumberFormat(documentLocale);
+
+function displayError(message: string): string {
+  if (documentLocale === "en" || /[А-Яа-яЁё]/.test(message)) return message;
+  const localized = localizedExtensionError(message);
+  return browser.i18n.getMessage(
+    localized.messageName,
+    localized.substitutions,
+  );
+}
 
 function requiredElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -33,27 +47,59 @@ const snapshotButton =
 const optionsButton = requiredElement<HTMLButtonElement>("#options-button");
 let browserConfigured = false;
 
+function localizeStaticUi(): void {
+  document.documentElement.lang = documentLocale;
+  document.title = browser.i18n.getMessage("extensionName");
+  requiredElement<HTMLElement>("#popup-brand").textContent =
+    browser.i18n.getMessage("extensionName");
+  requiredElement<HTMLElement>("#popup-heading").textContent =
+    browser.i18n.getMessage("popupHeading");
+  requiredElement<HTMLElement>("#server-label").textContent =
+    browser.i18n.getMessage("popupServerLabel");
+  requiredElement<HTMLElement>("#pending-label").textContent =
+    browser.i18n.getMessage("popupUnsyncedTabsLabel");
+  requiredElement<HTMLElement>("#pending-operations-label").textContent =
+    browser.i18n.getMessage("popupQueuedOperationsLabel");
+  serverStatus.textContent = browser.i18n.getMessage("popupChecking");
+  captureCurrentButton.textContent = browser.i18n.getMessage(
+    "popupCaptureCurrentButton",
+  );
+  captureAllButton.textContent = browser.i18n.getMessage(
+    "popupCaptureAllButton",
+  );
+  snapshotButton.textContent = browser.i18n.getMessage(
+    "popupSnapshotButton",
+  );
+  optionsButton.textContent = browser.i18n.getMessage(
+    "popupBrowserSettingsButton",
+  );
+}
+
 function renderStatus(status: ExtensionStatus): void {
   browserConfigured = status.browserConfigured;
   serverStatus.textContent = status.serverReachable
-    ? "Available"
-    : "Unavailable";
-  pendingCount.textContent = String(status.pendingTabCount);
-  pendingOperations.textContent = String(status.pendingOperationCount);
+    ? browser.i18n.getMessage("popupServerAvailable")
+    : browser.i18n.getMessage("popupServerUnavailable");
+  pendingCount.textContent = numberFormatter.format(status.pendingTabCount);
+  pendingOperations.textContent = numberFormatter.format(status.pendingOperationCount);
   statusDot.className = `status-dot ${status.serverReachable ? "online" : "offline"}`;
   statusDot.title = status.serverReachable
-    ? "TabHub server available"
-    : "TabHub server unavailable";
+    ? browser.i18n.getMessage("popupServerAvailableTitle")
+    : browser.i18n.getMessage("popupServerUnavailableTitle");
 
   if (!status.browserConfigured) {
-    detail.textContent =
-      "Choose this browser's identity in Browser settings before capturing tabs.";
+    detail.textContent = browser.i18n.getMessage(
+      "popupChooseBrowserIdentity",
+    );
   } else if (status.lastError !== undefined) {
-    detail.textContent = status.lastError;
+    detail.textContent = displayError(status.lastError);
   } else if (status.pendingOperationCount > 0) {
-    detail.textContent = `${status.pendingTabCount} unique tabs across ${status.pendingOperationCount} queued operations are waiting to retry.`;
+    detail.textContent = browser.i18n.getMessage("popupWaitingToRetry", [
+      numberFormatter.format(status.pendingTabCount),
+      numberFormatter.format(status.pendingOperationCount),
+    ]);
   } else {
-    detail.textContent = "All queued items are synchronized.";
+    detail.textContent = browser.i18n.getMessage("popupAllSynchronized");
   }
 
   setActionsDisabled(false);
@@ -61,15 +107,24 @@ function renderStatus(status: ExtensionStatus): void {
 
 function formatCaptureSummary(summary: CaptureSummary): string {
   if (summary.captured === 0) {
-    return `Captured 0 of ${summary.requested}; skipped ${summary.skipped}. No content was sent.`;
+    return browser.i18n.getMessage("popupCaptureNone", [
+      numberFormatter.format(summary.requested),
+      numberFormatter.format(summary.skipped),
+    ]);
   }
 
-  const queued =
-    summary.queued > 0
-      ? ` ${summary.queued} saved locally for automatic retry.`
-      : " Content synchronized.";
-
-  return `Captured ${summary.captured} of ${summary.requested}; skipped ${summary.skipped}.${queued}`;
+  return summary.queued > 0
+    ? browser.i18n.getMessage("popupCaptureQueued", [
+        numberFormatter.format(summary.captured),
+        numberFormatter.format(summary.requested),
+        numberFormatter.format(summary.skipped),
+        numberFormatter.format(summary.queued),
+      ])
+    : browser.i18n.getMessage("popupCaptureSynchronized", [
+        numberFormatter.format(summary.captured),
+        numberFormatter.format(summary.requested),
+        numberFormatter.format(summary.skipped),
+      ]);
 }
 
 async function sendRequest(
@@ -83,7 +138,7 @@ async function refreshStatus(): Promise<void> {
   renderStatus(response.status);
 
   if (!response.ok) {
-    detail.textContent = response.error;
+    detail.textContent = displayError(response.error);
   }
 }
 
@@ -114,12 +169,14 @@ function runAction(
     renderStatus(response.status);
 
     if (!response.ok) {
-      detail.textContent = response.error;
+      detail.textContent = displayError(response.error);
     } else if (response.status.lastError === undefined) {
       if (response.capture !== undefined) {
         detail.textContent = formatCaptureSummary(response.capture);
       } else if (response.status.pendingOperationCount > 0) {
-        detail.textContent = "Snapshot saved locally; retry is automatic.";
+        detail.textContent = browser.i18n.getMessage(
+          "popupSnapshotSavedForRetry",
+        );
       } else {
         detail.textContent = doneLabel;
       }
@@ -127,7 +184,9 @@ function runAction(
   })()
     .catch((error: unknown) => {
       detail.textContent =
-        error instanceof Error ? error.message : "Extension action failed.";
+        error instanceof Error
+          ? displayError(error.message)
+          : browser.i18n.getMessage("popupActionFailed");
     })
     .finally(() => {
       setActionsDisabled(false);
@@ -138,27 +197,27 @@ function runAction(
 captureCurrentButton.addEventListener("click", () => {
   runAction(
     captureCurrentButton,
-    "Capturing current tab…",
+    browser.i18n.getMessage("popupCapturingCurrent"),
     { type: "tabhub:capture-current" },
-    "Current tab captured.",
+    browser.i18n.getMessage("popupCurrentCaptured"),
   );
 });
 
 captureAllButton.addEventListener("click", () => {
   runAction(
     captureAllButton,
-    "Capturing eligible tabs…",
+    browser.i18n.getMessage("popupCapturingAll"),
     { type: "tabhub:capture-all" },
-    "Eligible tabs captured.",
+    browser.i18n.getMessage("popupAllCaptured"),
   );
 });
 
 snapshotButton.addEventListener("click", () => {
   runAction(
     snapshotButton,
-    "Taking snapshot…",
+    browser.i18n.getMessage("popupTakingSnapshot"),
     { type: "tabhub:snapshot-now" },
-    "Snapshot synchronized.",
+    browser.i18n.getMessage("popupSnapshotSynchronized"),
   );
 });
 
@@ -166,11 +225,17 @@ optionsButton.addEventListener("click", () => {
   void browser.runtime.openOptionsPage().then(() => window.close());
 });
 
+localizeStaticUi();
+
 void refreshStatus().catch((error: unknown) => {
-  serverStatus.textContent = "Unavailable";
+  serverStatus.textContent = browser.i18n.getMessage(
+    "popupServerUnavailable",
+  );
   pendingCount.textContent = "—";
   pendingOperations.textContent = "—";
   statusDot.className = "status-dot offline";
   detail.textContent =
-    error instanceof Error ? error.message : "Could not read extension status.";
+    error instanceof Error
+      ? displayError(error.message)
+      : browser.i18n.getMessage("popupCouldNotReadStatus");
 });

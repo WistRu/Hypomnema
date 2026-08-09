@@ -944,6 +944,112 @@ describe("physical tab instances", () => {
     }
   });
 
+  it("paginates whole duplicate groups by size and searches without trimming group members", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-duplicate-groups-"));
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+      clock: () => new Date("2026-08-09T10:00:00.000Z"),
+    });
+
+    try {
+      const ingested = await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          installationId: "20fdb15a-c19d-45aa-aa93-aae02ac1be64",
+          tabs: [
+            {
+              tabId: 1,
+              url: "https://groups.example/largest",
+              title: "Needle title",
+              windowId: 1,
+              index: 0,
+            },
+            {
+              tabId: 2,
+              url: "https://groups.example/largest",
+              title: "Second copy",
+              windowId: 1,
+              index: 1,
+            },
+            {
+              tabId: 3,
+              url: "https://groups.example/largest",
+              title: "Third copy",
+              windowId: 2,
+              index: 0,
+            },
+            {
+              tabId: 4,
+              url: "https://groups.example/smaller",
+              title: "Other group",
+              windowId: 2,
+              index: 1,
+            },
+            {
+              tabId: 5,
+              url: "https://groups.example/smaller",
+              title: "Other copy",
+              windowId: 2,
+              index: 2,
+            },
+          ],
+        },
+      });
+      expect(ingested.statusCode).toBe(200);
+
+      const firstPage = await app.inject({
+        method: "GET",
+        url: "/api/duplicate-groups?page=1&pageSize=1",
+      });
+      expect(firstPage.statusCode).toBe(200);
+      expect(firstPage.json()).toMatchObject({
+        totalGroups: 2,
+        page: 1,
+        pageSize: 1,
+        items: [
+          {
+            url: "https://groups.example/largest",
+            count: 3,
+            instances: [{}, {}, {}],
+          },
+        ],
+      });
+
+      const secondPage = await app.inject({
+        method: "GET",
+        url: "/api/duplicate-groups?page=2&pageSize=1",
+      });
+      expect(secondPage.json()).toMatchObject({
+        page: 2,
+        items: [{ url: "https://groups.example/smaller", count: 2 }],
+      });
+
+      const searched = await app.inject({
+        method: "GET",
+        url: "/api/duplicate-groups?q=Needle&pageSize=50",
+      });
+      expect(searched.statusCode).toBe(200);
+      expect(searched.json()).toMatchObject({
+        totalGroups: 1,
+        totalTabsInGroups: 3,
+        totalDuplicateCopies: 2,
+        items: [
+          {
+            url: "https://groups.example/largest",
+            count: 3,
+            instances: [{}, {}, {}],
+          },
+        ],
+      });
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("reads duplicate totals, groups, and instances from one database snapshot", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-duplicate-read-"));
     const databasePath = join(directory, "tabhub.sqlite");

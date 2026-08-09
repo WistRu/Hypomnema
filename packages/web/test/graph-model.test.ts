@@ -83,6 +83,31 @@ describe("graph layout", () => {
     expect(new Set(layout.groups.map((group) => group.id)).size).toBe(2);
   });
 
+  it("localizes the untagged label without changing deterministic en-US ordering", () => {
+    const nodes = [
+      graphNode(1, "Tagged", ["Beta"]),
+      graphNode(2, "No topic", []),
+    ];
+    const english = layoutGraphNodes(nodes);
+    const localized = layoutGraphNodes(
+      [...nodes].reverse(),
+      "",
+      (key) => key === "Untagged" ? "A-localized" : key,
+    );
+
+    expect(localized.groups.map(({ id }) => id)).toEqual(
+      english.groups.map(({ id }) => id),
+    );
+    expect(localized.groups.find(({ id }) => id === "untagged")?.label).toBe(
+      "A-localized",
+    );
+    expect(
+      localized.nodes.map(({ node, position }) => ({ id: node.id, position })),
+    ).toEqual(
+      english.nodes.map(({ node, position }) => ({ id: node.id, position })),
+    );
+  });
+
   it("lays out 350 nodes once each with finite stable coordinates", () => {
     const nodes = Array.from({ length: 350 }, (_, index) =>
       graphNode(

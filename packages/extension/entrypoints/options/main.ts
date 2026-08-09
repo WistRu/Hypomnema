@@ -4,17 +4,61 @@ import type {
   ExtensionRequest,
   ExtensionResponse,
 } from "../../lib/messages";
+import { localizedExtensionError } from "../../lib/localized-error";
 import { getBrowserIdentifier, isKnownBrowser } from "../../lib/storage";
 
-const select = document.querySelector<HTMLSelectElement>("#browser-select");
-const saveStatus = document.querySelector<HTMLElement>("#save-status");
+const uiLocale = browser.i18n.getMessage("@@ui_locale");
+const documentLocale = /^ru(?:[-_]|$)/i.test(uiLocale) ? "ru" : "en";
+const numberFormatter = new Intl.NumberFormat(documentLocale);
 
-if (select === null || saveStatus === null) {
-  throw new Error("TabHub options page is missing required controls");
+function displayError(message: string): string {
+  if (documentLocale === "en" || /[А-Яа-яЁё]/.test(message)) return message;
+  const localized = localizedExtensionError(message);
+  return browser.i18n.getMessage(
+    localized.messageName,
+    localized.substitutions,
+  );
 }
 
-const browserSelect = select;
-const statusElement = saveStatus;
+function requiredElement<T extends Element>(selector: string): T {
+  const element = document.querySelector<T>(selector);
+
+  if (element === null) {
+    throw new Error(`TabHub options page is missing ${selector}`);
+  }
+
+  return element;
+}
+
+const browserSelect =
+  requiredElement<HTMLSelectElement>("#browser-select");
+const statusElement = requiredElement<HTMLElement>("#save-status");
+
+function localizeStaticUi(): void {
+  document.documentElement.lang = documentLocale;
+  document.title = browser.i18n.getMessage("optionsDocumentTitle");
+  requiredElement<HTMLElement>("#options-brand").textContent =
+    browser.i18n.getMessage("extensionName");
+  requiredElement<HTMLElement>("#options-heading").textContent =
+    browser.i18n.getMessage("optionsHeading");
+  requiredElement<HTMLElement>("#options-description").textContent =
+    browser.i18n.getMessage("optionsDescription");
+  requiredElement<HTMLElement>("#browser-label").textContent =
+    browser.i18n.getMessage("optionsBrowserLabel");
+  requiredElement<HTMLOptionElement>(
+    "#browser-option-placeholder",
+  ).textContent = browser.i18n.getMessage("optionsChooseBrowser");
+  requiredElement<HTMLOptionElement>("#browser-option-chrome").textContent =
+    browser.i18n.getMessage("browserChrome");
+  requiredElement<HTMLOptionElement>("#browser-option-yandex").textContent =
+    browser.i18n.getMessage("browserYandex");
+  requiredElement<HTMLOptionElement>("#browser-option-edge").textContent =
+    browser.i18n.getMessage("browserEdge");
+  requiredElement<HTMLOptionElement>("#browser-option-other").textContent =
+    browser.i18n.getMessage("browserOther");
+}
+
+localizeStaticUi();
 
 let selectedBrowser = await getBrowserIdentifier();
 browserSelect.value = selectedBrowser ?? "";
@@ -25,22 +69,27 @@ function savedMessage(
   requestedBrowser: NonNullable<typeof selectedBrowser>,
 ): string {
   if (response.status.deadLetterCount > 0) {
-    const detail = response.status.lastError
-      ? ` ${response.status.lastError}`
-      : " Check the extension popup for the rejected upload.";
-    return `Saved, but an unsendable operation was discarded.${detail}`;
+    return response.status.lastError
+      ? browser.i18n.getMessage("optionsSavedDiscardedWithError", [
+          displayError(response.status.lastError),
+        ])
+      : browser.i18n.getMessage("optionsSavedDiscarded");
   }
 
   if (response.status.pendingOperationCount > 0) {
-    const detail = response.status.lastError
-      ? ` Last error: ${response.status.lastError}`
-      : "";
-    return `Saved locally. ${response.status.pendingOperationCount} queued operations will retry automatically.${detail}`;
+    return response.status.lastError
+      ? browser.i18n.getMessage("optionsSavedPendingWithError", [
+          numberFormatter.format(response.status.pendingOperationCount),
+          displayError(response.status.lastError),
+        ])
+      : browser.i18n.getMessage("optionsSavedPending", [
+          numberFormatter.format(response.status.pendingOperationCount),
+        ]);
   }
 
   return previousBrowser === undefined || previousBrowser === requestedBrowser
-    ? "Saved. This browser is synchronized."
-    : "Saved. The previous identity was closed and this browser is synchronized.";
+    ? browser.i18n.getMessage("optionsSavedSynchronized")
+    : browser.i18n.getMessage("optionsSavedIdentityChanged");
 }
 
 async function reconcileSelection(): Promise<void> {
@@ -55,7 +104,9 @@ browserSelect.addEventListener("change", () => {
 
   void (async () => {
     if (!isKnownBrowser(requestedValue)) {
-      throw new Error("Unsupported browser selection");
+      throw new Error(
+        browser.i18n.getMessage("optionsUnsupportedBrowserSelection"),
+      );
     }
 
     const message: ExtensionRequest = {
@@ -67,7 +118,7 @@ browserSelect.addEventListener("change", () => {
     )) as ExtensionResponse;
 
     if (!response.ok) {
-      throw new Error(response.error);
+      throw new Error(displayError(response.error));
     }
 
     await reconcileSelection();
@@ -80,7 +131,9 @@ browserSelect.addEventListener("change", () => {
     .catch(async (error: unknown) => {
       await reconcileSelection().catch(() => undefined);
       statusElement.textContent =
-        error instanceof Error ? error.message : "Could not save the setting.";
+        error instanceof Error
+          ? displayError(error.message)
+          : browser.i18n.getMessage("optionsCouldNotSave");
     })
     .finally(() => {
       browserSelect.disabled = false;

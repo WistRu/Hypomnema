@@ -1,0 +1,238 @@
+{
+  "extensionName": {
+    "message": "TabHub"
+  },
+  "extensionDescription": {
+    "message": "Синхронизирует открытые вкладки этого браузера с TabHub."
+  },
+  "popupHeading": {
+    "message": "Сбор вкладок"
+  },
+  "popupServerLabel": {
+    "message": "Сервер"
+  },
+  "popupUnsyncedTabsLabel": {
+    "message": "Несинхронизированные вкладки"
+  },
+  "popupQueuedOperationsLabel": {
+    "message": "Операции в очереди"
+  },
+  "popupChecking": {
+    "message": "Проверка…"
+  },
+  "popupCaptureCurrentButton": {
+    "message": "Сохранить текущую вкладку"
+  },
+  "popupCaptureAllButton": {
+    "message": "Сохранить все доступные вкладки"
+  },
+  "popupSnapshotButton": {
+    "message": "Создать снимок"
+  },
+  "popupBrowserSettingsButton": {
+    "message": "Настройки браузера"
+  },
+  "popupServerAvailable": {
+    "message": "Доступен"
+  },
+  "popupServerUnavailable": {
+    "message": "Недоступен"
+  },
+  "popupServerAvailableTitle": {
+    "message": "Сервер TabHub доступен"
+  },
+  "popupServerUnavailableTitle": {
+    "message": "Сервер TabHub недоступен"
+  },
+  "popupChooseBrowserIdentity": {
+    "message": "Перед сохранением вкладок выберите этот браузер в настройках."
+  },
+  "popupWaitingToRetry": {
+    "message": "Ожидают повторной отправки: уникальных вкладок — $TAB_COUNT$, операций в очереди — $OPERATION_COUNT$.",
+    "placeholders": {
+      "tab_count": {
+        "content": "$1",
+        "example": "3"
+      },
+      "operation_count": {
+        "content": "$2",
+        "example": "4"
+      }
+    }
+  },
+  "popupAllSynchronized": {
+    "message": "Все элементы очереди синхронизированы."
+  },
+  "popupCaptureNone": {
+    "message": "Сохранено 0 из $REQUESTED$; пропущено: $SKIPPED$. Содержимое не отправлено.",
+    "placeholders": {
+      "requested": {
+        "content": "$1",
+        "example": "5"
+      },
+      "skipped": {
+        "content": "$2",
+        "example": "5"
+      }
+    }
+  },
+  "popupCaptureQueued": {
+    "message": "Сохранено: $CAPTURED$ из $REQUESTED$; пропущено: $SKIPPED$. Локально сохранено для автоматического повтора: $QUEUED$.",
+    "placeholders": {
+      "captured": {
+        "content": "$1",
+        "example": "4"
+      },
+      "requested": {
+        "content": "$2",
+        "example": "5"
+      },
+      "skipped": {
+        "content": "$3",
+        "example": "1"
+      },
+      "queued": {
+        "content": "$4",
+        "example": "2"
+      }
+    }
+  },
+  "popupCaptureSynchronized": {
+    "message": "Сохранено: $CAPTURED$ из $REQUESTED$; пропущено: $SKIPPED$. Содержимое синхронизировано.",
+    "placeholders": {
+      "captured": {
+        "content": "$1",
+        "example": "4"
+      },
+      "requested": {
+        "content": "$2",
+        "example": "5"
+      },
+      "skipped": {
+        "content": "$3",
+        "example": "1"
+      }
+    }
+  },
+  "popupSnapshotSavedForRetry": {
+    "message": "Снимок сохранён локально; повторная отправка выполняется автоматически."
+  },
+  "popupActionFailed": {
+    "message": "Не удалось выполнить действие расширения."
+  },
+  "popupCapturingCurrent": {
+    "message": "Сохранение текущей вкладки…"
+  },
+  "popupCurrentCaptured": {
+    "message": "Текущая вкладка сохранена."
+  },
+  "popupCapturingAll": {
+    "message": "Сохранение доступных вкладок…"
+  },
+  "popupAllCaptured": {
+    "message": "Доступные вкладки сохранены."
+  },
+  "popupTakingSnapshot": {
+    "message": "Создание снимка…"
+  },
+  "popupSnapshotSynchronized": {
+    "message": "Снимок синхронизирован."
+  },
+  "popupCouldNotReadStatus": {
+    "message": "Не удалось получить состояние расширения."
+  },
+  "optionsDocumentTitle": {
+    "message": "Настройки TabHub"
+  },
+  "optionsHeading": {
+    "message": "Идентификация браузера"
+  },
+  "optionsDescription": {
+    "message": "Выберите браузер, в котором установлена эта копия TabHub. Эта метка позволяет различать вкладки из разных браузеров."
+  },
+  "optionsBrowserLabel": {
+    "message": "Браузер"
+  },
+  "optionsChooseBrowser": {
+    "message": "Выберите этот браузер…"
+  },
+  "browserChrome": {
+    "message": "Chrome"
+  },
+  "browserYandex": {
+    "message": "Яндекс Браузер"
+  },
+  "browserEdge": {
+    "message": "Microsoft Edge"
+  },
+  "browserOther": {
+    "message": "Другой браузер Chromium"
+  },
+  "optionsSavedDiscardedWithError": {
+    "message": "Настройка сохранена, но операция, которую невозможно отправить, была отброшена. $ERROR$",
+    "placeholders": {
+      "error": {
+        "content": "$1",
+        "example": "Загрузка отклонена"
+      }
+    }
+  },
+  "optionsSavedDiscarded": {
+    "message": "Настройка сохранена, но операция, которую невозможно отправить, была отброшена. Проверьте отклонённую загрузку во всплывающем окне расширения."
+  },
+  "optionsSavedPendingWithError": {
+    "message": "Настройка сохранена локально. Операций в очереди: $COUNT$. Повторная отправка выполняется автоматически. Последняя ошибка: $ERROR$",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      },
+      "error": {
+        "content": "$2",
+        "example": "Сервер недоступен"
+      }
+    }
+  },
+  "optionsSavedPending": {
+    "message": "Настройка сохранена локально. Операций в очереди: $COUNT$. Повторная отправка выполняется автоматически.",
+    "placeholders": {
+      "count": {
+        "content": "$1",
+        "example": "3"
+      }
+    }
+  },
+  "optionsSavedSynchronized": {
+    "message": "Настройка сохранена. Этот браузер синхронизирован."
+  },
+  "optionsSavedIdentityChanged": {
+    "message": "Настройка сохранена. Прежняя идентификация закрыта, этот браузер синхронизирован."
+  },
+  "optionsUnsupportedBrowserSelection": {
+    "message": "Выбран неподдерживаемый браузер"
+  },
+  "optionsCouldNotSave": {
+    "message": "Не удалось сохранить настройку."
+  },
+  "extensionErrorSnapshotUpload": {
+    "message": "Не удалось отправить снимок (HTTP $STATUS$).",
+    "placeholders": {
+      "status": {
+        "content": "$1",
+        "example": "503"
+      }
+    }
+  },
+  "extensionErrorContentUpload": {
+    "message": "Не удалось отправить содержимое (HTTP $STATUS$).",
+    "placeholders": {
+      "status": {
+        "content": "$1",
+        "example": "429"
+      }
+    }
+  },
+  "extensionErrorOfflineQueueFull": {
+    "message": "Офлайн-очередь TabHub заполнена. Подключите локальный сервер и повторите попытку."
+  }
+}

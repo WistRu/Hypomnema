@@ -5,6 +5,7 @@ import {
 } from "@tabhub/shared";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
+import websocket from "@fastify/websocket";
 import Fastify, {
   type FastifyBaseLogger,
   type FastifyInstance,
@@ -33,6 +34,10 @@ import { registerGraphRoutes } from "./graph-routes.js";
 import { registerRequestSecurity } from "./request-security.js";
 import { createWorkspaceCatalog } from "./workspace-catalog.js";
 import { registerWorkspaceRoutes } from "./workspace-routes.js";
+import {
+  createTabCommandRelay,
+  registerTabCommandRelayRoutes,
+} from "./tab-command-relay.js";
 
 export interface CreateAppOptions {
   databasePath: string;
@@ -44,6 +49,11 @@ export interface CreateAppOptions {
   summaryMaxAttempts?: number;
   summaryWorkerPollMs?: number;
   embeddingProvider?: EmbeddingProvider;
+  tabCommandRelayAppOrigins?: readonly string[];
+  tabCommandRelayCommandTimeoutMs?: number;
+  tabCommandRelayHeartbeatIntervalMs?: number;
+  tabCommandRelayHeartbeatTimeoutMs?: number;
+  tabCommandRelayRegistrationTimeoutMs?: number;
 }
 
 export type TabHubApp = FastifyInstance;
@@ -75,6 +85,9 @@ export function createApp(options: CreateAppOptions): TabHubApp {
     bodyLimit: tabHubHttpBodyLimitBytes,
   });
   registerRequestSecurity(app);
+  void app.register(websocket, {
+    options: { maxPayload: tabHubHttpBodyLimitBytes },
+  });
   const tabInstanceCatalog = createTabInstanceCatalog(database.connection);
   const tabCatalog = createTabCatalog(
     database.connection,
@@ -95,6 +108,24 @@ export function createApp(options: CreateAppOptions): TabHubApp {
     database.connection,
     options.clock,
   );
+  const tabCommandRelay = createTabCommandRelay({
+    ...(options.clock === undefined ? {} : { clock: options.clock }),
+    ...(options.tabCommandRelayCommandTimeoutMs === undefined
+      ? {}
+      : { commandTimeoutMs: options.tabCommandRelayCommandTimeoutMs }),
+    ...(options.tabCommandRelayHeartbeatIntervalMs === undefined
+      ? {}
+      : { heartbeatIntervalMs: options.tabCommandRelayHeartbeatIntervalMs }),
+    ...(options.tabCommandRelayHeartbeatTimeoutMs === undefined
+      ? {}
+      : { heartbeatTimeoutMs: options.tabCommandRelayHeartbeatTimeoutMs }),
+    ...(options.tabCommandRelayRegistrationTimeoutMs === undefined
+      ? {}
+      : {
+          registrationTimeoutMs:
+            options.tabCommandRelayRegistrationTimeoutMs,
+        }),
+  });
   const summaryWorker =
     options.summaryProvider === undefined
       ? undefined
@@ -148,6 +179,7 @@ export function createApp(options: CreateAppOptions): TabHubApp {
   });
 
   app.addHook("onClose", async () => {
+    tabCommandRelay.close();
     await summaryWorker?.stop();
     database.close();
   });
@@ -174,6 +206,13 @@ export function createApp(options: CreateAppOptions): TabHubApp {
   registerEmbeddingRoutes(app, embeddingCatalog);
   registerGraphRoutes(app, graphCatalog);
   registerWorkspaceRoutes(app, workspaceCatalog);
+  void app.register(async (relayApp) => {
+    registerTabCommandRelayRoutes(relayApp, tabCommandRelay, {
+      ...(options.tabCommandRelayAppOrigins === undefined
+        ? {}
+        : { appOrigins: options.tabCommandRelayAppOrigins }),
+    });
+  });
 
   return app;
 }

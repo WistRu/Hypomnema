@@ -928,6 +928,7 @@ export type TabInstanceBulkResponse = z.infer<
 
 export const duplicateGroupListQuerySchema = z.object({
   browser: browserIdentifierSchema.optional(),
+  q: z.string().trim().min(1).max(500).optional(),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(200).default(50),
 });
@@ -971,3 +972,486 @@ export const healthResponseSchema = z.object({
 });
 
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
+
+export const tabCommandRelayProtocolVersion = 3 as const;
+
+const tabCommandRelayKnownBrowserSchema = z.enum(knownBrowserOptions);
+const tabCommandRelayRequestIdSchema = z.string().uuid();
+const tabCommandRelayOpaqueIdSchema = z.string().uuid();
+const tabCommandRelayTimestampSchema = z.string().datetime();
+
+export const tabCommandScopeSchema = z
+  .object({
+    browser: tabCommandRelayKnownBrowserSchema,
+    browserSessionId: browserSessionIdSchema,
+    installationId: installationIdSchema,
+  })
+  .strict();
+
+export type TabCommandScope = z.infer<typeof tabCommandScopeSchema>;
+
+export const tabCommandRelayPhysicalTargetSchema = z
+  .object({
+    expectedUrl: tabUrlSchema,
+    tabId: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type TabCommandRelayPhysicalTarget = z.infer<
+  typeof tabCommandRelayPhysicalTargetSchema
+>;
+
+const tabCommandRelayPhysicalTargetsSchema = z
+  .array(tabCommandRelayPhysicalTargetSchema)
+  .min(1)
+  .superRefine((targets, context) => {
+    const targetIds = new Set<number>();
+    targets.forEach((target, index) => {
+      if (targetIds.has(target.tabId)) {
+        context.addIssue({
+          code: "custom",
+          message: "Physical tab target IDs must be unique",
+          path: [index, "tabId"],
+        });
+      }
+      targetIds.add(target.tabId);
+    });
+  });
+
+const tabCommandRelayMoveDestinationSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("new-window") }).strict(),
+  z
+    .object({
+      kind: z.literal("window"),
+      windowId: z.number().int().nonnegative(),
+    })
+    .strict(),
+]);
+
+const tabCommandRelayWorkspaceDestinationSchema = z
+  .object({ kind: z.literal("new-window") })
+  .strict();
+
+const tabCommandRelayWorkspaceTabSchema = z
+  .object({
+    muted: z.boolean(),
+    pinned: z.boolean(),
+    url: tabUrlSchema,
+  })
+  .strict();
+
+export const tabCommandRelayClosePreviewTargetSchema =
+  tabCommandRelayPhysicalTargetSchema
+    .extend({
+      keeper: tabCommandRelayPhysicalTargetSchema.optional(),
+    })
+    .strict();
+
+export type TabCommandRelayClosePreviewTarget = z.infer<
+  typeof tabCommandRelayClosePreviewTargetSchema
+>;
+
+export const tabCommandRelayClosePreviewTargetsSchema = z
+  .array(tabCommandRelayClosePreviewTargetSchema)
+  .min(1)
+  .superRefine((targets, context) => {
+    const targetIds = new Set<number>();
+    targets.forEach((target, index) => {
+      if (targetIds.has(target.tabId)) {
+        context.addIssue({
+          code: "custom",
+          message: "Close-preview target IDs must be unique",
+          path: [index, "tabId"],
+        });
+      }
+      targetIds.add(target.tabId);
+      if (
+        target.keeper !== undefined &&
+        target.keeper.expectedUrl !== target.expectedUrl
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "A keeper must still have the candidate's exact URL",
+          path: [index, "keeper", "expectedUrl"],
+        });
+      }
+    });
+    targets.forEach((target, index) => {
+      if (
+        target.keeper !== undefined &&
+        targetIds.has(target.keeper.tabId)
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "A keeper cannot also be a close-preview target",
+          path: [index, "keeper", "tabId"],
+        });
+      }
+    });
+  });
+
+export const tabCommandRelayCommandSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("get-browser-state") }).strict(),
+  z
+    .object({
+      kind: z.literal("activate-tab"),
+      tabId: z.number().int().nonnegative(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("close-preview"),
+      targets: tabCommandRelayClosePreviewTargetsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      confirmed: z.literal(true),
+      kind: z.literal("close"),
+      previewId: tabCommandRelayOpaqueIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("undo-close"),
+      undoId: tabCommandRelayOpaqueIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("set-pinned"),
+      targets: tabCommandRelayPhysicalTargetsSchema,
+      value: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("set-muted"),
+      targets: tabCommandRelayPhysicalTargetsSchema,
+      value: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("discard"),
+      targets: tabCommandRelayPhysicalTargetsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      bypassCache: z.boolean().optional(),
+      kind: z.literal("reload"),
+      targets: tabCommandRelayPhysicalTargetsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      destination: tabCommandRelayMoveDestinationSchema,
+      kind: z.literal("move"),
+      targets: tabCommandRelayPhysicalTargetsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      destination: tabCommandRelayWorkspaceDestinationSchema,
+      kind: z.literal("open-workspace"),
+      tabs: z.array(tabCommandRelayWorkspaceTabSchema).min(1),
+    })
+    .strict(),
+]);
+
+export type TabCommandRelayCommand = z.infer<
+  typeof tabCommandRelayCommandSchema
+>;
+
+const tabCommandRelaySkippedSchema = z
+  .object({
+    reason: z.string().min(1),
+    tabId: z.number().int().nonnegative(),
+  })
+  .strict();
+
+const tabCommandRelayFailureSchema = z
+  .object({
+    error: z.string().min(1),
+    tabId: z.number().int().nonnegative(),
+  })
+  .strict();
+
+const tabCommandRelayUndoSummarySchema = z
+  .object({
+    count: z.number().int().nonnegative(),
+    expiresAt: z.number().int().nonnegative(),
+    undoId: tabCommandRelayOpaqueIdSchema,
+  })
+  .strict();
+
+const tabCommandRelayWindowSummarySchema = z
+  .object({
+    focused: z.boolean(),
+    tabCount: z.number().int().nonnegative(),
+    windowId: z.number().int().nonnegative(),
+  })
+  .strict();
+
+const tabCommandRelayMutationResultFields = {
+  failed: z.array(tabCommandRelayFailureSchema),
+  requested: z.number().int().nonnegative(),
+  skipped: z.array(tabCommandRelaySkippedSchema),
+  succeededTabIds: z.array(z.number().int().nonnegative()),
+} as const;
+
+export const tabCommandRelayResultSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("get-browser-state"),
+      pendingUndos: z.array(tabCommandRelayUndoSummarySchema).max(5),
+      windows: z.array(tabCommandRelayWindowSummarySchema),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("activate-tab"),
+      tabId: z.number().int().nonnegative(),
+      windowId: z.number().int().nonnegative(),
+    })
+    .strict(),
+  z
+    .object({
+      candidateTabIds: z.array(z.number().int().nonnegative()),
+      expiresAt: z.number().int().nonnegative(),
+      kind: z.literal("close-preview"),
+      previewId: tabCommandRelayOpaqueIdSchema,
+      requested: z.number().int().nonnegative(),
+      skipped: z.array(tabCommandRelaySkippedSchema),
+    })
+    .strict(),
+  z
+    .object({
+      ...tabCommandRelayMutationResultFields,
+      kind: z.literal("close"),
+      undo: tabCommandRelayUndoSummarySchema.nullable().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      failed: z.array(tabCommandRelayFailureSchema),
+      kind: z.literal("undo-close"),
+      requested: z.number().int().nonnegative(),
+      restoredTabIds: z.array(z.number().int().nonnegative()),
+      retry: tabCommandRelayUndoSummarySchema.optional(),
+      skipped: z.array(tabCommandRelaySkippedSchema),
+    })
+    .strict(),
+  z
+    .object({
+      ...tabCommandRelayMutationResultFields,
+      kind: z.literal("set-pinned"),
+    })
+    .strict(),
+  z
+    .object({
+      ...tabCommandRelayMutationResultFields,
+      kind: z.literal("set-muted"),
+    })
+    .strict(),
+  z
+    .object({
+      ...tabCommandRelayMutationResultFields,
+      kind: z.literal("discard"),
+    })
+    .strict(),
+  z
+    .object({
+      ...tabCommandRelayMutationResultFields,
+      kind: z.literal("reload"),
+    })
+    .strict(),
+  z
+    .object({
+      ...tabCommandRelayMutationResultFields,
+      destinationWindowId: z.number().int().nonnegative().optional(),
+      kind: z.literal("move"),
+    })
+    .strict(),
+  z
+    .object({
+      destinationWindowId: z.number().int().nonnegative().optional(),
+      failed: z.array(
+        z
+          .object({
+            error: z.string().min(1),
+            index: z.number().int().nonnegative(),
+          })
+          .strict(),
+      ),
+      kind: z.literal("open-workspace"),
+      openedTabIds: z.array(z.number().int().nonnegative()),
+      requested: z.number().int().nonnegative(),
+    })
+    .strict(),
+]);
+
+export type TabCommandRelayResult = z.infer<
+  typeof tabCommandRelayResultSchema
+>;
+
+export const tabCommandRelayHttpRequestSchema = tabCommandScopeSchema
+  .extend({ command: tabCommandRelayCommandSchema })
+  .strict();
+
+export type TabCommandRelayHttpRequest = z.infer<
+  typeof tabCommandRelayHttpRequestSchema
+>;
+
+export const tabCommandRelayConnectedScopeSchema = tabCommandScopeSchema
+  .extend({
+    connectedAt: tabCommandRelayTimestampSchema,
+    lastSeenAt: tabCommandRelayTimestampSchema,
+  })
+  .strict();
+
+export type TabCommandRelayConnectedScope = z.infer<
+  typeof tabCommandRelayConnectedScopeSchema
+>;
+
+export const tabCommandRelayConnectedScopesResponseSchema = z
+  .object({ items: z.array(tabCommandRelayConnectedScopeSchema) })
+  .strict();
+
+export type TabCommandRelayConnectedScopesResponse = z.infer<
+  typeof tabCommandRelayConnectedScopesResponseSchema
+>;
+
+export const tabCommandRelayRegisterEnvelopeSchema = z
+  .object({
+    scope: tabCommandScopeSchema,
+    type: z.literal("register"),
+    version: z.literal(tabCommandRelayProtocolVersion),
+  })
+  .strict();
+
+export const tabCommandRelayReadyEnvelopeSchema = z
+  .object({
+    connectedAt: tabCommandRelayTimestampSchema,
+    heartbeatIntervalMs: z.number().int().positive(),
+    scope: tabCommandScopeSchema,
+    type: z.literal("ready"),
+    version: z.literal(tabCommandRelayProtocolVersion),
+  })
+  .strict();
+
+export const tabCommandRelayPingEnvelopeSchema = z
+  .object({
+    heartbeatId: tabCommandRelayRequestIdSchema,
+    sentAt: tabCommandRelayTimestampSchema,
+    type: z.literal("ping"),
+    version: z.literal(tabCommandRelayProtocolVersion),
+  })
+  .strict();
+
+export const tabCommandRelayPongEnvelopeSchema = z
+  .object({
+    heartbeatId: tabCommandRelayRequestIdSchema,
+    type: z.literal("pong"),
+    version: z.literal(tabCommandRelayProtocolVersion),
+  })
+  .strict();
+
+export const tabCommandRelayCommandEnvelopeSchema = z
+  .object({
+    command: tabCommandRelayCommandSchema,
+    executionDeadlineAt: z.number().int().nonnegative(),
+    requestId: tabCommandRelayRequestIdSchema,
+    scope: tabCommandScopeSchema,
+    type: z.literal("command"),
+    version: z.literal(tabCommandRelayProtocolVersion),
+  })
+  .strict();
+
+const tabCommandRelaySuccessfulResultEnvelopeSchema = z
+  .object({
+    ok: z.literal(true),
+    requestId: tabCommandRelayRequestIdSchema,
+    result: tabCommandRelayResultSchema,
+    scope: tabCommandScopeSchema,
+    type: z.literal("result"),
+    version: z.literal(tabCommandRelayProtocolVersion),
+  })
+  .strict();
+
+const tabCommandRelayFailedResultEnvelopeSchema = z
+  .object({
+    error: z.string().min(1),
+    ok: z.literal(false),
+    requestId: tabCommandRelayRequestIdSchema,
+    scope: tabCommandScopeSchema,
+    type: z.literal("result"),
+    version: z.literal(tabCommandRelayProtocolVersion),
+  })
+  .strict();
+
+export const tabCommandRelayResultEnvelopeSchema = z.union([
+  tabCommandRelaySuccessfulResultEnvelopeSchema,
+  tabCommandRelayFailedResultEnvelopeSchema,
+]);
+
+export const tabCommandRelayClientEnvelopeSchema = z.union([
+  tabCommandRelayRegisterEnvelopeSchema,
+  tabCommandRelayPongEnvelopeSchema,
+  tabCommandRelayResultEnvelopeSchema,
+]);
+
+export type TabCommandRelayClientEnvelope = z.infer<
+  typeof tabCommandRelayClientEnvelopeSchema
+>;
+
+export const tabCommandRelayServerEnvelopeSchema = z.union([
+  tabCommandRelayReadyEnvelopeSchema,
+  tabCommandRelayPingEnvelopeSchema,
+  tabCommandRelayCommandEnvelopeSchema,
+]);
+
+export type TabCommandRelayServerEnvelope = z.infer<
+  typeof tabCommandRelayServerEnvelopeSchema
+>;
+
+export const tabCommandRelayErrorCodeSchema = z.enum([
+  "SCOPE_OFFLINE",
+  "COMMAND_TIMEOUT",
+  "EXTENSION_DISCONNECTED",
+  "EXTENSION_COMMAND_FAILED",
+  "INVALID_COMMAND_RECEIPT",
+]);
+
+export type TabCommandRelayErrorCode = z.infer<
+  typeof tabCommandRelayErrorCodeSchema
+>;
+
+const tabCommandRelayHttpSuccessSchema = z
+  .object({
+    ok: z.literal(true),
+    requestId: tabCommandRelayRequestIdSchema,
+    result: tabCommandRelayResultSchema,
+    scope: tabCommandScopeSchema,
+  })
+  .strict();
+
+const tabCommandRelayHttpFailureSchema = z
+  .object({
+    error: tabCommandRelayErrorCodeSchema,
+    message: z.string().min(1),
+    ok: z.literal(false),
+    outcome: z.enum(["not-sent", "unknown"]),
+    requestId: tabCommandRelayRequestIdSchema.optional(),
+  })
+  .strict();
+
+export const tabCommandRelayHttpResponseSchema = z.union([
+  tabCommandRelayHttpSuccessSchema,
+  tabCommandRelayHttpFailureSchema,
+]);
+
+export type TabCommandRelayHttpResponse = z.infer<
+  typeof tabCommandRelayHttpResponseSchema
+>;

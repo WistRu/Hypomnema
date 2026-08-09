@@ -89,19 +89,13 @@ describe("physical tab command executor", () => {
     expect(browserAdapter.updateTab).not.toHaveBeenCalled();
   });
 
-  it("sets pinned state on the live physical tab even if it navigated since the snapshot", async () => {
+  it("skips pinning when the physical tab URL changed since the snapshot", async () => {
     const browserAdapter = adapter();
     vi.mocked(browserAdapter.getTab).mockResolvedValue({
       id: 42,
       index: 2,
       pinned: false,
       url: "https://example.com/navigated",
-      windowId: 7,
-    });
-    vi.mocked(browserAdapter.updateTab).mockResolvedValue({
-      id: 42,
-      index: 2,
-      pinned: true,
       windowId: 7,
     });
     const executor = createPhysicalTabCommandExecutor({
@@ -129,11 +123,78 @@ describe("physical tab command executor", () => {
       failed: [],
       kind: "set-pinned",
       requested: 1,
-      skipped: [],
-      succeededTabIds: [42],
+      skipped: [{ reason: "url-changed", tabId: 42 }],
+      succeededTabIds: [],
     });
 
-    expect(browserAdapter.updateTab).toHaveBeenCalledWith(42, { pinned: true });
+    expect(browserAdapter.updateTab).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      command: {
+        kind: "set-muted" as const,
+        targets: [
+          { expectedUrl: "https://example.com/original", tabId: 42 },
+        ],
+        value: true,
+      },
+      label: "muting",
+    },
+    {
+      command: {
+        kind: "discard" as const,
+        targets: [
+          { expectedUrl: "https://example.com/original", tabId: 42 },
+        ],
+      },
+      label: "discarding",
+    },
+    {
+      command: {
+        kind: "reload" as const,
+        targets: [
+          { expectedUrl: "https://example.com/original", tabId: 42 },
+        ],
+      },
+      label: "reloading",
+    },
+  ])("skips $label when the physical tab URL changed", async ({ command }) => {
+    const browserAdapter = adapter();
+    vi.mocked(browserAdapter.getTab).mockResolvedValue({
+      active: false,
+      discarded: false,
+      id: 42,
+      index: 2,
+      mutedInfo: { muted: false },
+      url: "https://example.com/navigated",
+      windowId: 7,
+    });
+    const executor = createPhysicalTabCommandExecutor({
+      adapter: browserAdapter,
+      storage: storage(),
+    });
+
+    await expect(
+      executor.execute(
+        {
+          controlTabId: 900,
+          controlWindowId: 90,
+          currentScope: CURRENT_SCOPE,
+        },
+        { ...CURRENT_SCOPE, command },
+      ),
+    ).resolves.toEqual({
+      failed: [],
+      kind: command.kind,
+      requested: 1,
+      skipped: [{ reason: "url-changed", tabId: 42 }],
+      succeededTabIds: [],
+    });
+
+    expect(browserAdapter.discardTab).not.toHaveBeenCalled();
+    expect(browserAdapter.reloadTab).not.toHaveBeenCalled();
+    expect(browserAdapter.updateTab).not.toHaveBeenCalled();
   });
 
   it("reports per-target mute successes, no-ops, missing tabs, and failures", async () => {
@@ -144,6 +205,7 @@ describe("physical tab command executor", () => {
         id: tabId,
         index: tabId,
         mutedInfo: { muted: tabId === 42 },
+        url: `https://example.com/${tabId}`,
         windowId: 7,
       };
     });
@@ -194,6 +256,7 @@ describe("physical tab command executor", () => {
       discarded: tabId === 42,
       id: tabId,
       index: tabId,
+      url: `https://example.com/${tabId}`,
       windowId: 7,
     }));
     vi.mocked(browserAdapter.discardTab).mockResolvedValue({
@@ -245,6 +308,7 @@ describe("physical tab command executor", () => {
     vi.mocked(browserAdapter.getTab).mockImplementation(async (tabId) => ({
       id: tabId,
       index: tabId,
+      url: `https://example.com/${tabId}`,
       windowId: 7,
     }));
     vi.mocked(browserAdapter.reloadTab).mockResolvedValue(undefined);
@@ -291,6 +355,7 @@ describe("physical tab command executor", () => {
     vi.mocked(browserAdapter.getTab).mockImplementation(async (tabId) => ({
       id: tabId,
       index: tabId,
+      url: `https://example.com/${tabId}`,
       windowId: tabId === 43 ? 90 : 7,
     }));
     vi.mocked(browserAdapter.getWindow).mockResolvedValue({
@@ -341,11 +406,110 @@ describe("physical tab command executor", () => {
     });
   });
 
+  it("skips moving a physical tab whose URL changed since the snapshot", async () => {
+    const browserAdapter = adapter();
+    vi.mocked(browserAdapter.getTab).mockResolvedValue({
+      id: 42,
+      index: 2,
+      url: "https://example.com/navigated",
+      windowId: 7,
+    });
+    const executor = createPhysicalTabCommandExecutor({
+      adapter: browserAdapter,
+      storage: storage(),
+    });
+
+    await expect(
+      executor.execute(
+        {
+          controlTabId: 900,
+          controlWindowId: 90,
+          currentScope: CURRENT_SCOPE,
+        },
+        {
+          ...CURRENT_SCOPE,
+          command: {
+            destination: { kind: "window", windowId: 90 },
+            kind: "move",
+            targets: [
+              { expectedUrl: "https://example.com/original", tabId: 42 },
+            ],
+          },
+        },
+      ),
+    ).resolves.toEqual({
+      failed: [],
+      kind: "move",
+      requested: 1,
+      skipped: [{ reason: "url-changed", tabId: 42 }],
+      succeededTabIds: [],
+    });
+
+    expect(browserAdapter.getWindow).not.toHaveBeenCalled();
+    expect(browserAdapter.moveTabs).not.toHaveBeenCalled();
+  });
+
+  it("rechecks each target immediately before moving it to an existing window", async () => {
+    const browserAdapter = adapter();
+    vi.mocked(browserAdapter.getTab)
+      .mockResolvedValueOnce({
+        id: 42,
+        index: 2,
+        url: "https://example.com/original",
+        windowId: 7,
+      })
+      .mockResolvedValueOnce({
+        id: 42,
+        index: 2,
+        url: "https://example.com/navigated",
+        windowId: 7,
+      });
+    vi.mocked(browserAdapter.getWindow).mockResolvedValue({
+      id: 90,
+      type: "normal",
+    });
+    const executor = createPhysicalTabCommandExecutor({
+      adapter: browserAdapter,
+      storage: storage(),
+    });
+
+    await expect(
+      executor.execute(
+        {
+          controlTabId: 900,
+          controlWindowId: 90,
+          currentScope: CURRENT_SCOPE,
+        },
+        {
+          ...CURRENT_SCOPE,
+          command: {
+            destination: { kind: "window", windowId: 90 },
+            kind: "move",
+            targets: [
+              { expectedUrl: "https://example.com/original", tabId: 42 },
+            ],
+          },
+        },
+      ),
+    ).resolves.toEqual({
+      destinationWindowId: 90,
+      failed: [],
+      kind: "move",
+      requested: 1,
+      skipped: [{ reason: "url-changed", tabId: 42 }],
+      succeededTabIds: [],
+    });
+
+    expect(browserAdapter.getTab).toHaveBeenCalledTimes(2);
+    expect(browserAdapter.moveTabs).not.toHaveBeenCalled();
+  });
+
   it("reports each existing-window move independently when one tab races away", async () => {
     const browserAdapter = adapter();
     vi.mocked(browserAdapter.getTab).mockImplementation(async (tabId) => ({
       id: tabId,
       index: tabId,
+      url: `https://example.com/${tabId}`,
       windowId: 7,
     }));
     vi.mocked(browserAdapter.getWindow).mockResolvedValue({
@@ -400,6 +564,7 @@ describe("physical tab command executor", () => {
     vi.mocked(browserAdapter.getTab).mockImplementation(async (tabId) => ({
       id: tabId,
       ...positions.get(tabId)!,
+      url: `https://example.com/${tabId}`,
     }));
     vi.mocked(browserAdapter.createWindow).mockResolvedValue({
       id: 99,
@@ -457,6 +622,70 @@ describe("physical tab command executor", () => {
     });
   });
 
+  it("rechecks the seed and remaining targets immediately before a new-window move", async () => {
+    const browserAdapter = adapter();
+    const reads = new Map<number, number>();
+    vi.mocked(browserAdapter.getTab).mockImplementation(async (tabId) => {
+      const read = (reads.get(tabId) ?? 0) + 1;
+      reads.set(tabId, read);
+      return {
+        id: tabId,
+        index: tabId - 42,
+        url:
+          read === 2 && (tabId === 42 || tabId === 44)
+            ? `https://example.com/${tabId}/navigated`
+            : `https://example.com/${tabId}`,
+        windowId: 7,
+      };
+    });
+    vi.mocked(browserAdapter.createWindow).mockResolvedValue({
+      id: 99,
+      type: "normal",
+    });
+    const executor = createPhysicalTabCommandExecutor({
+      adapter: browserAdapter,
+      storage: storage(),
+    });
+
+    await expect(
+      executor.execute(
+        {
+          controlTabId: 900,
+          controlWindowId: 90,
+          currentScope: CURRENT_SCOPE,
+        },
+        {
+          ...CURRENT_SCOPE,
+          command: {
+            destination: { kind: "new-window" },
+            kind: "move",
+            targets: [42, 43, 44].map((tabId) => ({
+              expectedUrl: `https://example.com/${tabId}`,
+              tabId,
+            })),
+          },
+        },
+      ),
+    ).resolves.toEqual({
+      destinationWindowId: 99,
+      failed: [],
+      kind: "move",
+      requested: 3,
+      skipped: [
+        { reason: "url-changed", tabId: 42 },
+        { reason: "url-changed", tabId: 44 },
+      ],
+      succeededTabIds: [43],
+    });
+
+    expect(browserAdapter.createWindow).toHaveBeenCalledOnce();
+    expect(browserAdapter.createWindow).toHaveBeenCalledWith({
+      focused: true,
+      tabId: 43,
+    });
+    expect(browserAdapter.moveTabs).not.toHaveBeenCalled();
+  });
+
   it("previews active tabs while protecting pinned and control tabs", async () => {
     const browserAdapter = adapter();
     vi.mocked(browserAdapter.getTab).mockImplementation(async (tabId) => {
@@ -487,12 +716,13 @@ describe("physical tab command executor", () => {
           controlTabId: 44,
           controlWindowId: 90,
           currentScope: CURRENT_SCOPE,
+          protectedTabIds: [47],
         },
         {
           ...CURRENT_SCOPE,
           command: {
             kind: "close-preview",
-            targets: [41, 42, 43, 44, 45, 46].map((tabId) => ({
+            targets: [41, 42, 43, 44, 45, 46, 47].map((tabId) => ({
               expectedUrl: `https://example.com/${tabId}`,
               tabId,
             })),
@@ -504,12 +734,13 @@ describe("physical tab command executor", () => {
       expiresAt: 301_000,
       kind: "close-preview",
       previewId: "323e4567-e89b-42d3-a456-426614174000",
-      requested: 6,
+      requested: 7,
       skipped: [
         { reason: "pinned-protected", tabId: 43 },
         { reason: "control-tab-protected", tabId: 44 },
         { reason: "url-changed", tabId: 45 },
         { reason: "missing", tabId: 46 },
+        { reason: "control-tab-protected", tabId: 47 },
       ],
     });
 
@@ -526,6 +757,99 @@ describe("physical tab command executor", () => {
         version: 1,
       },
     });
+  });
+
+  it("previews and closes an active duplicate while preserving its keeper and protected TabHub tab", async () => {
+    const exactUrl = "https://example.com/shared-active";
+    const tabHubUrl = "http://127.0.0.1:7717/app/";
+    const previewId = "323e4567-e89b-42d3-a456-426614174000";
+    const undoId = "423e4567-e89b-42d3-a456-426614174000";
+    const generatedIds = [previewId, undoId];
+    const browserAdapter = adapter();
+    vi.mocked(browserAdapter.getTab).mockImplementation(async (tabId) => {
+      if (tabId === 41) {
+        return {
+          active: false,
+          id: 41,
+          index: 0,
+          pinned: false,
+          url: exactUrl,
+          windowId: 7,
+        };
+      }
+      if (tabId === 42) {
+        return {
+          active: true,
+          id: 42,
+          index: 1,
+          pinned: false,
+          url: exactUrl,
+          windowId: 7,
+        };
+      }
+      return {
+        active: true,
+        id: 900,
+        index: 2,
+        pinned: false,
+        url: tabHubUrl,
+        windowId: 7,
+      };
+    });
+    const sessionStorage = statefulStorage();
+    const executor = createPhysicalTabCommandExecutor({
+      adapter: browserAdapter,
+      createId: () => generatedIds.shift()!,
+      now: () => 1_000,
+      storage: sessionStorage,
+    });
+    const context = {
+      currentScope: CURRENT_SCOPE,
+      protectedTabIds: [900],
+    } as const;
+
+    await expect(
+      executor.execute(context, {
+        ...CURRENT_SCOPE,
+        command: {
+          kind: "close-preview",
+          targets: [
+            {
+              expectedUrl: exactUrl,
+              keeper: { expectedUrl: exactUrl, tabId: 41 },
+              tabId: 42,
+            },
+            { expectedUrl: tabHubUrl, tabId: 900 },
+          ],
+        },
+      }),
+    ).resolves.toEqual({
+      candidateTabIds: [42],
+      expiresAt: 301_000,
+      kind: "close-preview",
+      previewId,
+      requested: 2,
+      skipped: [{ reason: "control-tab-protected", tabId: 900 }],
+    });
+
+    await expect(
+      executor.execute(context, {
+        ...CURRENT_SCOPE,
+        command: { confirmed: true, kind: "close", previewId },
+      }),
+    ).resolves.toEqual({
+      failed: [],
+      kind: "close",
+      requested: 1,
+      skipped: [],
+      succeededTabIds: [42],
+      undo: { count: 1, expiresAt: 601_000, undoId },
+    });
+
+    expect(browserAdapter.removeTab).toHaveBeenCalledOnce();
+    expect(browserAdapter.removeTab).toHaveBeenCalledWith(42);
+    expect(browserAdapter.removeTab).not.toHaveBeenCalledWith(41);
+    expect(browserAdapter.removeTab).not.toHaveBeenCalledWith(900);
   });
 
   it("previews every target when a close contains more than 500 tabs", async () => {
@@ -768,6 +1092,7 @@ describe("physical tab command executor", () => {
           controlTabId: 900,
           controlWindowId: 90,
           currentScope: CURRENT_SCOPE,
+          protectedTabIds: [43],
         },
         {
           ...CURRENT_SCOPE,
@@ -780,11 +1105,12 @@ describe("physical tab command executor", () => {
       requested: 5,
       skipped: [
         { reason: "url-changed", tabId: 42 },
+        { reason: "control-tab-protected", tabId: 43 },
         { reason: "pinned-protected", tabId: 44 },
         { reason: "control-tab-protected", tabId: 900 },
       ],
-      succeededTabIds: [41, 43],
-      undo: { count: 2, expiresAt: 602_000, undoId },
+      succeededTabIds: [41],
+      undo: { count: 1, expiresAt: 602_000, undoId },
     });
 
     expect(events[0]).toBe("journal");
@@ -1369,6 +1695,301 @@ describe("physical tab command executor", () => {
       failed: [],
       kind: "close",
       succeededTabIds: [41, 42],
+    });
+  });
+
+  it("starts independent confirmed removals concurrently without weakening close safety", async () => {
+    const previewId = "323e4567-e89b-42d3-a456-426614174000";
+    const undoId = "423e4567-e89b-42d3-a456-426614174000";
+    const previewKey =
+      `tabhub:physical-close-preview:${CURRENT_SCOPE.installationId}`;
+    const undoKey =
+      `tabhub:physical-close-undo:${CURRENT_SCOPE.installationId}`;
+    const sessionStorage = statefulStorage({
+      [previewKey]: {
+        ...CURRENT_SCOPE,
+        expiresAt: 100_000,
+        previewId,
+        targets: [
+          {
+            expectedUrl: "https://example.com/shared-a",
+            keeper: {
+              expectedUrl: "https://example.com/shared-a",
+              tabId: 101,
+            },
+            tabId: 41,
+          },
+          {
+            expectedUrl: "https://example.com/shared-b",
+            keeper: {
+              expectedUrl: "https://example.com/shared-b",
+              tabId: 103,
+            },
+            tabId: 43,
+          },
+          {
+            expectedUrl: "https://example.com/shared-c",
+            keeper: {
+              expectedUrl: "https://example.com/shared-c",
+              tabId: 102,
+            },
+            tabId: 42,
+          },
+        ],
+        version: 1,
+      },
+    });
+    const browserAdapter = adapter();
+    const readsByTab = new Map<number, number>();
+    vi.mocked(browserAdapter.getTab).mockImplementation(async (tabId) => {
+      readsByTab.set(tabId, (readsByTab.get(tabId) ?? 0) + 1);
+      if (tabId === 101) {
+        return {
+          id: 101,
+          index: 1,
+          url: "https://example.com/shared-a",
+          windowId: 7,
+        };
+      }
+      if (tabId === 102) {
+        return {
+          id: 102,
+          index: 2,
+          url: "https://example.com/shared-c",
+          windowId: 7,
+        };
+      }
+      if (tabId === 103) {
+        return {
+          id: 103,
+          index: 3,
+          url: "https://example.com/keeper-navigated",
+          windowId: 7,
+        };
+      }
+      return {
+        active: false,
+        id: tabId,
+        index: tabId,
+        pinned: false,
+        title: `Live ${tabId}`,
+        url:
+          tabId === 41
+            ? "https://example.com/shared-a"
+            : tabId === 43
+              ? "https://example.com/shared-b"
+              : "https://example.com/shared-c",
+        windowId: 7,
+      };
+    });
+
+    let signalFirstRemove!: () => void;
+    const firstRemoveStarted = new Promise<void>((resolve) => {
+      signalFirstRemove = resolve;
+    });
+    let releaseFirstRemove!: () => void;
+    const firstRemovePending = new Promise<void>((resolve) => {
+      releaseFirstRemove = resolve;
+    });
+    let signalSecondRemove!: () => void;
+    const secondRemoveStarted = new Promise<void>((resolve) => {
+      signalSecondRemove = resolve;
+    });
+    let journalWasDurableBeforeEveryRemove = true;
+    vi.mocked(browserAdapter.removeTab).mockImplementation((tabId) => {
+      const journal = sessionStorage.peek(undoKey) as
+        | {
+            entries: Array<{
+              targets: Array<{ originalTabId: number }>;
+              undoId: string;
+            }>;
+          }
+        | undefined;
+      const storedTargets = journal?.entries.find(
+        (entry) => entry.undoId === undoId,
+      )?.targets;
+      if (
+        storedTargets?.some(
+          ({ originalTabId }) => originalTabId === tabId,
+        ) !== true
+      ) {
+        journalWasDurableBeforeEveryRemove = false;
+      }
+      if (tabId === 41) {
+        signalFirstRemove();
+        return firstRemovePending;
+      }
+      if (tabId === 42) {
+        signalSecondRemove();
+        return Promise.resolve();
+      }
+      return Promise.reject(new Error(`Unexpected remove of tab ${tabId}`));
+    });
+    const executor = createPhysicalTabCommandExecutor({
+      adapter: browserAdapter,
+      createId: () => undoId,
+      now: () => 2_000,
+      storage: sessionStorage,
+    });
+
+    const execution = executor.execute(
+      {
+        controlTabId: 900,
+        controlWindowId: 90,
+        currentScope: CURRENT_SCOPE,
+      },
+      {
+        ...CURRENT_SCOPE,
+        command: { confirmed: true, kind: "close", previewId },
+      },
+    );
+    await firstRemoveStarted;
+
+    let concurrencyTimeout: ReturnType<typeof setTimeout> | undefined;
+    const secondStartedWhileFirstWasPending = await Promise.race([
+      secondRemoveStarted.then(() => true),
+      new Promise<boolean>((resolve) => {
+        concurrencyTimeout = setTimeout(() => resolve(false), 100);
+      }),
+    ]);
+    if (concurrencyTimeout !== undefined) clearTimeout(concurrencyTimeout);
+    releaseFirstRemove();
+
+    await expect(execution).resolves.toEqual({
+      failed: [],
+      kind: "close",
+      requested: 3,
+      skipped: [{ reason: "keeper-changed", tabId: 43 }],
+      succeededTabIds: [41, 42],
+      undo: { count: 2, expiresAt: 602_000, undoId },
+    });
+    expect(journalWasDurableBeforeEveryRemove).toBe(true);
+    expect(readsByTab.get(41)).toBe(2);
+    expect(readsByTab.get(42)).toBe(2);
+    expect(readsByTab.get(43)).toBe(2);
+    expect(readsByTab.get(101)).toBe(1);
+    expect(readsByTab.get(102)).toBe(1);
+    expect(readsByTab.get(103)).toBe(1);
+    expect(browserAdapter.removeTab).not.toHaveBeenCalledWith(43);
+    expect(browserAdapter.removeTab).not.toHaveBeenCalledWith(101);
+    expect(browserAdapter.removeTab).not.toHaveBeenCalledWith(102);
+    expect(browserAdapter.removeTab).not.toHaveBeenCalledWith(103);
+    expect(secondStartedWhileFirstWasPending).toBe(true);
+  });
+
+  it("limits confirmed removals to eight in flight and preserves result order", async () => {
+    const previewId = "323e4567-e89b-42d3-a456-426614174000";
+    const undoId = "423e4567-e89b-42d3-a456-426614174000";
+    const previewKey =
+      `tabhub:physical-close-preview:${CURRENT_SCOPE.installationId}`;
+    const tabIds = Array.from({ length: 9 }, (_, index) => 41 + index);
+    const sessionStorage = statefulStorage({
+      [previewKey]: {
+        ...CURRENT_SCOPE,
+        expiresAt: 100_000,
+        previewId,
+        targets: tabIds.map((tabId) => ({
+          expectedUrl: `https://example.com/${tabId}`,
+          tabId,
+        })),
+        version: 1,
+      },
+    });
+    const browserAdapter = adapter();
+    vi.mocked(browserAdapter.getTab).mockImplementation(async (tabId) => ({
+      active: false,
+      id: tabId,
+      index: tabId,
+      pinned: false,
+      title: `Live ${tabId}`,
+      url: `https://example.com/${tabId}`,
+      windowId: 7,
+    }));
+
+    let signalEighthRemove!: () => void;
+    const eighthRemoveStarted = new Promise<void>((resolve) => {
+      signalEighthRemove = resolve;
+    });
+    let signalNinthRemove!: () => void;
+    const ninthRemoveStarted = new Promise<void>((resolve) => {
+      signalNinthRemove = resolve;
+    });
+    const startedTabIds: number[] = [];
+    const releaseByTabId = new Map<number, () => void>();
+    let removalsInFlight = 0;
+    let maxRemovalsInFlight = 0;
+    vi.mocked(browserAdapter.removeTab).mockImplementation((tabId) => {
+      startedTabIds.push(tabId);
+      removalsInFlight += 1;
+      maxRemovalsInFlight = Math.max(
+        maxRemovalsInFlight,
+        removalsInFlight,
+      );
+      if (startedTabIds.length === 8) signalEighthRemove();
+      if (tabId === 49) signalNinthRemove();
+      return new Promise<void>((resolve) => {
+        let released = false;
+        releaseByTabId.set(tabId, () => {
+          if (released) return;
+          released = true;
+          releaseByTabId.delete(tabId);
+          removalsInFlight -= 1;
+          resolve();
+        });
+      });
+    });
+    const executor = createPhysicalTabCommandExecutor({
+      adapter: browserAdapter,
+      createId: () => undoId,
+      now: () => 2_000,
+      storage: sessionStorage,
+    });
+
+    const execution = executor.execute(
+      {
+        controlTabId: 900,
+        controlWindowId: 90,
+        currentScope: CURRENT_SCOPE,
+      },
+      {
+        ...CURRENT_SCOPE,
+        command: { confirmed: true, kind: "close", previewId },
+      },
+    );
+    await eighthRemoveStarted;
+
+    const firstWaveTabIds = [...startedTabIds];
+    const inFlightBeforeRelease = removalsInFlight;
+    const ninthStartedBeforeAFreeSlot = startedTabIds.includes(49);
+    releaseByTabId.get(48)?.();
+
+    let ninthStartTimeout: ReturnType<typeof setTimeout> | undefined;
+    const ninthStartedAfterOneResolved = await Promise.race([
+      ninthRemoveStarted.then(() => true),
+      new Promise<boolean>((resolve) => {
+        ninthStartTimeout = setTimeout(() => resolve(false), 100);
+      }),
+    ]);
+    if (ninthStartTimeout !== undefined) clearTimeout(ninthStartTimeout);
+
+    for (const release of [...releaseByTabId.values()]) release();
+    await ninthRemoveStarted;
+    releaseByTabId.get(49)?.();
+    const result = await execution;
+
+    expect(firstWaveTabIds).toEqual(tabIds.slice(0, 8));
+    expect(inFlightBeforeRelease).toBe(8);
+    expect(ninthStartedBeforeAFreeSlot).toBe(false);
+    expect(ninthStartedAfterOneResolved).toBe(true);
+    expect(maxRemovalsInFlight).toBe(8);
+    expect(startedTabIds).toEqual(tabIds);
+    expect(result).toMatchObject({
+      failed: [],
+      kind: "close",
+      requested: 9,
+      skipped: [],
+      succeededTabIds: tabIds,
+      undo: { count: 9, undoId },
     });
   });
 

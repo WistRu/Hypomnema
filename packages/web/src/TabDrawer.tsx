@@ -25,21 +25,18 @@ import {
   patchTabDetails,
   unassignTag,
 } from "./api";
+import { useI18n } from "./i18n";
 
-const STATUS_OPTIONS: Array<{ label: string; value: TabStatus }> = [
-  { label: "Inbox", value: "inbox" },
-  { label: "In progress", value: "in_progress" },
-  { label: "Done", value: "done" },
-  { label: "Archived", value: "archived" },
+const STATUS_OPTIONS: Array<{ labelKey: string; value: TabStatus }> = [
+  { labelKey: "Inbox", value: "inbox" },
+  { labelKey: "In progress", value: "in_progress" },
+  { labelKey: "Done", value: "done" },
+  { labelKey: "Archived", value: "archived" },
 ];
 
 interface TabDrawerProps {
   tabId: number;
   onClose: () => void;
-}
-
-function readableError(error: unknown) {
-  return error instanceof Error ? error.message : "Something went wrong.";
 }
 
 function displayTitle(tab: TabDetailResponse) {
@@ -53,15 +50,17 @@ function displayTitle(tab: TabDetailResponse) {
 }
 
 function SectionError({ error }: { error: unknown }) {
+  const { errorMessage } = useI18n();
   return (
     <p className="drawer-error" role="alert">
-      {readableError(error)}
+      {errorMessage(error)}
     </p>
   );
 }
 
 function ContentText({ text }: { text: string }) {
   const [expanded, setExpanded] = useState(false);
+  const { formatNumber, t } = useI18n();
   const limit = 20_000;
   const isLong = text.length > limit;
   const visibleText = isLong && !expanded ? `${text.slice(0, limit)}\n\n...` : text;
@@ -71,7 +70,11 @@ function ContentText({ text }: { text: string }) {
       <pre>{visibleText}</pre>
       {isLong ? (
         <button type="button" onClick={() => setExpanded((current) => !current)}>
-          {expanded ? "Show compact view" : `Show all ${text.length.toLocaleString()} characters`}
+          {expanded
+            ? t("Show compact view")
+            : t("Show all {count} characters", {
+                count: formatNumber(text.length),
+              })}
         </button>
       ) : null}
     </div>
@@ -94,6 +97,7 @@ function CustomFieldRow({
   onSave,
 }: CustomFieldRowProps) {
   const [draft, setDraft] = useState(value ?? "");
+  const { t } = useI18n();
 
   useEffect(() => setDraft(value ?? ""), [value]);
 
@@ -108,14 +112,14 @@ function CustomFieldRow({
       <label>
         <span>{fieldKey}</span>
         <input
-          aria-label={`Value for ${fieldKey}`}
+          aria-label={t("Value for {field}", { field: fieldKey })}
           disabled={isSaving}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
         />
       </label>
       <button disabled={isSaving || draft === (value ?? "")} type="submit">
-        Save
+        {t("Save")}
       </button>
       <button
         className="danger-button"
@@ -123,7 +127,7 @@ function CustomFieldRow({
         type="button"
         onClick={() => onDelete(fieldKey)}
       >
-        Delete
+        {t("Delete")}
       </button>
     </form>
   );
@@ -146,6 +150,7 @@ function LinkRow({
 }: LinkRowProps) {
   const [kind, setKind] = useState(link.kind);
   const [note, setNote] = useState(link.note ?? "");
+  const { formatNumber, t } = useI18n();
   const isOutgoing = link.fromTab === currentTabId;
   const relatedTab = isOutgoing ? link.toTab : link.fromTab;
   const changed = kind !== link.kind || note !== (link.note ?? "");
@@ -164,14 +169,14 @@ function LinkRow({
       }}
     >
       <div className="link-direction">
-        <span>{isOutgoing ? "Outgoing" : "Incoming"}</span>
-        <strong>Tab #{relatedTab}</strong>
+        <span>{isOutgoing ? t("Outgoing") : t("Incoming")}</span>
+        <strong>{t("Tab #{id}", { id: formatNumber(relatedTab) })}</strong>
         <span className={`provenance-badge is-${link.createdBy}`}>
-          {link.createdBy === "agent" ? "Agent" : "User"}
+          {link.createdBy === "agent" ? t("Agent") : t("User")}
         </span>
       </div>
       <label>
-        <span>Kind</span>
+        <span>{t("Kind")}</span>
         <input
           disabled={isSaving}
           maxLength={128}
@@ -181,18 +186,18 @@ function LinkRow({
         />
       </label>
       <label>
-        <span>Note</span>
+        <span>{t("Note")}</span>
         <input
           disabled={isSaving}
           maxLength={2_048}
-          placeholder="Optional context"
+          placeholder={t("Optional context")}
           value={note}
           onChange={(event) => setNote(event.target.value)}
         />
       </label>
       <div className="link-actions">
         <button disabled={isSaving || !changed || !kind.trim()} type="submit">
-          Save link
+          {t("Save link")}
         </button>
         <button
           className="danger-button"
@@ -200,7 +205,7 @@ function LinkRow({
           type="button"
           onClick={() => onDelete(link.id)}
         >
-          Delete
+          {t("Delete")}
         </button>
       </div>
     </form>
@@ -209,6 +214,7 @@ function LinkRow({
 
 export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
   const queryClient = useQueryClient();
+  const { formatDate, formatNumber, t } = useI18n();
   const headingId = useId();
   const closeButton = useRef<HTMLButtonElement>(null);
   const [tagPath, setTagPath] = useState("");
@@ -365,11 +371,13 @@ export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
       >
         <header className="drawer-header">
           <div>
-            <p>Tab details | #{tabId}</p>
-            <h2 id={headingId}>{tab ? displayTitle(tab) : `Tab #${tabId}`}</h2>
+            <p>{t("Tab details | #{id}", { id: formatNumber(tabId) })}</p>
+            <h2 id={headingId}>
+              {tab ? displayTitle(tab) : t("Tab #{id}", { id: formatNumber(tabId) })}
+            </h2>
           </div>
           <button
-            aria-label="Close tab details"
+            aria-label={t("Close tab details")}
             className="icon-button"
             ref={closeButton}
             type="button"
@@ -382,14 +390,14 @@ export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
         {detailQuery.isPending ? (
           <div className="drawer-state" role="status">
             <span className="spinner" aria-hidden="true" />
-            Loading tab details
+            {t("Loading tab details")}
           </div>
         ) : null}
         {detailQuery.isError ? (
           <div className="drawer-state">
             <SectionError error={detailQuery.error} />
             <button type="button" onClick={() => void detailQuery.refetch()}>
-              Try again
+              {t("Try again")}
             </button>
           </div>
         ) : null}
@@ -398,14 +406,14 @@ export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
           <div className="drawer-body">
             <section className="drawer-overview">
               <a className="primary-link" href={tab.url} rel="noreferrer" target="_blank">
-                Open in browser
+                {t("Open in browser")}
               </a>
               <p className="drawer-url" title={tab.url}>
                 {tab.url}
               </p>
               <div className="editor-grid">
                 <label>
-                  <span>Status</span>
+                  <span>{t("Status")}</span>
                   <select
                     disabled={patchMutation.isPending}
                     value={tab.status}
@@ -415,13 +423,13 @@ export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
                   >
                     {STATUS_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>
-                        {option.label}
+                        {t(option.labelKey)}
                       </option>
                     ))}
                   </select>
                 </label>
                 <fieldset className="importance-editor">
-                  <legend>Importance</legend>
+                  <legend>{t("Importance")}</legend>
                   <div>
                     {([0, 1, 2, 3] as TabImportance[]).map((level) => (
                       <button
@@ -442,18 +450,20 @@ export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
 
             <section className="drawer-section" aria-labelledby={`${headingId}-summary`}>
               <div className="section-heading">
-                <h3 id={`${headingId}-summary`}>Summary</h3>
+                <h3 id={`${headingId}-summary`}>{t("Summary")}</h3>
                 {tab.content?.summaryModel ? <span>{tab.content.summaryModel}</span> : null}
               </div>
               <p className="summary-copy">
-                {tab.content?.summary?.trim() || tab.summary?.trim() || "No summary yet."}
+                {tab.content?.summary?.trim() ||
+                  tab.summary?.trim() ||
+                  t("No summary yet.")}
               </p>
             </section>
 
             <section className="drawer-section" aria-labelledby={`${headingId}-tags`}>
               <div className="section-heading">
-                <h3 id={`${headingId}-tags`}>Tags</h3>
-                <span>{tab.tags.length}</span>
+                <h3 id={`${headingId}-tags`}>{t("Tags")}</h3>
+                <span>{formatNumber(tab.tags.length)}</span>
               </div>
               {tab.tags.length > 0 ? (
                 <ul className="tag-pills">
@@ -461,12 +471,17 @@ export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
                     <li key={tag.id}>
                       <span>{tag.path}</span>
                       <span className={`provenance-badge is-${tag.assignedBy}`}>
-                        {tag.assignedBy === "agent" ? "Agent" : "User"}
+                        {tag.assignedBy === "agent" ? t("Agent") : t("User")}
                       </span>
                       <button
-                        aria-label={`Remove ${tag.path}, assigned by ${tag.assignedBy}`}
+                        aria-label={t("Remove {tag}, assigned by {source}", {
+                          source: tag.assignedBy === "agent" ? t("Agent") : t("User"),
+                          tag: tag.path,
+                        })}
                         disabled={unassignMutation.isPending}
-                        title={`Assigned by ${tag.assignedBy}`}
+                        title={t("Assigned by {source}", {
+                          source: tag.assignedBy === "agent" ? t("Agent") : t("User"),
+                        })}
                         type="button"
                         onClick={() => unassignMutation.mutate(tag.id)}
                       >
@@ -476,7 +491,7 @@ export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
                   ))}
                 </ul>
               ) : (
-                <p className="muted-copy">No tags assigned.</p>
+                <p className="muted-copy">{t("No tags assigned.")}</p>
               )}
               <form
                 className="inline-form"
@@ -486,26 +501,26 @@ export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
                 }}
               >
                 <label>
-                  <span>Tag path</span>
+                  <span>{t("Tag path")}</span>
                   <input
                     disabled={assignMutation.isPending}
                     maxLength={2_048}
-                    placeholder="Research/AI/Agents"
+                    placeholder={t("Research/AI/Agents")}
                     required
                     value={tagPath}
                     onChange={(event) => setTagPath(event.target.value)}
                   />
                 </label>
                 <button disabled={assignMutation.isPending || !tagPath.trim()} type="submit">
-                  Assign
+                  {t("Assign")}
                 </button>
               </form>
             </section>
 
             <section className="drawer-section" aria-labelledby={`${headingId}-fields`}>
               <div className="section-heading">
-                <h3 id={`${headingId}-fields`}>Custom fields</h3>
-                <span>{Object.keys(tab.customFields).length}</span>
+                <h3 id={`${headingId}-fields`}>{t("Custom fields")}</h3>
+                <span>{formatNumber(Object.keys(tab.customFields).length)}</span>
               </div>
               <div className="field-list">
                 {Object.entries(tab.customFields).map(([key, value]) => (
@@ -539,38 +554,40 @@ export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
                 }}
               >
                 <label>
-                  <span>Field name</span>
+                  <span>{t("Field name")}</span>
                   <input
                     disabled={patchMutation.isPending}
                     maxLength={128}
-                    placeholder="owner"
+                    placeholder={t("owner")}
                     required
                     value={fieldKey}
                     onChange={(event) => setFieldKey(event.target.value)}
                   />
                 </label>
                 <label>
-                  <span>Value</span>
+                  <span>{t("Value")}</span>
                   <input
                     disabled={patchMutation.isPending}
                     maxLength={8_192}
-                    placeholder="Optional value"
+                    placeholder={t("Optional value")}
                     value={fieldValue}
                     onChange={(event) => setFieldValue(event.target.value)}
                   />
                 </label>
                 <button disabled={patchMutation.isPending || !fieldKey.trim()} type="submit">
-                  Add field
+                  {t("Add field")}
                 </button>
               </form>
             </section>
 
             <section className="drawer-section" aria-labelledby={`${headingId}-links`}>
               <div className="section-heading">
-                <h3 id={`${headingId}-links`}>Links</h3>
-                <span>{linksQuery.data?.items.length ?? 0}</span>
+                <h3 id={`${headingId}-links`}>{t("Links")}</h3>
+                <span>{formatNumber(linksQuery.data?.items.length ?? 0)}</span>
               </div>
-              {linksQuery.isPending ? <p className="muted-copy">Loading links...</p> : null}
+              {linksQuery.isPending ? (
+                <p className="muted-copy">{t("Loading links...")}</p>
+              ) : null}
               {linksQuery.isError ? <SectionError error={linksQuery.error} /> : null}
               <div className="link-list">
                 {linksQuery.data?.items.map((link) => (
@@ -588,7 +605,7 @@ export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
               </div>
               <form className="new-link-form" onSubmit={createNewLink}>
                 <label>
-                  <span>Direction</span>
+                  <span>{t("Direction")}</span>
                   <select
                     disabled={linkBusy}
                     value={linkDirection}
@@ -596,12 +613,12 @@ export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
                       setLinkDirection(event.target.value as "outgoing" | "incoming")
                     }
                   >
-                    <option value="outgoing">This tab to target</option>
-                    <option value="incoming">Source to this tab</option>
+                    <option value="outgoing">{t("This tab to target")}</option>
+                    <option value="incoming">{t("Source to this tab")}</option>
                   </select>
                 </label>
                 <label>
-                  <span>Related tab ID</span>
+                  <span>{t("Related tab ID")}</span>
                   <input
                     disabled={linkBusy}
                     inputMode="numeric"
@@ -614,7 +631,7 @@ export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
                   />
                 </label>
                 <label>
-                  <span>Kind</span>
+                  <span>{t("Kind")}</span>
                   <input
                     disabled={linkBusy}
                     maxLength={128}
@@ -624,11 +641,11 @@ export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
                   />
                 </label>
                 <label className="link-note-field">
-                  <span>Note</span>
+                  <span>{t("Note")}</span>
                   <input
                     disabled={linkBusy}
                     maxLength={2_048}
-                    placeholder="Why are these tabs connected?"
+                    placeholder={t("Why are these tabs connected?")}
                     value={linkNote}
                     onChange={(event) => setLinkNote(event.target.value)}
                   />
@@ -643,24 +660,27 @@ export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
                   }
                   type="submit"
                 >
-                  Create link
+                  {t("Create link")}
                 </button>
               </form>
             </section>
 
             <section className="drawer-section" aria-labelledby={`${headingId}-content`}>
               <div className="section-heading">
-                <h3 id={`${headingId}-content`}>Captured content</h3>
+                <h3 id={`${headingId}-content`}>{t("Captured content")}</h3>
                 {tab.content?.extractedAt ? (
                   <time dateTime={tab.content.extractedAt}>
-                    {new Date(tab.content.extractedAt).toLocaleString()}
+                    {formatDate(tab.content.extractedAt, {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })}
                   </time>
                 ) : null}
               </div>
               {tab.content?.text ? (
                 <ContentText text={tab.content.text} />
               ) : (
-                <p className="muted-copy">No captured content.</p>
+                <p className="muted-copy">{t("No captured content.")}</p>
               )}
             </section>
           </div>

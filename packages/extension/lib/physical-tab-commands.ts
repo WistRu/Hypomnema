@@ -79,9 +79,10 @@ export interface ScopedPhysicalTabCommand extends PhysicalTabCommandScope {
 }
 
 export interface PhysicalTabCommandContext {
-  controlTabId: number;
-  controlWindowId: number;
+  controlTabId?: number;
+  controlWindowId?: number;
   currentScope: PhysicalTabCommandScope;
+  protectedTabIds?: readonly number[];
 }
 
 export interface PhysicalTabLike {
@@ -205,6 +206,7 @@ const CLOSE_UNDO_TTL_MS = 10 * 60 * 1_000;
 const CLOSE_UNDO_JOURNAL_MAX_BYTES = 4 * 1024 * 1024;
 const CLOSE_UNDO_JOURNAL_MAX_ENTRIES = 5;
 const CLOSE_UNDO_TITLE_MAX_LENGTH = 512;
+const CLOSE_REMOVE_CONCURRENCY = 8;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -749,6 +751,16 @@ function sameScope(
   );
 }
 
+function isProtectedControlTab(
+  context: PhysicalTabCommandContext,
+  tabId: number,
+): boolean {
+  return (
+    context.controlTabId === tabId ||
+    context.protectedTabIds?.includes(tabId) === true
+  );
+}
+
 export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
   const createId = options.createId ?? (() => crypto.randomUUID());
   const now = options.now ?? (() => Date.now());
@@ -808,7 +820,7 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
         const candidates: ClosePreviewTarget[] = [];
 
         for (const target of request.command.targets) {
-          if (target.tabId === context.controlTabId) {
+          if (isProtectedControlTab(context, target.tabId)) {
             skipped.push({
               reason: "control-tab-protected",
               tabId: target.tabId,
@@ -905,7 +917,7 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
         }> = [];
 
         for (const target of preview.targets) {
-          if (target.tabId === context.controlTabId) {
+          if (isProtectedControlTab(context, target.tabId)) {
             result.skipped.push({
               reason: "control-tab-protected",
               tabId: target.tabId,
@@ -981,7 +993,17 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
 
         const closedTargets: StoredClosedTab[] = [];
         let durableTargets = undoRecord.targets;
+        type CloseRemovalOutcome =
+          | { closedTab: StoredClosedTab; kind: "succeeded"; tabId: number }
+          | { error: string; kind: "failed"; tabId: number };
+        const inFlightRemovals = new Set<Promise<CloseRemovalOutcome>>();
+        const orderedRemovals: Array<Promise<CloseRemovalOutcome>> = [];
+
         for (const { closedTab: target, keeper } of closable) {
+          while (inFlightRemovals.size >= CLOSE_REMOVE_CONCURRENCY) {
+            await Promise.race(inFlightRemovals);
+          }
+
           let liveTarget: PhysicalTabLike;
           try {
             liveTarget = await options.adapter.getTab(target.originalTabId);
@@ -1048,14 +1070,38 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
             ),
           );
 
-          try {
-            await options.adapter.removeTab(target.originalTabId);
-            closedTargets.push(liveClosedTab);
-            result.succeededTabIds.push(target.originalTabId);
-          } catch (error) {
+          const removal = (async (): Promise<CloseRemovalOutcome> => {
+            try {
+              await options.adapter.removeTab(target.originalTabId);
+              return {
+                closedTab: liveClosedTab,
+                kind: "succeeded",
+                tabId: target.originalTabId,
+              };
+            } catch (error) {
+              return {
+                error: error instanceof Error ? error.message : String(error),
+                kind: "failed",
+                tabId: target.originalTabId,
+              };
+            }
+          })();
+          let trackedRemoval!: Promise<CloseRemovalOutcome>;
+          trackedRemoval = removal.finally(() => {
+            inFlightRemovals.delete(trackedRemoval);
+          });
+          inFlightRemovals.add(trackedRemoval);
+          orderedRemovals.push(trackedRemoval);
+        }
+
+        for (const removal of await Promise.all(orderedRemovals)) {
+          if (removal.kind === "succeeded") {
+            closedTargets.push(removal.closedTab);
+            result.succeededTabIds.push(removal.tabId);
+          } else {
             result.failed.push({
-              error: error instanceof Error ? error.message : String(error),
-              tabId: target.originalTabId,
+              error: removal.error,
+              tabId: removal.tabId,
             });
           }
         }
@@ -1266,6 +1312,11 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
         let startIndex = 0;
 
         if (request.command.destination.kind === "app-window") {
+          if (context.controlWindowId === undefined) {
+            throw new Error(
+              "Opening a workspace in the TabHub window requires a local TabHub page.",
+            );
+          }
           destinationWindowId = context.controlWindowId;
           const window = await options.adapter.getWindow(destinationWindowId);
           if (
@@ -1375,6 +1426,7 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
       if (request.command.kind === "move") {
         const destination = request.command.destination;
         const liveTargets: Array<{
+          expectedUrl: string;
           index: number;
           tabId: number;
           windowId: number;
@@ -1389,14 +1441,21 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
           }
           if (tab.id !== target.tabId) {
             result.skipped.push({ reason: "missing", tabId: target.tabId });
+          } else if (currentTabUrl(tab) !== target.expectedUrl) {
+            result.skipped.push({
+              reason: "url-changed",
+              tabId: target.tabId,
+            });
           } else {
             liveTargets.push({
+              expectedUrl: target.expectedUrl,
               index: tab.index,
               tabId: target.tabId,
               windowId: tab.windowId,
             });
           }
         }
+        if (liveTargets.length === 0) return result;
 
         if (destination.kind === "new-window") {
           liveTargets.sort(
@@ -1405,22 +1464,50 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
               left.index - right.index ||
               left.tabId - right.tabId,
           );
-          if (liveTargets.length === 0) return result;
-
-          const orderedTabIds = liveTargets.map(({ tabId }) => tabId);
           let createdWindow: PhysicalWindowLike | undefined;
-          try {
-            createdWindow = await options.adapter.createWindow({
-              focused: true,
-              tabId: orderedTabIds[0],
-            });
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            result.failed.push(
-              ...orderedTabIds.map((tabId) => ({ error: message, tabId })),
-            );
-            return result;
+          let seedIndex = -1;
+          for (let index = 0; index < liveTargets.length; index += 1) {
+            const target = liveTargets[index]!;
+            let liveTab: PhysicalTabLike;
+            try {
+              liveTab = await options.adapter.getTab(target.tabId);
+            } catch {
+              result.skipped.push({ reason: "missing", tabId: target.tabId });
+              continue;
+            }
+            if (liveTab.id !== target.tabId) {
+              result.skipped.push({ reason: "missing", tabId: target.tabId });
+              continue;
+            }
+            if (currentTabUrl(liveTab) !== target.expectedUrl) {
+              result.skipped.push({
+                reason: "url-changed",
+                tabId: target.tabId,
+              });
+              continue;
+            }
+
+            seedIndex = index;
+            try {
+              createdWindow = await options.adapter.createWindow({
+                focused: true,
+                tabId: target.tabId,
+              });
+            } catch (error) {
+              const message =
+                error instanceof Error ? error.message : String(error);
+              result.failed.push(
+                ...liveTargets.slice(index).map(({ tabId }) => ({
+                  error: message,
+                  tabId,
+                })),
+              );
+              return result;
+            }
+            break;
           }
+          if (seedIndex < 0) return result;
+
           if (
             createdWindow?.id === undefined ||
             createdWindow.id < 0 ||
@@ -1428,39 +1515,68 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
           ) {
             const error = "The browser did not create a normal destination window.";
             result.failed.push(
-              ...orderedTabIds.map((tabId) => ({ error, tabId })),
+              ...liveTargets.slice(seedIndex).map(({ tabId }) => ({
+                error,
+                tabId,
+              })),
             );
             return result;
           }
 
           const destinationWindowId = createdWindow.id;
           result.destinationWindowId = destinationWindowId;
-          result.succeededTabIds.push(orderedTabIds[0]!);
-          const remaining = orderedTabIds.slice(1);
-          for (const tabId of remaining) {
+          result.succeededTabIds.push(liveTargets[seedIndex]!.tabId);
+          const remaining = liveTargets.slice(seedIndex + 1);
+          for (const target of remaining) {
+            let liveTab: PhysicalTabLike;
             try {
-              const moved = await options.adapter.moveTabs(tabId, {
+              liveTab = await options.adapter.getTab(target.tabId);
+            } catch {
+              result.skipped.push({ reason: "missing", tabId: target.tabId });
+              continue;
+            }
+            if (liveTab.id !== target.tabId) {
+              result.skipped.push({ reason: "missing", tabId: target.tabId });
+              continue;
+            }
+            if (currentTabUrl(liveTab) !== target.expectedUrl) {
+              result.skipped.push({
+                reason: "url-changed",
+                tabId: target.tabId,
+              });
+              continue;
+            }
+
+            try {
+              const moved = await options.adapter.moveTabs(target.tabId, {
                 index: -1,
                 windowId: destinationWindowId,
               });
-              if (Array.isArray(moved) || moved.id !== tabId) {
+              if (Array.isArray(moved) || moved.id !== target.tabId) {
                 throw new Error("The browser did not move this tab.");
               }
-              result.succeededTabIds.push(tabId);
+              result.succeededTabIds.push(target.tabId);
             } catch (error) {
               result.failed.push({
                 error: error instanceof Error ? error.message : String(error),
-                tabId,
+                tabId: target.tabId,
               });
             }
           }
           return result;
         }
 
-        const destinationWindowId =
-          destination.kind === "app-window"
-            ? context.controlWindowId
-            : destination.windowId;
+        let destinationWindowId: number;
+        if (destination.kind === "app-window") {
+          if (context.controlWindowId === undefined) {
+            throw new Error(
+              "Moving tabs to the TabHub window requires a local TabHub page.",
+            );
+          }
+          destinationWindowId = context.controlWindowId;
+        } else {
+          destinationWindowId = destination.windowId;
+        }
         const destinationWindow = await options.adapter.getWindow(
           destinationWindowId,
         );
@@ -1472,7 +1588,7 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
           throw new Error("The destination is not a normal browser window.");
         }
 
-        const movable: number[] = [];
+        const movable: PhysicalTabTarget[] = [];
         for (const target of liveTargets) {
           if (target.windowId === destinationWindowId) {
             result.skipped.push({
@@ -1480,24 +1596,43 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
               tabId: target.tabId,
             });
           } else {
-            movable.push(target.tabId);
+            movable.push({
+              expectedUrl: target.expectedUrl,
+              tabId: target.tabId,
+            });
           }
         }
 
-        for (const tabId of movable) {
+        for (const target of movable) {
+          let liveTab: PhysicalTabLike;
           try {
-            const moved = await options.adapter.moveTabs(tabId, {
+            liveTab = await options.adapter.getTab(target.tabId);
+          } catch {
+            result.skipped.push({ reason: "missing", tabId: target.tabId });
+            continue;
+          }
+          if (liveTab.id !== target.tabId) {
+            result.skipped.push({ reason: "missing", tabId: target.tabId });
+            continue;
+          }
+          if (currentTabUrl(liveTab) !== target.expectedUrl) {
+            result.skipped.push({ reason: "url-changed", tabId: target.tabId });
+            continue;
+          }
+
+          try {
+            const moved = await options.adapter.moveTabs(target.tabId, {
               index: -1,
               windowId: destinationWindowId,
             });
-            if (Array.isArray(moved) || moved.id !== tabId) {
+            if (Array.isArray(moved) || moved.id !== target.tabId) {
               throw new Error("The browser did not move this tab.");
             }
-            result.succeededTabIds.push(tabId);
+            result.succeededTabIds.push(target.tabId);
           } catch (error) {
             result.failed.push({
               error: error instanceof Error ? error.message : String(error),
-              tabId,
+              tabId: target.tabId,
             });
           }
         }
@@ -1509,7 +1644,7 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
       for (const target of request.command.targets) {
         if (
           request.command.kind === "reload" &&
-          target.tabId === context.controlTabId
+          isProtectedControlTab(context, target.tabId)
         ) {
           result.skipped.push({
             reason: "control-tab-protected",
@@ -1528,6 +1663,10 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
 
         if (tab.id !== target.tabId) {
           result.skipped.push({ reason: "missing", tabId: target.tabId });
+          continue;
+        }
+        if (currentTabUrl(tab) !== target.expectedUrl) {
+          result.skipped.push({ reason: "url-changed", tabId: target.tabId });
           continue;
         }
 

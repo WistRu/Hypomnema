@@ -88,6 +88,10 @@ const embeddingProvider = createEmbeddingProviderFromEnv(process.env);
 const app = createApp({
   databasePath,
   logger: true,
+  tabCommandRelayAppOrigins: [
+    `http://${host}:${port}`,
+    `http://localhost:${port}`,
+  ],
   webRoot: existsSync(webRoot) ? webRoot : false,
   ...(summaryProvider === undefined ? {} : { summaryProvider }),
   ...(embeddingProvider === undefined ? {} : { embeddingProvider }),

@@ -1,4 +1,4 @@
-import type { TabInstance } from "@tabhub/shared";
+import type { CreateWorkspace, TabInstance } from "@tabhub/shared";
 
 import type {
   ClosePreviewTarget,
@@ -36,6 +36,18 @@ export function setSelectedTabs(
     else next.delete(tab.instanceId);
   }
   return next;
+}
+
+export function workspaceSelectionsForTabs(
+  tabs: readonly TabInstance[],
+): CreateWorkspace["selections"] {
+  return tabs.map((tab) => ({
+    browser: tab.browser,
+    browserSessionId: tab.browserSessionId,
+    browserTabId: tab.browserTabId,
+    installationId: tab.installationId,
+    instanceId: tab.instanceId,
+  }));
 }
 
 export function controllableSelection(

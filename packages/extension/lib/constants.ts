@@ -2,6 +2,8 @@ export const SERVER_ORIGIN = "http://127.0.0.1:7717";
 export const SNAPSHOT_ENDPOINT = `${SERVER_ORIGIN}/api/ingest/snapshot`;
 export const CONTENT_ENDPOINT = `${SERVER_ORIGIN}/api/ingest/content`;
 export const HEALTH_ENDPOINT = `${SERVER_ORIGIN}/api/health`;
+export const TAB_COMMAND_RELAY_WEBSOCKET_ENDPOINT =
+  "ws://127.0.0.1:7717/api/tab-command-relay/ws";
 
 // Chrome requires executeScript file paths relative to the extension root.
 // WXT's generated PublicPath type includes a leading slash, so this assertion

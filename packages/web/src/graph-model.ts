@@ -28,6 +28,8 @@ export interface GraphLayout {
   width: number;
 }
 
+export type GraphModelTranslator = (key: string) => string;
+
 const horizontalCell = 214;
 const verticalCell = 108;
 const groupGap = 96;
@@ -43,14 +45,26 @@ function compareText(left: string, right: string) {
   return 0;
 }
 
-function nodeGroup(node: GraphNode, selectedRoot: string) {
+function nodeGroup(
+  node: GraphNode,
+  selectedRoot: string,
+  t: GraphModelTranslator | undefined,
+) {
   if (selectedRoot) {
-    return { id: `selected:${selectedRoot}`, label: selectedRoot };
+    return {
+      id: `selected:${selectedRoot}`,
+      label: selectedRoot,
+      sortLabel: selectedRoot,
+    };
   }
   const rootTag = node.rootTags[0];
   return rootTag
-    ? { id: `tag:${rootTag}`, label: rootTag }
-    : { id: "untagged", label: "Untagged" };
+    ? { id: `tag:${rootTag}`, label: rootTag, sortLabel: rootTag }
+    : {
+        id: "untagged",
+        label: t?.("Untagged") ?? "Untagged",
+        sortLabel: "Untagged",
+      };
 }
 
 export function graphNodeSize(importance: GraphNode["importance"]): GraphNodeSize {
@@ -63,17 +77,25 @@ export function graphNodeSize(importance: GraphNode["importance"]): GraphNodeSiz
 export function layoutGraphNodes(
   nodes: GraphNode[],
   selectedRoot = "",
+  t?: GraphModelTranslator,
 ): GraphLayout {
-  const grouped = new Map<string, { label: string; nodes: GraphNode[] }>();
+  const grouped = new Map<
+    string,
+    { label: string; nodes: GraphNode[]; sortLabel: string }
+  >();
   for (const node of nodes) {
-    const identity = nodeGroup(node, selectedRoot);
-    const group = grouped.get(identity.id) ?? { label: identity.label, nodes: [] };
+    const identity = nodeGroup(node, selectedRoot, t);
+    const group = grouped.get(identity.id) ?? {
+      label: identity.label,
+      nodes: [],
+      sortLabel: identity.sortLabel,
+    };
     group.nodes.push(node);
     grouped.set(identity.id, group);
   }
 
   const groupEntries = [...grouped.entries()].sort((left, right) => {
-    const labelOrder = compareText(left[1].label, right[1].label);
+    const labelOrder = compareText(left[1].sortLabel, right[1].sortLabel);
     return labelOrder || compareText(left[0], right[0]);
   });
   const positioned: PositionedGraphNode[] = [];

@@ -2,11 +2,16 @@ import type { TabInstance } from "@tabhub/shared";
 
 import type {
   ExtensionProbe,
+  PhysicalTabScope,
   TabActivationTarget,
 } from "./extension-bridge";
 
 export type TabActivationAvailability =
-  | { kind: "ready"; target: TabActivationTarget }
+  | {
+      kind: "ready";
+      route: "direct" | "relay";
+      target: TabActivationTarget;
+    }
   | {
       kind:
         | "checking"
@@ -18,41 +23,93 @@ export type TabActivationAvailability =
       message: string;
     };
 
+export type TabActivationTranslator = (key: string) => string;
+
+function translatedMessage(
+  t: TabActivationTranslator | undefined,
+  key: string,
+): string {
+  return t?.(key) ?? key;
+}
+
 export function tabActivationAvailability(
   tab: TabInstance,
   probe: ExtensionProbe | undefined,
+  t?: TabActivationTranslator,
+  connectedScopes: readonly PhysicalTabScope[] = [],
 ): TabActivationAvailability {
   if (tab.browserTabId === null) {
     return {
       kind: "missing-tab-id",
-      message: "Waiting for an updated physical-tab snapshot.",
+      message: translatedMessage(t, "Waiting for an updated physical-tab snapshot."),
+    };
+  }
+  const targetScope =
+    tab.browserSessionId === null
+      ? null
+      : {
+          browser: tab.browser,
+          browserSessionId: tab.browserSessionId,
+          installationId: tab.installationId,
+        };
+  const directMatches =
+    targetScope !== null &&
+    probe?.available === true &&
+    probe.browser === targetScope.browser &&
+    probe.browserSessionId === targetScope.browserSessionId &&
+    probe.installationId === targetScope.installationId;
+  const relayMatches =
+    targetScope !== null &&
+    connectedScopes.some(
+      (scope) =>
+        scope.browser === targetScope.browser &&
+        scope.browserSessionId === targetScope.browserSessionId &&
+        scope.installationId === targetScope.installationId,
+    );
+
+  if (directMatches || relayMatches) {
+    return {
+      kind: "ready",
+      route: directMatches ? "direct" : "relay",
+      target: {
+        browser: tab.browser,
+        browserSessionId: tab.browserSessionId!,
+        installationId: tab.installationId,
+        tabId: tab.browserTabId,
+      },
     };
   }
   if (probe === undefined) {
     return {
       kind: "checking",
-      message: "Checking the local TabHub extension.",
+      message: translatedMessage(t, "Checking connected TabHub extensions."),
     };
   }
   if (!probe.available) {
     return {
       kind: "bridge-unavailable",
-      message: "Open TabHub in that browser and reload the updated extension to switch tabs.",
+      message: translatedMessage(
+        t,
+        "No connected TabHub extension can control this browser profile.",
+      ),
     };
   }
   if (probe.browser === null) {
     return {
       kind: "identity-unconfigured",
-      message: "Choose this extension's browser identity before switching tabs.",
+      message: translatedMessage(
+        t,
+        "Choose this extension's browser identity before switching tabs.",
+      ),
     };
   }
-  if (
-    probe.browser !== tab.browser ||
-    probe.installationId !== tab.installationId
-  ) {
+  if (probe.browser !== tab.browser || probe.installationId !== tab.installationId) {
     return {
       kind: "other-installation",
-      message: "Open TabHub in the browser profile that owns this tab to switch to it.",
+      message: translatedMessage(
+        t,
+        "This tab's browser profile is not connected.",
+      ),
     };
   }
   if (
@@ -61,17 +118,18 @@ export function tabActivationAvailability(
   ) {
     return {
       kind: "waiting-for-current-session",
-      message: "Waiting for a fresh snapshot from this browser session.",
+      message: translatedMessage(
+        t,
+        "Waiting for a fresh snapshot from this browser session.",
+      ),
     };
   }
 
   return {
-    kind: "ready",
-    target: {
-      browser: tab.browser,
-      browserSessionId: tab.browserSessionId,
-      installationId: tab.installationId,
-      tabId: tab.browserTabId,
-    },
+    kind: "waiting-for-current-session",
+    message: translatedMessage(
+      t,
+      "Waiting for a fresh snapshot from this browser session.",
+    ),
   };
 }

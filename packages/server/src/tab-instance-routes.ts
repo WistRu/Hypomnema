@@ -64,6 +64,7 @@ export function registerTabInstanceRoutes(
     return duplicateGroupListResponseSchema.parse(
       catalog.listDuplicateGroups({
         browser: parsed.data.browser,
+        q: parsed.data.q,
         page: parsed.data.page,
         pageSize: parsed.data.pageSize,
       }),

@@ -77,6 +77,57 @@ describe("duplicate review model", () => {
     });
   });
 
+  it("uses an optional translator for user-facing duplicate reasons and labels", () => {
+    const group = {
+      ...duplicateResponse().items[0]!,
+      browser: "",
+      installationId: "other-installation",
+    };
+    const messages: Record<string, string> = {
+      "Edge": "Edge-RU",
+      "Every extra copy is pinned, so TabHub will keep it open.":
+        "Все лишние копии закреплены, поэтому TabHub оставит их открытыми.",
+      "Open TabHub in {browser} to close these duplicates.":
+        "Откройте TabHub в {browser}, чтобы закрыть эти дубликаты.",
+      "another browser": "другом браузере",
+      "TabHub extension is not connected to this page.":
+        "Расширение TabHub не подключено к этой странице.",
+      "this browser": "этом браузере",
+    };
+    const t = (
+      key: string,
+      params: Record<string, number | string> = {},
+    ) => (messages[key] ?? key).replace(/\{(\w+)\}/g, (match, name: string) =>
+      Object.hasOwn(params, name) ? String(params[name]) : match,
+    );
+
+    expect(
+      duplicateGroupView(duplicateResponse().items[1]!, "chrome-main", t).reason,
+    ).toBe("Откройте TabHub в Edge-RU, чтобы закрыть эти дубликаты.");
+    expect(duplicateGroupView(group, "chrome-main", t).reason).toBe(
+      "Откройте TabHub в этом браузере, чтобы закрыть эти дубликаты.",
+    );
+    expect(
+      duplicateGroupView(
+        { ...group, browser: "other" },
+        "chrome-main",
+        t,
+      ).reason,
+    ).toBe("Откройте TabHub в другом браузере, чтобы закрыть эти дубликаты.");
+    expect(duplicateGroupView(group, null, t).reason).toBe(
+      "Расширение TabHub не подключено к этой странице.",
+    );
+    expect(
+      duplicateGroupView(
+        { ...group, candidateInstanceIds: [] },
+        "other-installation",
+        t,
+      ).reason,
+    ).toBe(
+      "Все лишние копии закреплены, поэтому TabHub оставит их открытыми.",
+    );
+  });
+
   it("builds a two-step confirmation from safe candidates, not count minus one", () => {
     const confirmation = buildCloseConfirmation(
       duplicateResponse().items,

@@ -132,12 +132,16 @@ export function isAllowedAppMessageSender(
 ): boolean {
   const sourceUrl = sender.url ?? sender.tab?.url;
 
-  if (sourceUrl === undefined) {
+  return isAllowedAppPageUrl(sourceUrl);
+}
+
+export function isAllowedAppPageUrl(value: unknown): value is string {
+  if (typeof value !== "string") {
     return false;
   }
 
   try {
-    const url = new URL(sourceUrl);
+    const url = new URL(value);
     return (
       allowedAppOrigins.has(url.origin) &&
       (url.pathname === "/app" || url.pathname.startsWith("/app/"))

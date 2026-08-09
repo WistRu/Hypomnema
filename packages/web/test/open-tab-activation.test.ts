@@ -36,21 +36,76 @@ function tab(overrides: Partial<TabInstance> = {}): TabInstance {
 
 describe("tabActivationAvailability", () => {
   it("returns the native physical target only for the connected installation", () => {
+    const exactScope = {
+      browser: "chrome" as const,
+      browserSessionId: BROWSER_SESSION_ID,
+      installationId: INSTALLATION_ID,
+    };
     expect(
-      tabActivationAvailability(tab(), {
-        available: true,
-        browser: "chrome",
-        browserSessionId: BROWSER_SESSION_ID,
-        installationId: INSTALLATION_ID,
-      }),
+      tabActivationAvailability(
+        tab(),
+        { available: true, ...exactScope },
+        undefined,
+        [exactScope],
+      ),
     ).toEqual({
       kind: "ready",
+      route: "direct",
       target: {
         browser: "chrome",
         browserSessionId: BROWSER_SESSION_ID,
         installationId: INSTALLATION_ID,
         tabId: 42,
       },
+    });
+  });
+
+  it("uses an exact connected relay when the owning tab is in another browser", () => {
+    expect(
+      tabActivationAvailability(
+        tab({
+          browser: "yandex",
+          browserSessionId: "423e4567-e89b-42d3-a456-426614174000",
+          installationId: "323e4567-e89b-42d3-a456-426614174000",
+        }),
+        {
+          available: true,
+          browser: "chrome",
+          browserSessionId: BROWSER_SESSION_ID,
+          installationId: INSTALLATION_ID,
+        },
+        undefined,
+        [
+          {
+            browser: "yandex",
+            browserSessionId: "423e4567-e89b-42d3-a456-426614174000",
+            installationId: "323e4567-e89b-42d3-a456-426614174000",
+          },
+        ],
+      ),
+    ).toMatchObject({
+      kind: "ready",
+      route: "relay",
+      target: { browser: "yandex", tabId: 42 },
+    });
+  });
+
+  it("keeps English fallback copy and accepts a translator for unavailable messages", () => {
+    expect(tabActivationAvailability(tab(), undefined)).toMatchObject({
+      kind: "checking",
+      message: "Checking connected TabHub extensions.",
+    });
+    expect(
+      tabActivationAvailability(
+        tab(),
+        undefined,
+        (key) => key === "Checking connected TabHub extensions."
+          ? "Проверяем локальное расширение TabHub."
+          : key,
+      ),
+    ).toMatchObject({
+      kind: "checking",
+      message: "Проверяем локальное расширение TabHub.",
     });
   });
 
