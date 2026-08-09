@@ -99,6 +99,7 @@ const russianMessages: Record<string, Message> = {
   Done: "Готово",
   Delete: "Удалить",
   Direction: "Направление",
+  "Dismiss report": "Закрыть отчёт",
   Language: "Язык",
   English: "English",
   "Every physical browser tab, including repeated URLs.":
@@ -111,6 +112,7 @@ const russianMessages: Record<string, Message> = {
   "Field name": "Название поля",
   Graph: "Граф",
   Importance: "Важность",
+  OK: "Ок",
   Incoming: "Входящая",
   "Importance {level} of 3": "Важность: {level} из 3",
   Inbox: "Входящие",

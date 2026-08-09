@@ -2999,6 +2999,14 @@ tbody tr.is-selected {
   cursor: pointer;
 }
 
+.open-tab-action-receipt > .action-receipt-dismiss {
+  margin-left: auto;
+}
+
+.bulk-duplicate-close-receipt > .action-receipt-dismiss {
+  align-self: flex-end;
+}
+
 .physical-tabs-table tbody tr.is-selected {
   background: rgb(56 74 139 / 13%);
 }

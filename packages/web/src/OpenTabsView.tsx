@@ -20,6 +20,12 @@ import {
   isRelayedTabCommandOutcomeUnknown,
   TabCommandRelayClientError,
 } from "./api";
+import { ActionReceipt } from "./ActionReceipt";
+import {
+  closeUndoIsDismissed,
+  dismissCloseUndos,
+  type CloseUndoDismissals,
+} from "./close-undo-dismissals";
 import {
   duplicateGroupCloseSelections,
   duplicateGroupDisplayRows,
@@ -636,6 +642,8 @@ export function OpenTabsView({
     useState(false);
   const [duplicateGroupsCloseAllReceipt, setDuplicateGroupsCloseAllReceipt] =
     useState<DuplicateGroupsCloseAllReceipt | null>(null);
+  const [dismissedCloseUndos, setDismissedCloseUndos] =
+    useState<CloseUndoDismissals>(() => new Set());
   const [actionResult, setActionResult] = useState<TabCommandResult | null>(null);
   const [actionResultScope, setActionResultScope] = useState<PhysicalTabScope | null>(null);
   const [actionError, setActionError] = useState<ActionError | null>(null);
@@ -1685,17 +1693,42 @@ export function OpenTabsView({
     duplicateGroupsCloseAllReceipt?.scopes.filter(
       ({ kind }) => kind === "failed",
     ).length ?? 0;
-  const duplicateGroupsCloseAllUndoKeys = new Set(
+  const duplicateGroupsCloseAllUndos =
     duplicateGroupsCloseAllKnownReceipts.flatMap(({ result, scope }) =>
-      result.undo
-        ? [`${physicalTabScopeKey(scope)}\n${result.undo.undoId}`]
-        : [],
+      result.undo ? [{ scope, undoId: result.undo.undoId }] : [],
+    );
+  const duplicateGroupsCloseAllUndoKeys = new Set(
+    duplicateGroupsCloseAllUndos.map(
+      ({ scope, undoId }) => `${physicalTabScopeKey(scope)}\n${undoId}`,
     ),
   );
+  const dismissDuplicateGroupsCloseAllReceipt = () => {
+    if (duplicateGroupsCloseAllUndos.length > 0) {
+      setDismissedCloseUndos((current) =>
+        dismissCloseUndos(current, duplicateGroupsCloseAllUndos),
+      );
+    }
+    setDuplicateGroupsCloseAllReceipt(null);
+  };
+  const dismissMutationReceipt = () => {
+    if (mutationReceipt?.undo && actionResultScope) {
+      setDismissedCloseUndos((current) =>
+        dismissCloseUndos(current, [
+          { scope: actionResultScope, undoId: mutationReceipt.undo!.undoId },
+        ]),
+      );
+    }
+    setActionResult(null);
+    setActionResultScope(null);
+  };
   const discoverableUndos = browserStates.flatMap((state) =>
     state.pendingUndos
       .filter(
         ({ undoId }) =>
+          !closeUndoIsDismissed(dismissedCloseUndos, {
+            scope: state.scope,
+            undoId,
+          }) &&
           !duplicateGroupsCloseAllUndoKeys.has(
             `${physicalTabScopeKey(state.scope)}\n${undoId}`,
           ) &&
@@ -1705,6 +1738,17 @@ export function OpenTabsView({
       )
       .map((undo) => ({ scope: state.scope, undo })),
   );
+  const dismissDiscoverableUndos = () => {
+    setDismissedCloseUndos((current) =>
+      dismissCloseUndos(
+        current,
+        discoverableUndos.map(({ scope, undo }) => ({
+          scope,
+          undoId: undo.undoId,
+        })),
+      ),
+    );
+  };
   const listIsFetching = duplicatesOnly
     ? duplicateGroupsQuery.isFetching
     : openTabsQuery.isFetching;
@@ -2049,10 +2093,9 @@ export function OpenTabsView({
         ) : null}
 
         {duplicateGroupsCloseAllReceipt ? (
-          <div
-            className="open-tab-action-receipt bulk-duplicate-close-receipt"
-            role="status"
-            tabIndex={-1}
+          <ActionReceipt
+            className="bulk-duplicate-close-receipt"
+            onDismiss={dismissDuplicateGroupsCloseAllReceipt}
           >
             <strong>
               {t(
@@ -2155,10 +2198,10 @@ export function OpenTabsView({
                 </div>
               ))}
             </div>
-          </div>
+          </ActionReceipt>
         ) : null}
         {mutationReceipt ? (
-          <div className="open-tab-action-receipt" role="status" tabIndex={-1}>
+          <ActionReceipt onDismiss={dismissMutationReceipt}>
             <span>
               {t("{kind}: {succeeded} succeeded · {skipped} skipped · {failed} failed", {
                 failed: formatNumber(mutationReceipt.failed.length),
@@ -2184,10 +2227,10 @@ export function OpenTabsView({
                 {t("Reopen closed tabs")}
               </button>
             ) : null}
-          </div>
+          </ActionReceipt>
         ) : null}
         {discoverableUndos.length > 0 ? (
-          <div className="open-tab-action-receipt" role="status">
+          <ActionReceipt onDismiss={dismissDiscoverableUndos}>
             <span>{t("Recent closes available to undo")}</span>
             {discoverableUndos.map(({ scope, undo }) => (
               <button
@@ -2209,7 +2252,7 @@ export function OpenTabsView({
                 })}
               </button>
             ))}
-          </div>
+          </ActionReceipt>
         ) : null}
         {actionResult?.kind === "undo-close" ? (
           <div className="duplicate-action-result" role="status">
