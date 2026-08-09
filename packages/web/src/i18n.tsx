@@ -249,7 +249,34 @@ const russianMessages: Record<string, Message> = {
     const count = numericParam(params, "rawCount");
     return `Закрыть ${params.count} ${russianPlural(count, "вкладку", "вкладки", "вкладок")}?`;
   },
+  "Close {count} extra exact copies?": (params) => {
+    const count = numericParam(params, "rawCount");
+    return `Закрыть ${params.count} ${russianPlural(count, "лишнюю точную копию", "лишние точные копии", "лишних точных копий")}?`;
+  },
+  "Close duplicate copies": "Закрыть дубликаты",
+  "TabHub will keep at least one copy in each of {groups} exact-URL groups and close the extras across {profiles} connected browser profiles.":
+    "TabHub оставит минимум по одной копии в каждой из {groups} групп с одинаковым полным URL и закроет лишние вкладки в {profiles} подключённых профилях браузеров.",
+  "{copies} extra copies in {groups} unavailable groups will not be closed.":
+    "Не будут закрыты лишние копии ({copies}) в недоступных группах ({groups}).",
+  "{copies} pinned copies in {groups} groups will remain open.":
+    "Останутся открытыми закреплённые копии ({copies}) в группах ({groups}).",
+  "{count} ready to close": "Готово к закрытию: {count}",
+  "Browser profiles finish independently; if one disconnects, the others may still complete.":
+    "Профили браузеров выполняют операцию независимо: если один отключится, остальные всё равно могут завершить закрытие.",
+  "Excluded from this cleanup": "Исключено из этой очистки",
+  "{groups} groups · {copies} copies":
+    "Групп: {groups} · копий: {copies}",
+  "Browser profile offline": "Профиль браузера не подключён",
+  "Stale or incomplete tab snapshot": "Устаревший или неполный снимок вкладок",
+  "Live preview expired": "Срок live preview истёк",
+  "Tabs changed during live preview": "Вкладки изменились во время live preview",
+  "Live preview unavailable": "Live preview недоступен",
+  "No browser profile passed the live duplicate check. No tabs can be closed.":
+    "Ни один профиль браузера не прошёл live-проверку дубликатов. Закрытие вкладок недоступно.",
   "Close all duplicates ({count})…": "Закрыть все дубликаты ({count})…",
+  "Close all matching duplicates ({count})…":
+    "Закрыть все найденные дубликаты ({count})…",
+  "Checking every duplicate group…": "Проверяем все группы дубликатов…",
   "Close all duplicates from {group} ({count})…":
     "Закрыть все дубликаты группы «{group}» ({count})…",
   "Close {count} unpinned duplicates…":
@@ -352,6 +379,16 @@ const russianMessages: Record<string, Message> = {
   "{count} browser profiles connected for duplicate closing. Switching to a tab still requires TabHub in its browser.":
     "Подключено профилей браузера для закрытия дублей: {count}. Для перехода к вкладке TabHub пока должен быть открыт в её браузере.",
   "Copied {count} tabs as {format}.": "Скопировано вкладок: {count} ({format}).",
+  "Duplicate cleanup: {succeeded} closed · {skipped} skipped · {failed} failed · {notRun} profiles not completed · {unknown} profiles unknown":
+    "Очистка дубликатов: закрыто {succeeded} · пропущено {skipped} · ошибок {failed} · профилей без завершения {notRun} · профилей с неизвестным результатом {unknown}",
+  "{copies} copies in {groups} groups were unavailable or changed.":
+    "Недоступны или изменились копии ({copies}) в группах ({groups}).",
+  "{browser} · installation {id}: {closed} closed · {skipped} skipped · {failed} failed":
+    "{browser} · установка {id}: закрыто {closed} · пропущено {skipped} · ошибок {failed}",
+  "{browser} · installation {id}: result unknown for {count} tabs. Do not retry automatically.":
+    "{browser} · установка {id}: результат для {count} вкладок неизвестен. Не повторяйте операцию автоматически.",
+  "{browser} · installation {id}: close did not complete for {count} tabs. Refresh and check again.":
+    "{browser} · установка {id}: закрытие {count} вкладок не выполнено. Обновите данные и повторите проверку.",
   "Couldn't load duplicate groups": "Не удалось загрузить группы дубликатов",
   "Couldn't load open tabs": "Не удалось загрузить открытые вкладки",
   Details: "Сведения",
@@ -399,6 +436,14 @@ const russianMessages: Record<string, Message> = {
     "Выбрать лишние копии группы «{group}»: {count}",
   "The duplicate group changed. Refresh the list and try again; no tabs will be closed.":
     "Группа дубликатов изменилась. Обновите список и повторите попытку; вкладки не будут закрыты.",
+  "No connected browser profile can close any matching duplicate group.":
+    "Ни один подключённый профиль браузера не может закрыть найденные дубликаты.",
+  "Every connected duplicate preview changed. Refresh and try again.":
+    "Все проверенные группы дубликатов изменились. Обновите список и повторите попытку.",
+  "The live duplicate preview expired. Run the check again; no tabs were closed.":
+    "Проверка дубликатов устарела. Запустите её снова; вкладки не были закрыты.",
+  "TabHub returned an incomplete close result. The outcome is unknown.":
+    "TabHub получил неполный результат закрытия. Итог операции неизвестен.",
   "This duplicate group changed or is not controllable. Refresh and try again.":
     "Эта группа дубликатов изменилась или недоступна для управления. Обновите список и повторите попытку.",
   "This group has no closable extra copies.":
@@ -541,6 +586,12 @@ const russianMessages: Record<string, Message> = {
     "TabHub не удалось загрузить группы точных дубликатов",
   "TabHub returned an unreadable duplicate-group list.":
     "TabHub вернул нечитаемый список групп дубликатов.",
+  "TabHub could not load every exact duplicate group":
+    "TabHub не удалось загрузить все группы точных дубликатов",
+  "TabHub returned an unreadable bulk duplicate-group list.":
+    "TabHub вернул нечитаемый полный список групп дубликатов.",
+  "TabHub returned an unexpected bulk duplicate-group list.":
+    "TabHub вернул неожиданный полный список групп дубликатов.",
   "TabHub could not load saved workspaces":
     "TabHub не удалось загрузить сохранённые пространства",
   "TabHub returned unreadable saved workspaces.":

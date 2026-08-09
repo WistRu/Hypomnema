@@ -937,6 +937,15 @@ export type DuplicateGroupListQuery = z.infer<
   typeof duplicateGroupListQuerySchema
 >;
 
+export const duplicateGroupBulkQuerySchema = duplicateGroupListQuerySchema.pick({
+  browser: true,
+  q: true,
+});
+
+export type DuplicateGroupBulkQuery = z.infer<
+  typeof duplicateGroupBulkQuerySchema
+>;
+
 export const duplicateGroupSchema = z.object({
   installationId: z.string().min(1),
   browser: browserIdentifierSchema,
@@ -963,6 +972,16 @@ export const duplicateGroupListResponseSchema = z.object({
 
 export type DuplicateGroupListResponse = z.infer<
   typeof duplicateGroupListResponseSchema
+>;
+
+export const duplicateGroupBulkResponseSchema =
+  duplicateGroupListResponseSchema.omit({
+    page: true,
+    pageSize: true,
+  });
+
+export type DuplicateGroupBulkResponse = z.infer<
+  typeof duplicateGroupBulkResponseSchema
 >;
 
 export const healthResponseSchema = z.object({

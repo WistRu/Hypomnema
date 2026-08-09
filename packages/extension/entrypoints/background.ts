@@ -31,9 +31,10 @@ import {
   type CaptureBatchResult,
 } from "../lib/content-capture";
 import {
+  directAppTabCommandContext,
   isAllowedAppMessageSender,
-  isAllowedAppPageUrl,
   isExtensionRequest,
+  protectedAppPageTabIds,
   type AppExtensionResponse,
   type BridgeRequestType,
   type CaptureSummary,
@@ -327,12 +328,7 @@ async function executeRelayedTabCommand(
   if (currentScope === undefined) {
     throw new Error(IDENTITY_REQUIRED_ERROR);
   }
-  const protectedTabIds = tabs.flatMap((tab) =>
-    tab.id !== undefined &&
-    (isAllowedAppPageUrl(tab.url) || isAllowedAppPageUrl(tab.pendingUrl))
-      ? [tab.id]
-      : [],
-  );
+  const protectedTabIds = protectedAppPageTabIds(tabs);
   const result = await physicalTabCommandExecutor.execute(
     {
       currentScope,
@@ -731,11 +727,12 @@ async function handleAppRequest(
     }
     case "tabhub:app-tab-command": {
       return tabCommandSequencer.run(async () => {
-        const [browserIdentifier, installationId, browserSessionId] =
+        const [browserIdentifier, installationId, browserSessionId, tabs] =
           await Promise.all([
             getBrowserIdentifier(),
             getOrCreateInstallationId(),
             getOrCreateBrowserSessionId(),
+            browser.tabs.query({}),
           ]);
         if (browserIdentifier === undefined) {
           throw new Error(IDENTITY_REQUIRED_ERROR);
@@ -754,15 +751,18 @@ async function handleAppRequest(
         }
 
         const result = await physicalTabCommandExecutor.execute(
-          {
-            controlTabId: controlTabId as number,
-            controlWindowId: controlWindowId as number,
-            currentScope: {
+          directAppTabCommandContext(
+            {
               browser: browserIdentifier,
               browserSessionId,
               installationId,
             },
-          },
+            {
+              id: controlTabId as number,
+              windowId: controlWindowId as number,
+            },
+            tabs,
+          ),
           request,
         );
 
@@ -799,7 +799,7 @@ async function handleAppRequest(
   }
 }
 
-interface MessageSenderLike {
+export interface MessageSenderLike {
   tab?: {
     id?: number | undefined;
     url?: string | undefined;
@@ -808,7 +808,7 @@ interface MessageSenderLike {
   url?: string | undefined;
 }
 
-async function handleMessage(
+export async function handleMessage(
   message: unknown,
   sender: MessageSenderLike,
 ): Promise<ExtensionResponse | AppExtensionResponse | void> {

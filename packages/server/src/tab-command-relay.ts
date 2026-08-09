@@ -18,6 +18,7 @@ import { isExtensionOrigin } from "./request-security.js";
 
 const DEFAULT_INTERACTIVE_COMMAND_TIMEOUT_MS = 5_000;
 const DEFAULT_MUTATION_COMMAND_TIMEOUT_MS = 2 * 60_000;
+const DEFAULT_CLOSE_COMMAND_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_WORKSPACE_COMMAND_TIMEOUT_MS = 10 * 60_000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15_000;
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 45_000;
@@ -83,6 +84,9 @@ function defaultCommandTimeoutMs(
   const kind: string = command.kind;
   if (kind === "activate-tab" || kind === "get-browser-state") {
     return DEFAULT_INTERACTIVE_COMMAND_TIMEOUT_MS;
+  }
+  if (kind === "close" || kind === "close-preview") {
+    return DEFAULT_CLOSE_COMMAND_TIMEOUT_MS;
   }
   return kind === "open-workspace"
     ? DEFAULT_WORKSPACE_COMMAND_TIMEOUT_MS

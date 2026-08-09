@@ -4,6 +4,7 @@ import {
   isAllowedAppMessageSender,
   isAllowedAppPageUrl,
   isExtensionRequest,
+  protectedAppPageTabIds,
 } from "./messages";
 
 describe("isExtensionRequest", () => {
@@ -183,5 +184,18 @@ describe("isAllowedAppPageUrl", () => {
     );
     expect(isAllowedAppPageUrl("https://example.com/app/")).toBe(false);
     expect(isAllowedAppPageUrl(undefined)).toBe(false);
+  });
+});
+
+describe("protectedAppPageTabIds", () => {
+  it("collects every TabHub page from current and pending URLs", () => {
+    expect(
+      protectedAppPageTabIds([
+        { id: 11, url: "http://127.0.0.1:7717/app/" },
+        { id: 12, pendingUrl: "http://localhost:7717/app/?view=open" },
+        { id: 13, url: "https://example.com/article" },
+        { pendingUrl: "http://localhost:7717/app/" },
+      ]),
+    ).toEqual([11, 12]);
   });
 });

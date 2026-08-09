@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 
 import type {
   DuplicateGroup,
+  DuplicateGroupBulkResponse,
   DuplicateGroupListResponse,
   IngestSnapshot,
   TabInstance,
@@ -22,16 +23,26 @@ export interface ListTabInstancesInput extends FilterTabInstancesInput {
   pageSize: number;
 }
 
+export interface FilterDuplicateGroupsInput {
+  browser: string | undefined;
+  q?: string | undefined;
+}
+
+export interface ListDuplicateGroupsInput extends FilterDuplicateGroupsInput {
+  page: number;
+  pageSize: number;
+}
+
 export interface TabInstanceCatalog {
   syncSnapshot(snapshot: IngestSnapshot, now: string): { closed: number };
   listInstances(input: ListTabInstancesInput): TabInstanceListResponse;
   listAllInstances(input: FilterTabInstancesInput): TabInstanceBulkResponse;
-  listDuplicateGroups(input: {
-    browser: string | undefined;
-    q?: string | undefined;
-    page: number;
-    pageSize: number;
-  }): DuplicateGroupListResponse;
+  listDuplicateGroups(
+    input: ListDuplicateGroupsInput,
+  ): DuplicateGroupListResponse;
+  listAllDuplicateGroups(
+    input: FilterDuplicateGroupsInput,
+  ): DuplicateGroupBulkResponse;
 }
 
 interface InstanceKeyRow {
@@ -416,6 +427,138 @@ export function createTabInstanceCatalog(
     return tagPathsByTab;
   };
 
+  const readDuplicateGroups = (
+    input: FilterDuplicateGroupsInput,
+    pagination?: { page: number; pageSize: number },
+  ): DuplicateGroupBulkResponse => {
+    const readSnapshot = connection.transaction(() => {
+      const predicates: string[] = [];
+      const parameters: string[] = [];
+      if (input.browser !== undefined) {
+        predicates.push("tabs.browser = ?");
+        parameters.push(input.browser);
+      }
+      const whereClause =
+        predicates.length === 0 ? "" : `WHERE ${predicates.join(" AND ")}`;
+      let searchHavingClause = "";
+      if (input.q !== undefined) {
+        const escaped = input.q
+          .replaceAll("\\", "\\\\")
+          .replaceAll("%", "\\%")
+          .replaceAll("_", "\\_");
+        searchHavingClause = `
+          AND SUM(
+            CASE WHEN
+              tab_instances.url LIKE ? ESCAPE '\\'
+              OR COALESCE(tab_instances.title, '') LIKE ? ESCAPE '\\'
+            THEN 1 ELSE 0 END
+          ) > 0
+        `;
+        parameters.push(`%${escaped}%`, `%${escaped}%`);
+      }
+      const groupedQuery = `
+      WITH grouped AS (
+        SELECT
+          tab_instances.installation_id,
+          tabs.browser,
+          tab_instances.url,
+          COUNT(*) AS count,
+          SUM(
+            CASE WHEN tab_instances.pinned = 1
+              THEN 1 ELSE 0 END
+          ) AS protected_count
+        FROM tab_instances
+        JOIN tabs ON tabs.id = tab_instances.tab_id
+        ${whereClause}
+        GROUP BY
+          tab_instances.installation_id,
+          tabs.browser,
+          tab_instances.url
+        HAVING COUNT(*) > 1
+        ${searchHavingClause}
+      )`;
+      const totals = connection
+        .prepare(`
+        ${groupedQuery}
+        SELECT
+          COUNT(*) AS total_groups,
+          COALESCE(SUM(count), 0) AS total_tabs_in_groups,
+          COALESCE(SUM(count - 1), 0) AS total_duplicate_copies,
+          COALESCE(SUM(
+            CASE WHEN protected_count > 0
+              THEN count - protected_count
+              ELSE count - 1 END
+          ), 0) AS total_close_candidates,
+          COALESCE(SUM(protected_count), 0) AS total_protected
+        FROM grouped
+        `)
+        .get(...parameters) as DuplicateTotalsRow;
+      const paginationClause =
+        pagination === undefined ? "" : "LIMIT ? OFFSET ?";
+      const groupParameters: Array<string | number> = [...parameters];
+      if (pagination !== undefined) {
+        groupParameters.push(
+          pagination.pageSize,
+          (pagination.page - 1) * pagination.pageSize,
+        );
+      }
+      const groupRows = connection
+        .prepare(`
+        ${groupedQuery}
+        SELECT *
+        FROM grouped
+        ORDER BY count DESC, browser COLLATE NOCASE, installation_id, url
+        ${paginationClause}
+        `)
+        .all(...groupParameters) as DuplicateGroupRow[];
+      const rowsByGroup = groupRows.map((group) =>
+        selectDuplicateGroupInstances.all(
+          group.installation_id,
+          group.browser,
+          group.url,
+        ) as TabInstanceRow[],
+      );
+      const tagPathsByTab = loadTagPaths(rowsByGroup.flat());
+      const items: DuplicateGroup[] = groupRows.map((group, groupIndex) => {
+        const instances = rowsByGroup[groupIndex]!.map((row) =>
+          mapInstanceRow(row, tagPathsByTab.get(row.canonical_tab_id) ?? []),
+        );
+        const protectedInstances = instances.filter(
+          (instance) => instance.pinned,
+        );
+        const keeper = protectedInstances[0] ?? instances[0]!;
+        const candidates =
+          protectedInstances.length > 0
+            ? instances.filter((instance) => !instance.pinned)
+            : instances.slice(1);
+
+        return {
+          installationId: group.installation_id,
+          browser: group.browser,
+          url: group.url,
+          count: group.count,
+          keeperInstanceId: keeper.instanceId,
+          candidateInstanceIds: candidates.map(({ instanceId }) => instanceId),
+          protectedInstanceIds: protectedInstances.map(
+            ({ instanceId }) => instanceId,
+          ),
+          instances,
+        };
+      });
+
+      return {
+        items,
+        totalGroups: totals.total_groups,
+        totalTabsInGroups: totals.total_tabs_in_groups,
+        totalDuplicateCopies: totals.total_duplicate_copies,
+        totalCloseCandidates: totals.total_close_candidates,
+        totalProtected: totals.total_protected,
+      };
+    });
+
+    return readSnapshot();
+  };
+
   return {
     syncSnapshot(snapshot, now) {
       const installationId = installationIdFor(snapshot);
@@ -558,126 +701,18 @@ export function createTabInstanceCatalog(
     },
 
     listDuplicateGroups(input) {
-      const readSnapshot = connection.transaction(() => {
-        const predicates: string[] = [];
-        const parameters: string[] = [];
-        if (input.browser !== undefined) {
-          predicates.push("tabs.browser = ?");
-          parameters.push(input.browser);
-        }
-        const whereClause =
-          predicates.length === 0 ? "" : `WHERE ${predicates.join(" AND ")}`;
-        let searchHavingClause = "";
-        if (input.q !== undefined) {
-          const escaped = input.q
-            .replaceAll("\\", "\\\\")
-            .replaceAll("%", "\\%")
-            .replaceAll("_", "\\_");
-          searchHavingClause = `
-            AND SUM(
-              CASE WHEN
-                tab_instances.url LIKE ? ESCAPE '\\'
-                OR COALESCE(tab_instances.title, '') LIKE ? ESCAPE '\\'
-              THEN 1 ELSE 0 END
-            ) > 0
-          `;
-          parameters.push(`%${escaped}%`, `%${escaped}%`);
-        }
-        const groupedQuery = `
-        WITH grouped AS (
-          SELECT
-            tab_instances.installation_id,
-            tabs.browser,
-            tab_instances.url,
-            COUNT(*) AS count,
-            SUM(
-              CASE WHEN tab_instances.pinned = 1
-                THEN 1 ELSE 0 END
-            ) AS protected_count
-          FROM tab_instances
-          JOIN tabs ON tabs.id = tab_instances.tab_id
-          ${whereClause}
-          GROUP BY
-            tab_instances.installation_id,
-            tabs.browser,
-            tab_instances.url
-          HAVING COUNT(*) > 1
-          ${searchHavingClause}
-        )`;
-        const totals = connection
-          .prepare(`
-          ${groupedQuery}
-          SELECT
-            COUNT(*) AS total_groups,
-            COALESCE(SUM(count), 0) AS total_tabs_in_groups,
-            COALESCE(SUM(count - 1), 0) AS total_duplicate_copies,
-            COALESCE(SUM(
-              CASE WHEN protected_count > 0
-                THEN count - protected_count
-                ELSE count - 1 END
-            ), 0) AS total_close_candidates,
-            COALESCE(SUM(protected_count), 0) AS total_protected
-          FROM grouped
-          `)
-          .get(...parameters) as DuplicateTotalsRow;
-        const offset = (input.page - 1) * input.pageSize;
-        const groupRows = connection
-          .prepare(`
-          ${groupedQuery}
-          SELECT *
-          FROM grouped
-          ORDER BY count DESC, browser COLLATE NOCASE, installation_id, url
-          LIMIT ? OFFSET ?
-          `)
-          .all(...parameters, input.pageSize, offset) as DuplicateGroupRow[];
-        const rowsByGroup = groupRows.map((group) =>
-          selectDuplicateGroupInstances.all(
-            group.installation_id,
-            group.browser,
-            group.url,
-          ) as TabInstanceRow[],
-        );
-        const tagPathsByTab = loadTagPaths(rowsByGroup.flat());
-        const items: DuplicateGroup[] = groupRows.map((group, groupIndex) => {
-          const instances = rowsByGroup[groupIndex]!.map((row) =>
-            mapInstanceRow(row, tagPathsByTab.get(row.canonical_tab_id) ?? []),
-          );
-          const protectedInstances = instances.filter(
-            (instance) => instance.pinned,
-          );
-          const keeper = protectedInstances[0] ?? instances[0]!;
-          const candidates =
-            protectedInstances.length > 0
-              ? instances.filter((instance) => !instance.pinned)
-              : instances.slice(1);
-
-          return {
-            installationId: group.installation_id,
-            browser: group.browser,
-            url: group.url,
-            count: group.count,
-            keeperInstanceId: keeper.instanceId,
-            candidateInstanceIds: candidates.map(({ instanceId }) => instanceId),
-            protectedInstanceIds: protectedInstances.map(
-              ({ instanceId }) => instanceId,
-            ),
-            instances,
-          };
-        });
-
-        return {
-          items,
-          totalGroups: totals.total_groups,
-          totalTabsInGroups: totals.total_tabs_in_groups,
-          totalDuplicateCopies: totals.total_duplicate_copies,
-          totalCloseCandidates: totals.total_close_candidates,
-          totalProtected: totals.total_protected,
+      return {
+        ...readDuplicateGroups(input, {
           page: input.page,
           pageSize: input.pageSize,
-        };
-      });
+        }),
+        page: input.page,
+        pageSize: input.pageSize,
+      };
+    },
 
-      return readSnapshot();
+    listAllDuplicateGroups(input) {
+      return readDuplicateGroups(input);
     },
   };
 }

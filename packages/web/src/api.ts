@@ -1,6 +1,7 @@
 import {
   assignTagsResponseSchema,
   deleteResponseSchema,
+  duplicateGroupBulkResponseSchema,
   duplicateGroupListResponseSchema,
   graphResponseSchema,
   linkListResponseSchema,
@@ -347,17 +348,28 @@ export async function fetchAllDuplicateGroups(
   filters: Omit<DuplicateGroupListFilters, "page">,
   signal?: AbortSignal,
 ) {
-  const items = [];
-  let page = 1;
-  let total = 0;
-  do {
-    const response = await fetchDuplicateGroups({ ...filters, page }, signal);
-    items.push(...response.items);
-    total = response.totalGroups;
-    if (response.items.length === 0) break;
-    page += 1;
-  } while (items.length < total);
-  return items;
+  const searchParams = new URLSearchParams();
+  if (filters.browser !== "all") {
+    searchParams.set("browser", filters.browser);
+  }
+  if (filters.q) {
+    searchParams.set("q", filters.q);
+  }
+  const query = searchParams.toString();
+  const payload = await requestJson(
+    `/api/duplicate-groups/bulk${query ? `?${query}` : ""}`,
+    {
+      headers: { Accept: "application/json" },
+      signal: signal ?? null,
+    },
+    "TabHub could not load every exact duplicate group",
+    "TabHub returned an unreadable bulk duplicate-group list.",
+  );
+  const parsed = duplicateGroupBulkResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected bulk duplicate-group list.");
+  }
+  return parsed.data.items;
 }
 
 export async function fetchOpenTabs(

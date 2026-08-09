@@ -564,6 +564,33 @@ describe("local extension bridge", () => {
     expect(target.listeners.size).toBe(0);
   });
 
+  it("keeps a large close preview pending beyond the ordinary command timeout", async () => {
+    vi.useFakeTimers();
+    const target = new FakeBridgeWindow();
+    const bridge = createExtensionBridge({
+      target,
+      origin: "http://127.0.0.1:7717",
+      requestId: () => "close-timeout",
+      timeouts: { close: 50, command: 25 },
+    });
+    const pending = bridge.command({
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      command: {
+        kind: "close-preview",
+        targets: [{ expectedUrl: "https://example.com/exact", tabId: 41 }],
+      },
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+    });
+    const rejection = expect(pending).rejects.toThrow(/outcome is unknown/i);
+
+    await vi.advanceTimersByTimeAsync(25);
+    expect(target.listeners.size).toBe(1);
+    await vi.advanceTimersByTimeAsync(25);
+    await rejection;
+    expect(target.listeners.size).toBe(0);
+  });
+
   it("rejects a close preview whose keeper is the target or a different URL", async () => {
     const target = new FakeBridgeWindow();
     const bridge = createExtensionBridge({

@@ -12,11 +12,13 @@ import { type MouseEvent, useCallback, useEffect, useMemo, useRef, useState } fr
 import {
   createWorkspace,
   executeRelayedTabCommand,
+  fetchAllDuplicateGroups,
   fetchAllOpenTabs,
   fetchConnectedTabCommandScopes,
   fetchDuplicateGroups,
   fetchOpenTabs,
   isRelayedTabCommandOutcomeUnknown,
+  TabCommandRelayClientError,
 } from "./api";
 import {
   duplicateGroupCloseSelections,
@@ -25,6 +27,18 @@ import {
   type DuplicateGroupDisplayRole,
 } from "./duplicate-group-display";
 import { duplicateGroupClosePlan } from "./duplicate-group-close";
+import {
+  checkDuplicateGroupsCloseAllPreview,
+  duplicateGroupsCloseAllPlan,
+  duplicateGroupsCloseAllResultMatchesPreview,
+  type DuplicateGroupCloseAllBatch,
+  type DuplicateGroupsCloseAllPlan,
+} from "./duplicate-groups-close-all";
+import {
+  duplicateGroupsCloseAllRejectedOutcome,
+  DuplicateGroupsCloseAllUnknownOutcomeError,
+} from "./duplicate-groups-close-all-outcome";
+import { DuplicateGroupsCloseAllDialog } from "./DuplicateGroupsCloseAllDialog";
 import {
   createWindowExtensionBridge,
   type BrowserWindowSummary,
@@ -91,9 +105,82 @@ interface ScopedBrowserState {
   windows: BrowserWindowSummary[];
 }
 
+interface DuplicateGroupsCloseAllPreviewBatch {
+  batch: DuplicateGroupCloseAllBatch;
+  preview: ClosePreviewResult;
+}
+
+interface PendingDuplicateGroupsCloseAll {
+  blockedCandidateCount: number;
+  blockedGroupCount: number;
+  expiresAt: number;
+  excluded: DuplicateGroupsCloseAllExcludedProfile[];
+  plan: DuplicateGroupsCloseAllPlan;
+  previews: DuplicateGroupsCloseAllPreviewBatch[];
+}
+
+type DuplicateGroupsCloseAllExclusionReason =
+  | "changed"
+  | "expired"
+  | "invalid"
+  | "offline"
+  | "unavailable";
+
+interface DuplicateGroupsCloseAllExcludedProfile {
+  browser: string;
+  browserSessionId: string | null;
+  candidateCount: number;
+  groupCount: number;
+  installationId: string;
+  reason: DuplicateGroupsCloseAllExclusionReason;
+}
+
+type DuplicateGroupsCloseAllScopeReceipt =
+  | {
+      kind: "known";
+      result: TabMutationResult;
+      scope: PhysicalTabScope;
+    }
+  | {
+      cause: unknown;
+      kind: "failed";
+      requested: number;
+      scope: PhysicalTabScope;
+    }
+  | {
+      cause: unknown;
+      kind: "unknown";
+      requested: number;
+      scope: PhysicalTabScope;
+    };
+
+interface DuplicateGroupsCloseAllReceipt {
+  blockedCandidateCount: number;
+  blockedGroupCount: number;
+  scopes: DuplicateGroupsCloseAllScopeReceipt[];
+}
+
 function browserLabel(browser: string, t: Translate): string {
   const label = BROWSER_LABELS[browser] ?? browser;
   return label === "Other" ? t("Other") : label;
+}
+
+function duplicateGroupsCloseAllExclusionLabel(
+  reason: DuplicateGroupsCloseAllExclusionReason,
+  t: Translate,
+): string {
+  switch (reason) {
+    case "offline":
+      return t("Browser profile offline");
+    case "invalid":
+      return t("Stale or incomplete tab snapshot");
+    case "expired":
+      return t("Live preview expired");
+    case "changed":
+      return t("Tabs changed during live preview");
+    case "unavailable":
+      return t("Live preview unavailable");
+  }
 }
 
 function hostname(url: string): string {
@@ -541,6 +628,14 @@ export function OpenTabsView({
       }
     | null
   >(null);
+  const [pendingDuplicateGroupsCloseAll, setPendingDuplicateGroupsCloseAll] =
+    useState<PendingDuplicateGroupsCloseAll | null>(null);
+  const [duplicateGroupsCloseAllBusy, setDuplicateGroupsCloseAllBusy] =
+    useState(false);
+  const [duplicateGroupsCloseAllExpired, setDuplicateGroupsCloseAllExpired] =
+    useState(false);
+  const [duplicateGroupsCloseAllReceipt, setDuplicateGroupsCloseAllReceipt] =
+    useState<DuplicateGroupsCloseAllReceipt | null>(null);
   const [actionResult, setActionResult] = useState<TabCommandResult | null>(null);
   const [actionResultScope, setActionResultScope] = useState<PhysicalTabScope | null>(null);
   const [actionError, setActionError] = useState<ActionError | null>(null);
@@ -555,6 +650,27 @@ export function OpenTabsView({
     });
   }, [selection]);
   const dismissOperationDialog = useCallback(() => setPendingDialog(null), []);
+  const dismissDuplicateGroupsCloseAll = useCallback(
+    () => setPendingDuplicateGroupsCloseAll(null),
+    [],
+  );
+  useEffect(() => {
+    if (pendingDuplicateGroupsCloseAll === null) {
+      setDuplicateGroupsCloseAllExpired(false);
+      return;
+    }
+    const delay = pendingDuplicateGroupsCloseAll.expiresAt - Date.now();
+    if (delay <= 0) {
+      setDuplicateGroupsCloseAllExpired(true);
+      return;
+    }
+    setDuplicateGroupsCloseAllExpired(false);
+    const timer = window.setTimeout(
+      () => setDuplicateGroupsCloseAllExpired(true),
+      delay,
+    );
+    return () => window.clearTimeout(timer);
+  }, [pendingDuplicateGroupsCloseAll]);
   const queryClient = useQueryClient();
   const bridge = useMemo(() => createWindowExtensionBridge(), []);
   const q = useDebouncedValue(search, 300).trim();
@@ -743,6 +859,44 @@ export function OpenTabsView({
       ),
     [activationProbe, connectedCommandScopes],
   );
+  const executeScopedCommand = async (
+    command: TabCommand,
+    scope: PhysicalTabScope,
+  ): Promise<TabCommandResult> => {
+    if (sameTabCommandScope(currentScope, scope)) {
+      const response = await bridge.command({ ...scope, command });
+      if (
+        response.browser !== scope.browser ||
+        response.browserSessionId !== scope.browserSessionId ||
+        response.installationId !== scope.installationId
+      ) {
+        throw new ExtensionBridgeError(
+          "The extension browser session changed during the action.",
+        );
+      }
+      return response.result;
+    }
+
+    const addressedCommand = relayCommand(command);
+    if (addressedCommand === null) {
+      throw new ExtensionBridgeError(
+        "This action is unavailable through the connected browser relay.",
+      );
+    }
+    const relayScope = tabCommandScopeSchema.parse(scope);
+    const result = relayedTabCommandResult(
+      await executeRelayedTabCommand({
+        ...relayScope,
+        command: addressedCommand,
+      }),
+    );
+    if (result.kind !== command.kind) {
+      throw new ExtensionBridgeError(
+        "The extension returned a result for a different command.",
+      );
+    }
+    return result;
+  };
   const commandMutation = useMutation({
     mutationFn: async ({
       command,
@@ -750,41 +904,7 @@ export function OpenTabsView({
     }: {
       command: TabCommand;
       scope: PhysicalTabScope;
-    }) => {
-      if (sameTabCommandScope(currentScope, scope)) {
-        const response = await bridge.command({ ...scope, command });
-        if (
-          response.browser !== scope.browser ||
-          response.browserSessionId !== scope.browserSessionId ||
-          response.installationId !== scope.installationId
-        ) {
-          throw new ExtensionBridgeError(
-            "The extension browser session changed during the action.",
-          );
-        }
-        return response.result;
-      }
-
-      const addressedCommand = relayCommand(command);
-      if (addressedCommand === null) {
-        throw new ExtensionBridgeError(
-          "This action is unavailable through the connected browser relay.",
-        );
-      }
-      const relayScope = tabCommandScopeSchema.parse(scope);
-      const result = relayedTabCommandResult(
-        await executeRelayedTabCommand({
-          ...relayScope,
-          command: addressedCommand,
-        }),
-      );
-      if (result.kind !== command.kind) {
-        throw new ExtensionBridgeError(
-          "The extension returned a result for a different command.",
-        );
-      }
-      return result;
-    },
+    }) => executeScopedCommand(command, scope),
     onMutate: () => {
       setActionError(null);
       setActionFeedback(null);
@@ -1200,6 +1320,33 @@ export function OpenTabsView({
       .mutateAsync({ command, scope })
       .catch(() => undefined);
   };
+  const undoDuplicateGroupsCloseAllReceipt = (
+    scope: PhysicalTabScope,
+    undoId: string,
+  ) => {
+    void commandMutation
+      .mutateAsync({ command: { kind: "undo-close", undoId }, scope })
+      .then(() =>
+        setDuplicateGroupsCloseAllReceipt((current) =>
+          current === null
+            ? null
+            : {
+                ...current,
+                scopes: current.scopes.map((receipt) =>
+                  receipt.kind === "known" &&
+                  sameTabCommandScope(receipt.scope, scope) &&
+                  receipt.result.undo?.undoId === undoId
+                    ? {
+                        ...receipt,
+                        result: { ...receipt.result, undo: null },
+                      }
+                    : receipt,
+                ),
+              },
+        ),
+      )
+      .catch(() => undefined);
+  };
   const previewCloseTargets = async (
     targets: ClosePreviewTarget[],
     expectedCandidateCount?: number,
@@ -1250,6 +1397,229 @@ export function OpenTabsView({
       action.scope,
     );
   };
+  const previewAllDuplicateGroups = async () => {
+    if (duplicateGroupsCloseAllBusy) return;
+    setDuplicateGroupsCloseAllBusy(true);
+    setActionError(null);
+    setActionFeedback(null);
+    setActionResult(null);
+    setDuplicateGroupsCloseAllReceipt(null);
+    try {
+      const serverGroups = await fetchAllDuplicateGroups({
+        browser,
+        ...(q ? { q } : {}),
+      });
+      const groups = serverGroups.map((group) => {
+        const keeperOverride = duplicateGroupKeeperOverrides.get(
+          duplicateGroupIdentity(group),
+        );
+        return keeperOverride === undefined
+          ? group
+          : (duplicateGroupWithKeeper(group, keeperOverride) ?? group);
+      });
+      const plan = duplicateGroupsCloseAllPlan(
+        groups,
+        availableCommandScopes,
+      );
+      const excluded: DuplicateGroupsCloseAllExcludedProfile[] = [];
+      const addExcluded = (
+        entry: DuplicateGroupsCloseAllExcludedProfile,
+      ) => {
+        const existing = excluded.find(
+          (candidate) =>
+            candidate.browser === entry.browser &&
+            candidate.browserSessionId === entry.browserSessionId &&
+            candidate.installationId === entry.installationId &&
+            candidate.reason === entry.reason,
+        );
+        if (existing === undefined) {
+          excluded.push(entry);
+        } else {
+          existing.candidateCount += entry.candidateCount;
+          existing.groupCount += entry.groupCount;
+        }
+      };
+      for (const blocked of plan.blocked) {
+        addExcluded({
+          browser: blocked.group.browser,
+          browserSessionId:
+            blocked.scope?.browserSessionId ??
+            blocked.group.instances[0]?.browserSessionId ??
+            null,
+          candidateCount: blocked.candidateCount,
+          groupCount: 1,
+          installationId: blocked.group.installationId,
+          reason: blocked.reason,
+        });
+      }
+
+      const settled = await Promise.allSettled(
+        plan.batches.map(async (batch) => {
+          const result = await executeScopedCommand(
+            { kind: "close-preview", targets: batch.targets },
+            batch.scope,
+          );
+          if (result.kind !== "close-preview") {
+            throw new ExtensionBridgeError(
+              "The extension returned a result for a different command.",
+            );
+          }
+          return { batch, preview: result };
+        }),
+      );
+
+      const previews: DuplicateGroupsCloseAllPreviewBatch[] = [];
+      let blockedCandidateCount = plan.counts.blockedCandidates;
+      let blockedGroupCount = plan.counts.blockedGroups;
+      settled.forEach((outcome, index) => {
+        const batch = plan.batches[index]!;
+        if (outcome.status === "rejected") {
+          blockedCandidateCount += batch.targets.length;
+          blockedGroupCount += batch.groups.length;
+          addExcluded({
+            ...batch.scope,
+            candidateCount: batch.targets.length,
+            groupCount: batch.groups.length,
+            reason:
+              outcome.reason instanceof TabCommandRelayClientError &&
+              outcome.reason.code === "SCOPE_OFFLINE"
+                ? "offline"
+                : "unavailable",
+          });
+          return;
+        }
+        const check = checkDuplicateGroupsCloseAllPreview(
+          batch,
+          outcome.value.preview,
+        );
+        if (check.kind === "blocked") {
+          blockedCandidateCount += batch.targets.length;
+          blockedGroupCount += batch.groups.length;
+          addExcluded({
+            ...batch.scope,
+            candidateCount: batch.targets.length,
+            groupCount: batch.groups.length,
+            reason: check.reason === "expired" ? "expired" : "changed",
+          });
+          return;
+        }
+        previews.push(outcome.value);
+      });
+
+      setPendingDuplicateGroupsCloseAll({
+        blockedCandidateCount,
+        blockedGroupCount,
+        expiresAt:
+          previews.length === 0
+            ? Date.now()
+            : Math.min(...previews.map(({ preview }) => preview.expiresAt)),
+        excluded,
+        plan,
+        previews,
+      });
+    } catch (error) {
+      setActionError({ cause: error });
+      await Promise.all([
+        duplicateGroupsQuery.refetch(),
+        relayScopesQuery.refetch(),
+        probeQuery.refetch(),
+      ]);
+    } finally {
+      setDuplicateGroupsCloseAllBusy(false);
+    }
+  };
+  const confirmAllDuplicateGroups = async () => {
+    const pending = pendingDuplicateGroupsCloseAll;
+    if (pending === null || duplicateGroupsCloseAllBusy) return;
+    if (pending.expiresAt <= Date.now()) {
+      setDuplicateGroupsCloseAllExpired(true);
+      return;
+    }
+
+    setDuplicateGroupsCloseAllBusy(true);
+    setActionError(null);
+    try {
+      const settled = await Promise.allSettled(
+        pending.previews.map(async ({ preview, batch }) => {
+          const result = await executeScopedCommand(
+            { confirmed: true, kind: "close", previewId: preview.previewId },
+            batch.scope,
+          );
+          if (
+            result.kind !== "close" ||
+            !duplicateGroupsCloseAllResultMatchesPreview(preview, result)
+          ) {
+            throw new DuplicateGroupsCloseAllUnknownOutcomeError(
+              "TabHub returned an incomplete close result. The outcome is unknown.",
+            );
+          }
+          return result;
+        }),
+      );
+      const scopes: DuplicateGroupsCloseAllScopeReceipt[] = settled.map(
+        (outcome, index) => {
+          const batch = pending.previews[index]!.batch;
+          if (outcome.status === "fulfilled") {
+            return { kind: "known", result: outcome.value, scope: batch.scope };
+          }
+          const failure = {
+            cause: outcome.reason,
+            requested: batch.targets.length,
+            scope: batch.scope,
+          };
+          return duplicateGroupsCloseAllRejectedOutcome(outcome.reason) ===
+            "unknown"
+            ? { ...failure, kind: "unknown" }
+            : { ...failure, kind: "failed" };
+        },
+      );
+      setSelection((current) =>
+        scopes.reduce(
+          (next, receipt) =>
+            receipt.kind === "known"
+              ? removeSucceededPhysicalTabs(
+                  next,
+                  receipt.scope,
+                  receipt.result.succeededTabIds,
+                )
+              : next,
+          current,
+        ),
+      );
+      setDuplicateGroupsCloseAllReceipt({
+        blockedCandidateCount: pending.blockedCandidateCount,
+        blockedGroupCount: pending.blockedGroupCount,
+        scopes,
+      });
+      setPendingDuplicateGroupsCloseAll(null);
+    } finally {
+      try {
+        await Promise.all([
+          duplicateGroupsQuery.refetch(),
+          openTabsQuery.refetch(),
+          physicalCountQuery.refetch(),
+          probeQuery.refetch(),
+          relayScopesQuery.refetch(),
+          queryClient.invalidateQueries({
+            queryKey: ["tab-command-relay", "browser-state"],
+          }),
+          fetchAllOpenTabs({
+            browser: "all",
+            duplicatesOnly: false,
+            q: "",
+          })
+            .then((snapshot) =>
+              setSelection((current) =>
+                reconcileSelectionWithSnapshot(current, snapshot),
+              ),
+            )
+            .catch(() => undefined),
+        ]);
+      } finally {
+        setDuplicateGroupsCloseAllBusy(false);
+      }
+    }
+  };
   const saveSelectionAsWorkspace = async (closeAfter: boolean) => {
     const name = window.prompt(t("Workspace name"))?.trim();
     if (!name) return;
@@ -1288,13 +1658,50 @@ export function OpenTabsView({
     actionResult && ["close", "discard", "move", "reload", "set-muted", "set-pinned"].includes(actionResult.kind)
       ? (actionResult as TabMutationResult)
       : null;
+  const duplicateGroupsCloseAllKnownReceipts =
+    duplicateGroupsCloseAllReceipt?.scopes.flatMap((receipt) =>
+      receipt.kind === "known" ? [receipt] : [],
+    ) ?? [];
+  const duplicateGroupsCloseAllSucceeded =
+    duplicateGroupsCloseAllKnownReceipts.reduce(
+      (total, { result }) => total + result.succeededTabIds.length,
+      0,
+    );
+  const duplicateGroupsCloseAllSkipped =
+    duplicateGroupsCloseAllKnownReceipts.reduce(
+      (total, { result }) => total + result.skipped.length,
+      0,
+    );
+  const duplicateGroupsCloseAllFailed =
+    duplicateGroupsCloseAllKnownReceipts.reduce(
+      (total, { result }) => total + result.failed.length,
+      0,
+    );
+  const duplicateGroupsCloseAllUnknown =
+    duplicateGroupsCloseAllReceipt?.scopes.filter(
+      ({ kind }) => kind === "unknown",
+    ).length ?? 0;
+  const duplicateGroupsCloseAllNotCompleted =
+    duplicateGroupsCloseAllReceipt?.scopes.filter(
+      ({ kind }) => kind === "failed",
+    ).length ?? 0;
+  const duplicateGroupsCloseAllUndoKeys = new Set(
+    duplicateGroupsCloseAllKnownReceipts.flatMap(({ result, scope }) =>
+      result.undo
+        ? [`${physicalTabScopeKey(scope)}\n${result.undo.undoId}`]
+        : [],
+    ),
+  );
   const discoverableUndos = browserStates.flatMap((state) =>
     state.pendingUndos
       .filter(
         ({ undoId }) =>
-          mutationReceipt?.undo == null ||
-          !sameTabCommandScope(actionResultScope, state.scope) ||
-          undoId !== mutationReceipt.undo.undoId,
+          !duplicateGroupsCloseAllUndoKeys.has(
+            `${physicalTabScopeKey(state.scope)}\n${undoId}`,
+          ) &&
+          (mutationReceipt?.undo == null ||
+            !sameTabCommandScope(actionResultScope, state.scope) ||
+            undoId !== mutationReceipt.undo.undoId),
       )
       .map((undo) => ({ scope: state.scope, undo })),
   );
@@ -1487,6 +1894,28 @@ export function OpenTabsView({
             />
             {t("Exact duplicates only")}
           </label>
+          {duplicatesOnly ? (
+            <button
+              className="close-all-matching-duplicates danger-action"
+              disabled={
+                duplicateGroupsCloseAllBusy ||
+                commandMutation.isPending ||
+                (duplicateGroupsQuery.data?.totalCloseCandidates ?? 0) === 0 ||
+                pendingDialog !== null ||
+                pendingDuplicateGroupsCloseAll !== null
+              }
+              type="button"
+              onClick={() => void previewAllDuplicateGroups()}
+            >
+              {duplicateGroupsCloseAllBusy
+                ? t("Checking every duplicate group…")
+                : t("Close all matching duplicates ({count})…", {
+                    count: formatNumber(
+                      duplicateGroupsQuery.data?.totalCloseCandidates ?? 0,
+                    ),
+                  })}
+            </button>
+          ) : null}
           <OpenTabSelectionMenu
             busy={selectionBusy}
             hostname={selectionHostname}
@@ -1563,7 +1992,12 @@ export function OpenTabsView({
 
         {selection.size > 0 ? (
           <OpenTabBulkToolbar
-            busy={commandMutation.isPending || selectionBusy}
+            busy={
+              commandMutation.isPending ||
+              duplicateGroupsCloseAllBusy ||
+              pendingDuplicateGroupsCloseAll !== null ||
+              selectionBusy
+            }
             closeableCount={selectedClosePlan?.targets.length ?? 0}
             controlStatus={commandStatus}
             controlWindowId={
@@ -1614,6 +2048,115 @@ export function OpenTabsView({
           />
         ) : null}
 
+        {duplicateGroupsCloseAllReceipt ? (
+          <div
+            className="open-tab-action-receipt bulk-duplicate-close-receipt"
+            role="status"
+            tabIndex={-1}
+          >
+            <strong>
+              {t(
+                "Duplicate cleanup: {succeeded} closed · {skipped} skipped · {failed} failed · {notRun} profiles not completed · {unknown} profiles unknown",
+                {
+                  failed: formatNumber(duplicateGroupsCloseAllFailed),
+                  notRun: formatNumber(duplicateGroupsCloseAllNotCompleted),
+                  skipped: formatNumber(duplicateGroupsCloseAllSkipped),
+                  succeeded: formatNumber(duplicateGroupsCloseAllSucceeded),
+                  unknown: formatNumber(duplicateGroupsCloseAllUnknown),
+                },
+              )}
+            </strong>
+            {duplicateGroupsCloseAllReceipt.blockedGroupCount > 0 ? (
+              <span>
+                {t(
+                  "{copies} copies in {groups} groups were unavailable or changed.",
+                  {
+                    copies: formatNumber(
+                      duplicateGroupsCloseAllReceipt.blockedCandidateCount,
+                    ),
+                    groups: formatNumber(
+                      duplicateGroupsCloseAllReceipt.blockedGroupCount,
+                    ),
+                  },
+                )}
+              </span>
+            ) : null}
+            <div>
+              {duplicateGroupsCloseAllReceipt.scopes.map((receipt) => (
+                <div key={physicalTabScopeKey(receipt.scope)}>
+                  {receipt.kind === "known" ? (
+                    <>
+                      <span>
+                        {t(
+                          "{browser} · installation {id}: {closed} closed · {skipped} skipped · {failed} failed",
+                          {
+                            browser: browserLabel(receipt.scope.browser, t),
+                            closed: formatNumber(
+                              receipt.result.succeededTabIds.length,
+                            ),
+                            failed: formatNumber(receipt.result.failed.length),
+                            id: compactInstallationId(
+                              receipt.scope.installationId,
+                            ),
+                            skipped: formatNumber(
+                              receipt.result.skipped.length,
+                            ),
+                          },
+                        )}
+                      </span>
+                      {receipt.result.undo ? (
+                        <button
+                          disabled={
+                            commandMutation.isPending ||
+                            duplicateGroupsCloseAllBusy
+                          }
+                          type="button"
+                          onClick={() =>
+                            undoDuplicateGroupsCloseAllReceipt(
+                              receipt.scope,
+                              receipt.result.undo!.undoId,
+                            )
+                          }
+                        >
+                          {t("Reopen {count} tabs", {
+                            count: formatNumber(receipt.result.undo.count),
+                            rawCount: receipt.result.undo.count,
+                          })}
+                        </button>
+                      ) : null}
+                    </>
+                  ) : receipt.kind === "failed" ? (
+                    <span className="duplicate-action-error">
+                      {t(
+                        "{browser} · installation {id}: close did not complete for {count} tabs. Refresh and check again.",
+                        {
+                          browser: browserLabel(receipt.scope.browser, t),
+                          count: formatNumber(receipt.requested),
+                          id: compactInstallationId(
+                            receipt.scope.installationId,
+                          ),
+                        },
+                      )}
+                    </span>
+                  ) : (
+                    <span className="duplicate-action-error">
+                      {t(
+                        "{browser} · installation {id}: result unknown for {count} tabs. Do not retry automatically.",
+                        {
+                          browser: browserLabel(receipt.scope.browser, t),
+                          count: formatNumber(receipt.requested),
+                          id: compactInstallationId(
+                            receipt.scope.installationId,
+                          ),
+                        },
+                      )}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
         {mutationReceipt ? (
           <div className="open-tab-action-receipt" role="status" tabIndex={-1}>
             <span>
@@ -1739,7 +2282,9 @@ export function OpenTabsView({
                       (duplicatesOnly && visibleSelectableCount === 0) ||
                       selectionBusy ||
                       commandMutation.isPending ||
-                      pendingDialog !== null
+                      pendingDialog !== null ||
+                      duplicateGroupsCloseAllBusy ||
+                      pendingDuplicateGroupsCloseAll !== null
                     }
                     indeterminate={someVisibleSelected}
                     label={
@@ -1815,11 +2360,15 @@ export function OpenTabsView({
                   !groupAction.canPreview ||
                   commandMutation.isPending ||
                   selectionBusy ||
-                  pendingDialog !== null;
+                  pendingDialog !== null ||
+                  duplicateGroupsCloseAllBusy ||
+                  pendingDuplicateGroupsCloseAll !== null;
                 const keeperChoiceDisabled =
                   commandMutation.isPending ||
                   selectionBusy ||
-                  pendingDialog !== null;
+                  pendingDialog !== null ||
+                  duplicateGroupsCloseAllBusy ||
+                  pendingDuplicateGroupsCloseAll !== null;
                 return (
                   <tbody
                     aria-labelledby={groupHeadingId}
@@ -2098,6 +2647,67 @@ export function OpenTabsView({
           </nav>
         ) : null}
       </div>
+      {pendingDuplicateGroupsCloseAll ? (
+        <DuplicateGroupsCloseAllDialog
+          blockedCandidateCount={
+            pendingDuplicateGroupsCloseAll.blockedCandidateCount
+          }
+          blockedGroupCount={pendingDuplicateGroupsCloseAll.blockedGroupCount}
+          blockingMessage={
+            pendingDuplicateGroupsCloseAll.previews.length === 0
+              ? t(
+                  "No browser profile passed the live duplicate check. No tabs can be closed.",
+                )
+              : duplicateGroupsCloseAllExpired
+                ? t(
+                    "The live duplicate preview expired. Run the check again; no tabs were closed.",
+                  )
+                : undefined
+          }
+          busy={duplicateGroupsCloseAllBusy}
+          candidateCount={pendingDuplicateGroupsCloseAll.previews.reduce(
+            (total, { preview }) => total + preview.candidateTabIds.length,
+            0,
+          )}
+          confirmationBlocked={
+            duplicateGroupsCloseAllExpired ||
+            pendingDuplicateGroupsCloseAll.previews.length === 0
+          }
+          excludedProfiles={pendingDuplicateGroupsCloseAll.excluded.map(
+            (entry) => ({
+              candidateCount: entry.candidateCount,
+              groupCount: entry.groupCount,
+              label: t("{browser} · installation {id}", {
+                browser: browserLabel(entry.browser, t),
+                id: compactInstallationId(entry.installationId),
+              }),
+              reason: duplicateGroupsCloseAllExclusionLabel(entry.reason, t),
+            }),
+          )}
+          groupCount={pendingDuplicateGroupsCloseAll.previews.reduce(
+            (total, { batch }) => total + batch.groups.length,
+            0,
+          )}
+          profiles={pendingDuplicateGroupsCloseAll.previews.map(
+            ({ batch, preview }) => ({
+              candidateCount: preview.candidateTabIds.length,
+              label: t("{browser} · installation {id}", {
+                browser: browserLabel(batch.scope.browser, t),
+                id: compactInstallationId(batch.scope.installationId),
+              }),
+            }),
+          )}
+          profileCount={pendingDuplicateGroupsCloseAll.previews.length}
+          protectedCopyCount={
+            pendingDuplicateGroupsCloseAll.plan.counts.protectedCopies
+          }
+          protectedGroupCount={
+            pendingDuplicateGroupsCloseAll.plan.counts.protectedGroups
+          }
+          onDismiss={dismissDuplicateGroupsCloseAll}
+          onConfirm={() => void confirmAllDuplicateGroups()}
+        />
+      ) : null}
       {pendingDialog ? (
         <TabOperationDialog
           blockingMessage={

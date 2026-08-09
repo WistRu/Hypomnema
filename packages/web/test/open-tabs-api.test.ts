@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   executeRelayedTabCommand,
+  fetchAllDuplicateGroups,
   fetchAllOpenTabs,
   fetchConnectedTabCommandScopes,
   fetchDuplicateGroups,
@@ -524,6 +525,44 @@ describe("open-tab API", () => {
     expect(result.totalDuplicateCopies).toBe(2);
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
       "/api/duplicate-groups?page=1&pageSize=50&browser=chrome&q=Needle+title",
+    );
+  });
+
+  it("loads every exact duplicate group from one unpaged snapshot", async () => {
+    const groups = Array.from({ length: 205 }, (_, index) => {
+      const firstId = 1_001 + index * 3;
+      return {
+        browser: "chrome",
+        candidateInstanceIds: [firstId + 1],
+        count: 2,
+        installationId: "chrome-main",
+        instances: [instance(firstId, true), instance(firstId + 1)],
+        keeperInstanceId: firstId,
+        protectedInstanceIds: [],
+        url: `https://example.com/exact/${index}`,
+      };
+    });
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        items: groups,
+        totalCloseCandidates: 205,
+        totalDuplicateCopies: 205,
+        totalGroups: 205,
+        totalProtected: 0,
+        totalTabsInGroups: 410,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await fetchAllDuplicateGroups({
+      browser: "chrome",
+      q: "Needle title",
+    });
+
+    expect(result).toHaveLength(205);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/duplicate-groups/bulk?browser=chrome&q=Needle+title",
     );
   });
 });

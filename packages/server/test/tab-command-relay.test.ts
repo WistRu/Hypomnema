@@ -1018,6 +1018,16 @@ const defaultTimeoutCases: Array<{
   },
   {
     command: {
+      kind: "close-preview",
+      targets: [
+        { expectedUrl: "https://example.com/close-timeout", tabId: 41 },
+      ],
+    },
+    label: "duplicate close previews",
+    timeoutMs: 10 * 60_000,
+  },
+  {
+    command: {
       destination: { kind: "new-window" },
       kind: "open-workspace",
       tabs: [

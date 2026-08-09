@@ -3,7 +3,9 @@ import {
   parsePhysicalTabCommand,
   type PhysicalTabCloseUndoSummary,
   type PhysicalTabCommand,
+  type PhysicalTabCommandContext,
   type PhysicalTabCommandResult,
+  type PhysicalTabCommandScope,
   type PhysicalWindowSummary,
 } from "./physical-tab-commands";
 import {
@@ -105,6 +107,17 @@ interface AppMessageSenderLike {
   url?: string | undefined;
 }
 
+interface AppPageTabLike {
+  id?: number | undefined;
+  pendingUrl?: string | undefined;
+  url?: string | undefined;
+}
+
+interface DirectAppCommandTab {
+  id: number;
+  windowId: number;
+}
+
 const allowedAppOrigins = new Set([
   "http://127.0.0.1:7717",
   "http://localhost:7717",
@@ -149,6 +162,30 @@ export function isAllowedAppPageUrl(value: unknown): value is string {
   } catch {
     return false;
   }
+}
+
+export function protectedAppPageTabIds(
+  tabs: readonly AppPageTabLike[],
+): number[] {
+  return tabs.flatMap((tab) =>
+    tab.id !== undefined &&
+    (isAllowedAppPageUrl(tab.url) || isAllowedAppPageUrl(tab.pendingUrl))
+      ? [tab.id]
+      : [],
+  );
+}
+
+export function directAppTabCommandContext(
+  currentScope: PhysicalTabCommandScope,
+  controlTab: DirectAppCommandTab,
+  tabs: readonly AppPageTabLike[],
+): PhysicalTabCommandContext {
+  return {
+    controlTabId: controlTab.id,
+    controlWindowId: controlTab.windowId,
+    currentScope,
+    protectedTabIds: protectedAppPageTabIds(tabs),
+  };
 }
 
 export function isExtensionRequest(value: unknown): value is ExtensionRequest {

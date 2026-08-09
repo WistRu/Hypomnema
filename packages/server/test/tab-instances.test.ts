@@ -1050,7 +1050,119 @@ describe("physical tab instances", () => {
     }
   });
 
-  it("reads duplicate totals, groups, and instances from one database snapshot", async () => {
+  it("returns every matching duplicate group in one unpaged snapshot", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-duplicate-bulk-"));
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+      clock: () => new Date("2026-08-09T10:00:00.000Z"),
+    });
+    const chromeGroupCount = 205;
+
+    try {
+      const chromeTabs = Array.from(
+        { length: chromeGroupCount },
+        (_, groupIndex) =>
+          [0, 1].map((copyIndex) => ({
+            tabId: groupIndex * 2 + copyIndex + 1,
+            url: `https://bulk.example/group-${String(groupIndex).padStart(3, "0")}`,
+            title: `Chrome group ${groupIndex}`,
+            windowId: 1,
+            index: groupIndex * 2 + copyIndex,
+          })),
+      ).flat();
+      const chromeIngest = await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          installationId: "122e4567-e89b-42d3-a456-426614174000",
+          tabs: chromeTabs,
+        },
+      });
+      expect(chromeIngest.statusCode).toBe(200);
+
+      const edgeIngest = await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "edge",
+          installationId: "222e4567-e89b-42d3-a456-426614174000",
+          tabs: [
+            {
+              tabId: 1,
+              url: "https://bulk.example/edge-only",
+              title: "Edge copy one",
+              windowId: 1,
+              index: 0,
+            },
+            {
+              tabId: 2,
+              url: "https://bulk.example/edge-only",
+              title: "Edge copy two",
+              windowId: 1,
+              index: 1,
+            },
+          ],
+        },
+      });
+      expect(edgeIngest.statusCode).toBe(200);
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/duplicate-groups/bulk?browser=chrome",
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        totalGroups: chromeGroupCount,
+        totalTabsInGroups: chromeGroupCount * 2,
+        totalDuplicateCopies: chromeGroupCount,
+        totalCloseCandidates: chromeGroupCount,
+        totalProtected: 0,
+      });
+      expect(response.json().items).toHaveLength(chromeGroupCount);
+      expect(
+        new Set(
+          response
+            .json()
+            .items.map((group: { url: string }) => group.url),
+        ).size,
+      ).toBe(chromeGroupCount);
+      expect(
+        response
+          .json()
+          .items.every((group: { browser: string }) => group.browser === "chrome"),
+      ).toBe(true);
+      expect(response.json()).not.toHaveProperty("page");
+      expect(response.json()).not.toHaveProperty("pageSize");
+
+      const searched = await app.inject({
+        method: "GET",
+        url: "/api/duplicate-groups/bulk?browser=chrome&q=Chrome+group+204",
+      });
+      expect(searched.statusCode).toBe(200);
+      expect(searched.json()).toMatchObject({
+        totalGroups: 1,
+        totalTabsInGroups: 2,
+        totalDuplicateCopies: 1,
+        totalCloseCandidates: 1,
+        items: [
+          {
+            browser: "chrome",
+            url: "https://bulk.example/group-204",
+            count: 2,
+            instances: [{}, {}],
+          },
+        ],
+      });
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("reads every duplicate total, group, and instance from one database snapshot", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-duplicate-read-"));
     const databasePath = join(directory, "tabhub.sqlite");
     const app = createApp({
@@ -1095,7 +1207,7 @@ describe("physical tab instances", () => {
         if (property === "prepare") {
           return (source: string) => {
             const statement = target.prepare(source);
-            if (!source.includes("SELECT *\n          FROM grouped")) {
+            if (!/SELECT\s+\*\s+FROM grouped/.test(source)) {
               return statement;
             }
 
@@ -1133,10 +1245,8 @@ describe("physical tab instances", () => {
     }) as typeof reader.connection;
 
     try {
-      const result = createTabInstanceCatalog(connection).listDuplicateGroups({
+      const result = createTabInstanceCatalog(connection).listAllDuplicateGroups({
         browser: undefined,
-        page: 1,
-        pageSize: 50,
       });
 
       expect(replacedDuringRead).toBe(true);

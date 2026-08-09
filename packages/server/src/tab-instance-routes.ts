@@ -1,4 +1,6 @@
 import {
+  duplicateGroupBulkQuerySchema,
+  duplicateGroupBulkResponseSchema,
   duplicateGroupListQuerySchema,
   duplicateGroupListResponseSchema,
   tabInstanceBulkQuerySchema,
@@ -67,6 +69,23 @@ export function registerTabInstanceRoutes(
         q: parsed.data.q,
         page: parsed.data.page,
         pageSize: parsed.data.pageSize,
+      }),
+    );
+  });
+
+  app.get("/api/duplicate-groups/bulk", async (request, reply) => {
+    const parsed = duplicateGroupBulkQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "VALIDATION_ERROR",
+        issues: parsed.error.issues,
+      });
+    }
+
+    return duplicateGroupBulkResponseSchema.parse(
+      catalog.listAllDuplicateGroups({
+        browser: parsed.data.browser,
+        q: parsed.data.q,
       }),
     );
   });

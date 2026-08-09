@@ -170,7 +170,9 @@ interface ExtensionBridgeOptions {
   target: BridgeWindow;
   origin: string;
   requestId?: () => string;
-  timeouts?: Partial<Record<"probe" | "activate" | "command" | "workspace", number>>;
+  timeouts?: Partial<
+    Record<"probe" | "activate" | "close" | "command" | "workspace", number>
+  >;
 }
 
 type JsonRecord = Record<string, unknown>;
@@ -179,6 +181,13 @@ export class ExtensionBridgeError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ExtensionBridgeError";
+  }
+}
+
+export class ExtensionBridgeRejectedError extends ExtensionBridgeError {
+  constructor(message: string) {
+    super(message);
+    this.name = "ExtensionBridgeRejectedError";
   }
 }
 
@@ -573,6 +582,7 @@ export function createExtensionBridge(
   const timeouts = {
     probe: options.timeouts?.probe ?? 2_000,
     activate: options.timeouts?.activate ?? 5_000,
+    close: options.timeouts?.close ?? 10 * 60_000,
     command: options.timeouts?.command ?? 2 * 60_000,
     workspace: options.timeouts?.workspace ?? 10 * 60_000,
   };
@@ -609,7 +619,7 @@ export function createExtensionBridge(
         finish();
         if (!response.ok) {
           reject(
-            new ExtensionBridgeError(
+            new ExtensionBridgeRejectedError(
               typeof response.error === "string"
                 ? response.error
                 : "TabHub extension rejected the request.",
@@ -677,7 +687,10 @@ export function createExtensionBridge(
         "tab-command",
         validated.command.kind === "open-workspace"
           ? timeouts.workspace
-          : timeouts.command,
+          : validated.command.kind === "close" ||
+              validated.command.kind === "close-preview"
+            ? timeouts.close
+            : timeouts.command,
         (value) => {
           const response = parseTabCommandResponse(value);
           if (response.result.kind !== validated.command.kind) {
