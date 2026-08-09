@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 
 const localAuthorityPattern = /^(?:127\.0\.0\.1|localhost)(?::([1-9]\d{0,4}))?$/i;
 const extensionOriginPattern = /^chrome-extension:\/\/[a-z0-9_-]+$/i;
@@ -34,6 +34,18 @@ export function isExtensionOrigin(value: string | undefined): boolean {
   return value !== undefined && extensionOriginPattern.test(value);
 }
 
+function isTopLevelAppNavigation(request: FastifyRequest): boolean {
+  const pathname = request.url.split("?", 1)[0] ?? request.url;
+  const targetsApp = pathname === "/app" || pathname.startsWith("/app/");
+
+  return (
+    (request.method === "GET" || request.method === "HEAD") &&
+    targetsApp &&
+    request.headers["sec-fetch-mode"] === "navigate" &&
+    request.headers["sec-fetch-dest"] === "document"
+  );
+}
+
 export function registerRequestSecurity(app: FastifyInstance): void {
   app.addHook("onRequest", async (request, reply) => {
     reply.header("Content-Security-Policy", "frame-ancestors 'none'");
@@ -50,7 +62,8 @@ export function registerRequestSecurity(app: FastifyInstance): void {
 
     if (
       request.headers["sec-fetch-site"] === "cross-site" &&
-      !isExtensionOrigin(origin)
+      !isExtensionOrigin(origin) &&
+      !isTopLevelAppNavigation(request)
     ) {
       return reply.code(403).send({ error: "CROSS_SITE_REQUEST_BLOCKED" });
     }

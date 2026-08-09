@@ -68,12 +68,13 @@ describe("local request boundary", () => {
     );
   });
 
-  it("rejects DNS-rebinding, hostile-origin, and cross-site browser requests", async () => {
+  it("allows top-level app navigation while rejecting unsafe browser requests", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-security-"));
     const app = createApp({
       databasePath: join(directory, "tabhub.sqlite"),
       logger: false,
     });
+    app.get("/app/", async () => ({ status: "app" }));
 
     try {
       const rebinding = await app.inject({
@@ -102,16 +103,49 @@ describe("local request boundary", () => {
       const crossSiteNavigation = await app.inject({
         headers: {
           host: "127.0.0.1:7717",
+          "sec-fetch-dest": "document",
+          "sec-fetch-mode": "navigate",
           "sec-fetch-site": "cross-site",
         },
         method: "GET",
-        url: "/app",
+        url: "/app/",
       });
-      expect(crossSiteNavigation.statusCode).toBe(403);
+      expect(crossSiteNavigation.statusCode).toBe(200);
+      expect(crossSiteNavigation.json()).toEqual({ status: "app" });
       expect(crossSiteNavigation.headers["x-frame-options"]).toBe("DENY");
       expect(crossSiteNavigation.headers["content-security-policy"]).toBe(
         "frame-ancestors 'none'",
       );
+
+      const crossSiteApiRequest = await app.inject({
+        headers: {
+          host: "127.0.0.1:7717",
+          "sec-fetch-dest": "document",
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-site": "cross-site",
+        },
+        method: "GET",
+        url: "/api/health",
+      });
+      expect(crossSiteApiRequest.statusCode).toBe(403);
+      expect(crossSiteApiRequest.json()).toEqual({
+        error: "CROSS_SITE_REQUEST_BLOCKED",
+      });
+
+      const crossSiteFrame = await app.inject({
+        headers: {
+          host: "127.0.0.1:7717",
+          "sec-fetch-dest": "iframe",
+          "sec-fetch-mode": "navigate",
+          "sec-fetch-site": "cross-site",
+        },
+        method: "GET",
+        url: "/app/",
+      });
+      expect(crossSiteFrame.statusCode).toBe(403);
+      expect(crossSiteFrame.json()).toEqual({
+        error: "CROSS_SITE_REQUEST_BLOCKED",
+      });
 
       const extension = await app.inject({
         headers: {
