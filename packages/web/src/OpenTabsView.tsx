@@ -41,7 +41,7 @@ function physicalLocation(tab: TabInstance): string {
   return `Window ${tab.windowId} | position ${tab.index + 1} | ${tabId}`;
 }
 
-function OpenTabRow({
+export function OpenTabRow({
   tab,
   onSelectCanonicalTab,
 }: {
@@ -65,7 +65,7 @@ function OpenTabRow({
           >
             Open
           </a>
-          <span title={tab.url}>{hostname(tab.url)}</span>
+          <span dir="ltr" title={tab.url}>{tab.url}</span>
         </div>
       </td>
       <td>

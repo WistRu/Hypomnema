@@ -197,6 +197,28 @@ describe("toSnapshotTab", () => {
     ]);
   });
 
+  it("prefers the pending URL over a stale committed URL during navigation", () => {
+    expect(
+      buildSnapshot("chrome", INSTALLATION_ID, [
+        {
+          active: true,
+          id: 304,
+          index: 0,
+          pendingUrl: "https://www.youtube.com/watch?v=second-video",
+          title: "Second video - YouTube",
+          url: "https://www.youtube.com/watch?v=first-video",
+          windowId: 1,
+        },
+      ]).tabs,
+    ).toEqual([
+      expect.objectContaining({
+        tabId: 304,
+        title: "Second video - YouTube",
+        url: "https://www.youtube.com/watch?v=second-video",
+      }),
+    ]);
+  });
+
   it("accepts a captured redirect after the current snapshot observes the redirected URL", () => {
     const snapshot = buildSnapshot("chrome", INSTALLATION_ID, [
       {

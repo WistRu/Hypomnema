@@ -30,7 +30,7 @@ export interface CapturedTabUrl {
 }
 
 export function toSnapshotTab(tab: BrowserTabLike): SnapshotTab | undefined {
-  const url = tab.url?.trim() || tab.pendingUrl?.trim();
+  const url = tab.pendingUrl?.trim() || tab.url?.trim();
 
   if (!url) {
     return undefined;
