@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   closeObviousDuplicates,
   closeObviousDuplicatesAndRefresh,
+  parseDuplicateClosePlan,
   previewObviousDuplicates,
   type DuplicateTabAdapter,
   type DuplicateTabLike,
@@ -58,6 +59,34 @@ function closePlan(
 ) {
   return previewObviousDuplicates(tabs, urls).plan;
 }
+
+describe("parseDuplicateClosePlan", () => {
+  it("accepts complete plans above the former group and target ceilings", () => {
+    const groups = Array.from({ length: 10_001 }, (_, groupIndex) => {
+      const keeperTabId = groupIndex * 6;
+      return {
+        exactUrl: `https://example.com/duplicate/${groupIndex}`,
+        keeperTabId,
+        protectedCount: 0,
+        targetTabIds: Array.from(
+          { length: 5 },
+          (_, targetIndex) => keeperTabId + targetIndex + 1,
+        ),
+      };
+    });
+
+    const parsed = parseDuplicateClosePlan({ groups });
+
+    expect(parsed?.groups).toHaveLength(10_001);
+    expect(parsed?.groups.at(-1)).toEqual(groups.at(-1));
+    expect(
+      parsed?.groups.reduce(
+        (total, group) => total + group.targetTabIds.length,
+        0,
+      ),
+    ).toBe(50_005);
+  });
+});
 
 describe("previewObviousDuplicates", () => {
   it("counts only exact trimmed URL groups and keeps their newest tab", () => {

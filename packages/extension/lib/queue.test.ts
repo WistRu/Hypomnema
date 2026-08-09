@@ -279,21 +279,23 @@ describe("compactPendingQueue", () => {
 });
 
 describe("appendPendingItems", () => {
-  it("checks the compacted queue against item capacity before persistence", () => {
-    expect(() =>
-      appendPendingItems(
-        [snapshot("50", "chrome")],
-        [snapshot("51", "edge")],
-        { maxBytes: 1_000_000, maxItems: 1 },
+  it("accepts more than 2,000 pending operations while within byte capacity", () => {
+    const additions = Array.from({ length: 2_001 }, (_, index) =>
+      content(
+        `item-${index}`,
+        `https://example.com/pending/${index}`,
       ),
-    ).toThrow(PendingQueueCapacityError);
+    );
+
+    expect(
+      appendPendingItems([], additions, { maxBytes: 10_000_000 }),
+    ).toHaveLength(2_001);
   });
 
   it("checks serialized byte capacity before persistence with a clear error", () => {
     expect(() =>
       appendPendingItems([], [content("52", "https://example.com")], {
         maxBytes: 10,
-        maxItems: 10,
       }),
     ).toThrow(/offline queue is full.*bytes.*Reconnect the local server/i);
   });

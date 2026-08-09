@@ -36,7 +36,7 @@ describe("open-tab action presentation", () => {
     }
   });
 
-  it("blocks browser actions instead of silently slicing selections over 500", () => {
+  it("keeps every browser action enabled for selections over 500", () => {
     const markup = renderToStaticMarkup(
       createElement(OpenTabBulkToolbar, {
         busy: false,
@@ -50,8 +50,38 @@ describe("open-tab action presentation", () => {
         windows: [],
       }),
     );
-    expect(markup).toContain("Select at most 500");
-    expect(markup).toContain('disabled=""');
+    expect(markup).not.toContain("Select at most 500");
+    expect(markup).not.toContain('disabled=""');
+  });
+
+  it("keeps restore controls enabled for workspaces over 500 tabs", () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(["workspaces"], {
+      items: [
+        {
+          createdAt: "2026-08-09T00:00:00.000Z",
+          id: 1,
+          itemCount: 501,
+          name: "All tabs",
+          updatedAt: "2026-08-09T00:00:00.000Z",
+        },
+      ],
+    });
+    const markup = renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        createElement(SavedWorkspacesDrawer, {
+          busy: false,
+          onClose: vi.fn(),
+          onCommand: vi.fn(),
+        }),
+      ),
+    );
+
+    expect(markup).toContain("501 tabs");
+    expect(markup).not.toContain("Restore limit");
+    expect(markup).not.toContain('disabled=""');
   });
 
   it("warns that reload can discard form state", () => {

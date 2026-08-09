@@ -45,7 +45,6 @@ export interface DrainQueueResult {
 
 export interface PendingQueueLimits {
   maxBytes: number;
-  maxItems: number;
 }
 
 export interface PendingQueueSummary {
@@ -56,7 +55,6 @@ export interface PendingQueueSummary {
 export const MAX_DEAD_LETTERS = 50;
 export const DEFAULT_PENDING_QUEUE_LIMITS: PendingQueueLimits = {
   maxBytes: 32 * 1024 * 1024,
-  maxItems: 2_000,
 };
 
 export type PendingItemSender = (item: PendingItem) => Promise<void>;
@@ -192,9 +190,9 @@ export function assertPendingQueueCapacity(
 ): void {
   const byteSize = pendingQueueByteSize(queue);
 
-  if (queue.length > limits.maxItems || byteSize > limits.maxBytes) {
+  if (byteSize > limits.maxBytes) {
     throw new PendingQueueCapacityError(
-      `TabHub's offline queue is full (${queue.length} operations, ${byteSize} bytes; limits ${limits.maxItems} operations and ${limits.maxBytes} bytes). Reconnect the local server and retry.`,
+      `TabHub's offline queue is full (${queue.length} operations, ${byteSize} bytes; byte limit ${limits.maxBytes}). Reconnect the local server and retry.`,
     );
   }
 }

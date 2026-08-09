@@ -25,3 +25,9 @@ export const SNAPSHOT_INTERVAL_MINUTES = 5;
 export const RETRY_INTERVAL_MINUTES = 1;
 export const TAB_EVENT_DEBOUNCE_MS = 1_000;
 export const REQUEST_TIMEOUT_MS = 5_000;
+
+// Snapshot requests include both the upload and the server's transaction. The
+// extension talks to localhost, but a full transport-budget payload can still
+// take materially longer than the small health/content request timeout.
+export const SNAPSHOT_REQUEST_BASE_TIMEOUT_MS = 10_000;
+export const SNAPSHOT_REQUEST_MIN_THROUGHPUT_BYTES_PER_SECOND = 128 * 1024;

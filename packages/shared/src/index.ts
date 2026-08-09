@@ -63,7 +63,7 @@ export const ingestSnapshotSchema = z
     browser: browserIdentifierSchema,
     browserSessionId: browserSessionIdSchema.optional(),
     installationId: installationIdSchema.optional(),
-    tabs: z.array(snapshotTabSchema).max(10_000),
+    tabs: z.array(snapshotTabSchema),
   })
   .superRefine((snapshot, context) => {
     if (
@@ -258,7 +258,6 @@ export type PatchTab = z.infer<typeof patchTabSchema>;
 export const tabIdsSchema = z
   .array(tabIdSchema)
   .min(1)
-  .max(1_000)
   .refine((ids) => new Set(ids).size === ids.length, "Tab IDs must be unique");
 
 export type TabIds = z.infer<typeof tabIdsSchema>;
@@ -432,7 +431,6 @@ export const createWorkspaceSchema = z.object({
   selections: z
     .array(workspaceSelectionSchema)
     .min(1)
-    .max(2_000)
     .refine(
       (selections) =>
         new Set(selections.map(({ instanceId }) => instanceId)).size ===
@@ -825,16 +823,32 @@ const queryBooleanSchema = z.preprocess((value) => {
   return value;
 }, z.boolean());
 
+const tabFilterQueryShape = {
+  browser: browserIdentifierSchema.optional(),
+  is_open: queryBooleanSchema.optional(),
+  q: z.string().trim().min(1).max(500).optional(),
+  status: tabStatusSchema.optional(),
+  importance: z.coerce.number().pipe(tabImportanceSchema).optional(),
+  tag: tagPathSchema.optional(),
+};
+
+export const tabBulkIdsQuerySchema = z.object(tabFilterQueryShape);
+
+export type TabBulkIdsQuery = z.infer<typeof tabBulkIdsQuerySchema>;
+
+export const tabBulkIdsResponseSchema = z.object({
+  ids: z
+    .array(tabIdSchema)
+    .refine((ids) => new Set(ids).size === ids.length, "Tab IDs must be unique"),
+});
+
+export type TabBulkIdsResponse = z.infer<typeof tabBulkIdsResponseSchema>;
+
 export const tabListQuerySchema = z
   .object({
-    browser: browserIdentifierSchema.optional(),
-    is_open: queryBooleanSchema.optional(),
-    q: z.string().trim().min(1).max(500).optional(),
+    ...tabFilterQueryShape,
     search_mode: searchModeSchema.default("fulltext"),
     similar_to: z.coerce.number().int().positive().optional(),
-    status: tabStatusSchema.optional(),
-    importance: z.coerce.number().pipe(tabImportanceSchema).optional(),
-    tag: tagPathSchema.optional(),
     page: z.coerce.number().int().positive().default(1),
     pageSize: z.coerce.number().int().positive().max(200).default(50),
   })

@@ -526,6 +526,53 @@ describe("physical tab command executor", () => {
     });
   });
 
+  it("previews every target when a close contains more than 500 tabs", async () => {
+    const targets = Array.from({ length: 501 }, (_, index) => ({
+      expectedUrl: `https://example.com/${index}`,
+      tabId: 1_000 + index,
+    }));
+    const browserAdapter = adapter();
+    vi.mocked(browserAdapter.getTab).mockImplementation(async (tabId) => ({
+      active: false,
+      id: tabId,
+      index: tabId - 1_000,
+      pinned: false,
+      url: targets[tabId - 1_000]!.expectedUrl,
+      windowId: 7,
+    }));
+    const sessionStorage = storage();
+    const previewId = "323e4567-e89b-42d3-a456-426614174000";
+    const executor = createPhysicalTabCommandExecutor({
+      adapter: browserAdapter,
+      createId: () => previewId,
+      now: () => 1_000,
+      storage: sessionStorage,
+    });
+
+    const result = await executor.execute(
+      {
+        controlTabId: 900,
+        controlWindowId: 90,
+        currentScope: CURRENT_SCOPE,
+      },
+      {
+        ...CURRENT_SCOPE,
+        command: { kind: "close-preview", targets },
+      },
+    );
+
+    expect(result).toMatchObject({
+      candidateTabIds: targets.map(({ tabId }) => tabId),
+      kind: "close-preview",
+      requested: 501,
+      skipped: [],
+    });
+    expect(sessionStorage.set).toHaveBeenCalledWith({
+      [`tabhub:physical-close-preview:${CURRENT_SCOPE.installationId}`]:
+        expect.objectContaining({ targets }),
+    });
+  });
+
   it("previews a duplicate close only while its exact keeper is still live", async () => {
     const browserAdapter = adapter();
     vi.mocked(browserAdapter.getTab).mockImplementation(async (tabId) => {
@@ -911,12 +958,12 @@ describe("physical tab command executor", () => {
     );
   });
 
-  it("rejects a close that cannot fit a quota-safe Undo before removing tabs", async () => {
+  it("rejects a close of more than 500 tabs when it cannot fit a quota-safe Undo before removing tabs", async () => {
     const previewId = "323e4567-e89b-42d3-a456-426614174000";
     const previewKey =
       `tabhub:physical-close-preview:${CURRENT_SCOPE.installationId}`;
-    const suffix = "a".repeat(16_000);
-    const targets = Array.from({ length: 300 }, (_, index) => ({
+    const suffix = "a".repeat(9_000);
+    const targets = Array.from({ length: 501 }, (_, index) => ({
       expectedUrl: `https://example.com/${index}?value=${suffix}`,
       tabId: 1_000 + index,
     }));
@@ -1661,6 +1708,58 @@ describe("physical tab command executor", () => {
     expect(browserAdapter.updateTab).toHaveBeenCalledWith(101, { muted: true });
   });
 
+  it("opens every saved tab when a workspace contains more than 500 entries", async () => {
+    const tabs = Array.from({ length: 501 }, (_, index) => ({
+      muted: false,
+      pinned: false,
+      url: `https://example.com/saved/${index}`,
+    }));
+    const browserAdapter = adapter();
+    vi.mocked(browserAdapter.getWindow).mockResolvedValue({
+      id: 90,
+      type: "normal",
+    });
+    vi.mocked(browserAdapter.createTab).mockImplementation(
+      async (_properties) => ({
+        id: 1_000 + vi.mocked(browserAdapter.createTab).mock.calls.length,
+        index: 0,
+        windowId: 90,
+      }),
+    );
+    const executor = createPhysicalTabCommandExecutor({
+      adapter: browserAdapter,
+      storage: storage(),
+    });
+
+    const result = await executor.execute(
+      {
+        controlTabId: 900,
+        controlWindowId: 90,
+        currentScope: CURRENT_SCOPE,
+      },
+      {
+        ...CURRENT_SCOPE,
+        command: {
+          destination: { kind: "app-window" },
+          kind: "open-workspace",
+          tabs,
+        },
+      },
+    );
+
+    if (!("openedTabIds" in result)) {
+      throw new Error(`Expected open-workspace, received ${result.kind}`);
+    }
+    expect(result.requested).toBe(501);
+    expect(result.failed).toEqual([]);
+    expect(result.openedTabIds).toHaveLength(501);
+    expect(browserAdapter.createTab).toHaveBeenCalledTimes(501);
+    expect(browserAdapter.createTab).toHaveBeenNthCalledWith(
+      501,
+      expect.objectContaining({ url: "https://example.com/saved/500" }),
+    );
+  });
+
   it("opens the first saved tab as the anchor of one new workspace window", async () => {
     const browserAdapter = adapter();
     vi.mocked(browserAdapter.createWindow).mockResolvedValue({
@@ -1801,6 +1900,32 @@ describe("parsePhysicalTabCommand", () => {
         },
       ].map(parsePhysicalTabCommand),
     ).not.toContain(undefined);
+  });
+
+  it("accepts complete physical-tab and workspace requests larger than 500 entries", () => {
+    const targets = Array.from({ length: 501 }, (_, index) => ({
+      expectedUrl: `https://example.com/${index}`,
+      tabId: 1_000 + index,
+    }));
+    const tabs = Array.from({ length: 501 }, (_, index) => ({
+      muted: index % 2 === 0,
+      pinned: index % 3 === 0,
+      url: `https://example.com/saved/${index}`,
+    }));
+
+    expect(
+      parsePhysicalTabCommand({ kind: "discard", targets }),
+    ).toMatchObject({ kind: "discard", targets });
+    expect(
+      parsePhysicalTabCommand({ kind: "close-preview", targets }),
+    ).toMatchObject({ kind: "close-preview", targets });
+    expect(
+      parsePhysicalTabCommand({
+        destination: { kind: "new-window" },
+        kind: "open-workspace",
+        tabs,
+      }),
+    ).toMatchObject({ kind: "open-workspace", tabs });
   });
 
   it.each([

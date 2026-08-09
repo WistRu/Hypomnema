@@ -8,6 +8,8 @@ import {
   setImportanceSchema,
   setStatusResponseSchema,
   setStatusSchema,
+  tabBulkIdsQuerySchema,
+  tabBulkIdsResponseSchema,
   tabDetailResponseSchema,
   tabIdParamSchema,
   tabListQuerySchema,
@@ -149,6 +151,24 @@ export function registerTabRoutes(
 
       return sendEmbeddingError(reply, error);
     }
+  });
+
+  app.get("/api/tabs/bulk-ids", async (request, reply) => {
+    const parsed = tabBulkIdsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      return sendValidationError(reply, parsed.error.issues);
+    }
+
+    return tabBulkIdsResponseSchema.parse(
+      tabCatalog.listTabIds({
+        browser: parsed.data.browser,
+        isOpen: parsed.data.is_open,
+        q: parsed.data.q,
+        status: parsed.data.status,
+        importance: parsed.data.importance,
+        tag: parsed.data.tag,
+      }),
+    );
   });
 
   app.get("/api/tabs/:id", async (request, reply) => {

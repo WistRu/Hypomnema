@@ -491,10 +491,6 @@ export function OpenTabsView({
     }
   };
   const saveSelectionAsWorkspace = async (closeAfter: boolean) => {
-    if (selectedTabs.length > 2_000) {
-      setActionError("A workspace can contain at most 2,000 tabs.");
-      return;
-    }
     const name = window.prompt("Workspace name")?.trim();
     if (!name) return;
     setSelectionBusy(true);

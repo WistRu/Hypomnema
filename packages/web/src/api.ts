@@ -7,6 +7,7 @@ import {
   setStatusResponseSchema,
   summaryEnqueueResponseSchema,
   summaryJobSchema,
+  tabBulkIdsResponseSchema,
   tabDetailResponseSchema,
   tabInstanceBulkResponseSchema,
   tabInstanceListResponseSchema,
@@ -35,6 +36,8 @@ export interface TabListFilters {
   tag: string;
 }
 
+export type LibraryTabFilters = Omit<TabListFilters, "page">;
+
 export interface OpenTabListFilters {
   browser: string;
   duplicatesOnly: boolean;
@@ -51,6 +54,35 @@ export interface DuplicateGroupListFilters {
 export type PatchTabDetails = PatchTab;
 export type CreateTabLink = CreateLink;
 export type PatchTabLink = PatchLink;
+
+function appendLibraryTabFilters(
+  searchParams: URLSearchParams,
+  filters: LibraryTabFilters,
+): void {
+  if (filters.browser !== "all") {
+    searchParams.set("browser", filters.browser);
+  }
+
+  if (filters.openState !== "all") {
+    searchParams.set("is_open", String(filters.openState === "open"));
+  }
+
+  if (filters.status !== "all") {
+    searchParams.set("status", filters.status);
+  }
+
+  if (filters.importance !== "all") {
+    searchParams.set("importance", String(filters.importance));
+  }
+
+  if (filters.q) {
+    searchParams.set("q", filters.q);
+  }
+
+  if (filters.tag) {
+    searchParams.set("tag", filters.tag);
+  }
+}
 
 async function responsePayload(response: Response, unreadableMessage: string) {
   if (response.status === 204) return null;
@@ -104,30 +136,7 @@ export async function fetchTabs(
     page: String(filters.page),
     pageSize: "50",
   });
-
-  if (filters.browser !== "all") {
-    searchParams.set("browser", filters.browser);
-  }
-
-  if (filters.openState !== "all") {
-    searchParams.set("is_open", String(filters.openState === "open"));
-  }
-
-  if (filters.status !== "all") {
-    searchParams.set("status", filters.status);
-  }
-
-  if (filters.importance !== "all") {
-    searchParams.set("importance", String(filters.importance));
-  }
-
-  if (filters.q) {
-    searchParams.set("q", filters.q);
-  }
-
-  if (filters.tag) {
-    searchParams.set("tag", filters.tag);
-  }
+  appendLibraryTabFilters(searchParams, filters);
 
   const payload = await requestJson(
     `/api/tabs?${searchParams.toString()}`,
@@ -144,6 +153,29 @@ export async function fetchTabs(
   }
 
   return parsed.data;
+}
+
+export async function fetchAllLibraryTabIds(
+  filters: LibraryTabFilters,
+  signal?: AbortSignal,
+) {
+  const searchParams = new URLSearchParams();
+  appendLibraryTabFilters(searchParams, filters);
+  const query = searchParams.toString();
+  const payload = await requestJson(
+    `/api/tabs/bulk-ids${query ? `?${query}` : ""}`,
+    {
+      headers: { Accept: "application/json" },
+      signal: signal ?? null,
+    },
+    "TabHub could not load all filtered Library tabs",
+    "TabHub returned an unreadable Library tab selection.",
+  );
+  const parsed = tabBulkIdsResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected Library tab selection.");
+  }
+  return parsed.data.ids;
 }
 
 export async function fetchAllOpenTabs(

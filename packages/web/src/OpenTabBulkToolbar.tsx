@@ -98,14 +98,12 @@ export function OpenTabBulkToolbar({
   selectedCount: number;
   windows: BrowserWindowSummary[];
 }) {
-  const overLimit = controllableCount > 500;
-  const liveDisabled = busy || controllableCount === 0 || overLimit;
+  const liveDisabled = busy || controllableCount === 0;
 
   return (
     <div className="bulk-toolbar open-tab-bulk-toolbar" aria-label="Open-tab bulk actions">
       <strong>{selectedCount.toLocaleString()} selected</strong>
       <span>{controllableCount.toLocaleString()} controllable here</span>
-      {overLimit ? <span className="bulk-error" role="alert">Select at most 500 for browser actions.</span> : null}
       <label>
         <span>Move destination</span>
         <select

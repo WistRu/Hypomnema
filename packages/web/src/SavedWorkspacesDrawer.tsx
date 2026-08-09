@@ -71,9 +71,6 @@ export function SavedWorkspacesDrawer({
       setError(null);
       try {
         const detail = await fetchWorkspace(id);
-        if (detail.items.length > 500) {
-          throw new Error("This workspace has more than 500 tabs. Restore it in smaller workspaces.");
-        }
         await onCommand({
           destination: destination.kind === "new-window" ? destination : { kind: "app-window" },
           kind: "open-workspace",
@@ -119,10 +116,9 @@ export function SavedWorkspacesDrawer({
                 <strong>{workspace.name}</strong>
                 <span>{workspace.itemCount.toLocaleString()} tabs</span>
               </div>
-              {workspace.itemCount > 500 ? <small>Restore limit: 500 tabs</small> : null}
               <div>
-                <button disabled={drawerBusy || workspace.itemCount > 500} type="button" onClick={() => void openWorkspace(workspace.id, { kind: "app-window" })}>{restoringWorkspaceId === workspace.id ? "Opening..." : "Open here"}</button>
-                <button disabled={drawerBusy || workspace.itemCount > 500} type="button" onClick={() => void openWorkspace(workspace.id, { kind: "new-window" })}>{restoringWorkspaceId === workspace.id ? "Opening..." : "New window"}</button>
+                <button disabled={drawerBusy} type="button" onClick={() => void openWorkspace(workspace.id, { kind: "app-window" })}>{restoringWorkspaceId === workspace.id ? "Opening..." : "Open here"}</button>
+                <button disabled={drawerBusy} type="button" onClick={() => void openWorkspace(workspace.id, { kind: "new-window" })}>{restoringWorkspaceId === workspace.id ? "Opening..." : "New window"}</button>
                 <button
                   disabled={drawerBusy}
                   type="button"

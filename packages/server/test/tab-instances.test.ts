@@ -190,6 +190,49 @@ describe("physical tab instances", () => {
     }
   });
 
+  it(
+    "returns more instances than SQLite permits as variables in one statement",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "tabhub-instance-bulk-large-"));
+      const app = createApp({
+        databasePath: join(directory, "tabhub.sqlite"),
+        logger: false,
+      });
+      const tabCount = 33_000;
+
+      try {
+        const ingest = await app.inject({
+          method: "POST",
+          url: "/api/ingest/snapshot",
+          payload: {
+            browser: "chrome",
+            installationId: "e3ba1525-47ec-4350-a0ec-777814958933",
+            tabs: Array.from({ length: tabCount }, (_, index) => ({
+              tabId: index + 1,
+              url: `https://large.example/${index}`,
+              windowId: 1,
+              index,
+            })),
+          },
+        });
+        expect(ingest.statusCode).toBe(200);
+
+        const bulk = await app.inject({
+          method: "GET",
+          url: "/api/tab-instances/bulk?browser=chrome",
+        });
+
+        expect(bulk.statusCode).toBe(200);
+        expect(bulk.json()).toMatchObject({ total: tabCount });
+        expect(bulk.json().items).toHaveLength(tabCount);
+      } finally {
+        await app.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+    60_000,
+  );
+
   it("reads bulk instances and their tag paths from one database snapshot", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-instance-bulk-read-"));
     const databasePath = join(directory, "tabhub.sqlite");

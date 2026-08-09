@@ -392,7 +392,73 @@ describe("saved workspaces", () => {
     }
   });
 
-  it("validates workspace names, unique selections, and the 2,000-item cap", async () => {
+  it("saves every selected tab when a workspace contains more than 2,000 items", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-large-workspace-"));
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+    });
+
+    try {
+      const tabCount = 2_001;
+      const ingested = await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          installationId: INSTALLATION_ID,
+          browserSessionId: BROWSER_SESSION_ID,
+          tabs: Array.from({ length: tabCount }, (_, index) => ({
+            tabId: index + 1,
+            url: `https://example.com/large-workspace/${index + 1}`,
+            title: `Tab ${index + 1}`,
+            windowId: Math.floor(index / 500) + 1,
+            index: index % 500,
+            active: index === 0,
+            pinned: false,
+          })),
+        },
+      });
+      expect(ingested.statusCode).toBe(200);
+
+      const physical = await app.inject({
+        method: "GET",
+        url: "/api/tab-instances/bulk?browser=chrome",
+      });
+      expect(physical.statusCode).toBe(200);
+      expect(physical.json().items).toHaveLength(tabCount);
+
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/workspaces",
+        payload: {
+          name: "Every physical tab",
+          selections: physical.json().items.map(selection),
+        },
+      });
+
+      expect(created.statusCode).toBe(201);
+      expect(created.json()).toMatchObject({
+        name: "Every physical tab",
+        itemCount: tabCount,
+      });
+      expect(created.json().items).toHaveLength(tabCount);
+      expect(
+        new Set(
+          created
+            .json()
+            .items.map(
+              (item: { sourceInstanceId: number }) => item.sourceInstanceId,
+            ),
+        ).size,
+      ).toBe(tabCount);
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("requires a name, at least one selection, and unique instance IDs", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-workspace-validation-"));
     const app = createApp({
       databasePath: join(directory, "tabhub.sqlite"),
@@ -404,14 +470,8 @@ describe("saved workspaces", () => {
       const selected = selection(tabs[0]!);
       for (const payload of [
         { name: "   ", selections: [selected] },
+        { name: "Empty", selections: [] },
         { name: "Duplicate", selections: [selected, selected] },
-        {
-          name: "Too large",
-          selections: Array.from({ length: 2_001 }, (_, index) => ({
-            ...selected,
-            instanceId: index + 1,
-          })),
-        },
       ]) {
         const response = await app.inject({
           method: "POST",
@@ -421,22 +481,6 @@ describe("saved workspaces", () => {
         expect(response.statusCode).toBe(400);
         expect(response.json()).toMatchObject({ error: "VALIDATION_ERROR" });
       }
-
-      const maximumCompactRequest = await app.inject({
-        method: "POST",
-        url: "/api/workspaces",
-        payload: {
-          name: "Exactly at the compact limit",
-          selections: Array.from({ length: 2_000 }, (_, index) => ({
-            ...selected,
-            instanceId: index + 1,
-          })),
-        },
-      });
-      expect(maximumCompactRequest.statusCode).toBe(409);
-      expect(maximumCompactRequest.json()).toMatchObject({
-        error: "TAB_INSTANCE_STALE",
-      });
 
       const invalidRename = await app.inject({
         method: "PATCH",

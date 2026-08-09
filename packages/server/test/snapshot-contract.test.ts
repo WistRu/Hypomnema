@@ -1,6 +1,7 @@
 import {
   ingestSnapshotBodyLimitBytes,
   ingestSnapshotSchema,
+  tabIdsSchema,
   tabHubHttpBodyLimitBytes,
 } from "@tabhub/shared";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -23,6 +24,29 @@ function largeSnapshot(tabCount: number) {
 }
 
 describe("snapshot transport contract", () => {
+  it("accepts every snapshot tab above the former count ceiling while within the byte budget", () => {
+    const tabCount = 10_001;
+    const parsed = ingestSnapshotSchema.safeParse({
+      browser: "chrome",
+      installationId: "b77ac5af-f3e0-4fa1-bcb5-f45235980222",
+      tabs: Array.from({ length: tabCount }, (_, index) => ({
+        index,
+        tabId: index + 1,
+        url: `https://example.com/unbounded/${index + 1}`,
+        windowId: 1,
+      })),
+    });
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.tabs).toHaveLength(tabCount);
+  });
+
+  it("accepts every unique Library tab ID above the former bulk ceiling", () => {
+    const ids = Array.from({ length: 1_001 }, (_, index) => index + 1);
+
+    expect(tabIdsSchema.parse(ids)).toEqual(ids);
+  });
+
   it("requires native tab IDs for modern installations while accepting queued legacy snapshots", () => {
     const tabWithoutNativeId = {
       url: "https://example.com/legacy",

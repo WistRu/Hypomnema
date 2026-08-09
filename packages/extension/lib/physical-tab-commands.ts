@@ -280,7 +280,7 @@ function parsePhysicalTabTarget(value: unknown): PhysicalTabTarget | undefined {
 function parsePhysicalTabTargets(
   value: unknown,
 ): PhysicalTabTarget[] | undefined {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 500) {
+  if (!Array.isArray(value) || value.length < 1) {
     return undefined;
   }
   const targets = value.map(parsePhysicalTabTarget);
@@ -323,11 +323,7 @@ function parseClosePreviewTargets(
   value: unknown,
   minimumLength = 1,
 ): ClosePreviewTarget[] | undefined {
-  if (
-    !Array.isArray(value) ||
-    value.length < minimumLength ||
-    value.length > 500
-  ) {
+  if (!Array.isArray(value) || value.length < minimumLength) {
     return undefined;
   }
   const targets = value.map(parseClosePreviewTarget);
@@ -464,7 +460,6 @@ export function parsePhysicalTabCommand(
       !hasOnlyKeys(value, ["destination", "kind", "tabs"]) ||
       !Array.isArray(value.tabs) ||
       value.tabs.length < 1 ||
-      value.tabs.length > 500 ||
       !isRecord(value.destination) ||
       !hasOnlyKeys(value.destination, ["kind"]) ||
       (value.destination.kind !== "app-window" &&
@@ -507,8 +502,7 @@ function parseStoredClosePreview(value: unknown): StoredClosePreview | undefined
     !Number.isSafeInteger(value.expiresAt) ||
     (value.expiresAt as number) < 0 ||
     value.version !== 1 ||
-    !Array.isArray(value.targets) ||
-    value.targets.length > 500
+    !Array.isArray(value.targets)
   ) {
     return undefined;
   }
@@ -590,8 +584,7 @@ function parseStoredCloseUndo(value: unknown): StoredCloseUndo | undefined {
     (value.expiresAt as number) < 0 ||
     value.version !== 1 ||
     !Array.isArray(value.targets) ||
-    value.targets.length < 1 ||
-    value.targets.length > 500
+    value.targets.length < 1
   ) {
     return undefined;
   }

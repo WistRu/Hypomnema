@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createApp, type TabHubApp } from "../src/app.js";
@@ -648,5 +649,92 @@ describe("semantic tab search", () => {
       ]);
     },
     20_000,
+  );
+
+  it(
+    "clusters every eligible inbox tab above the former 10,000-tab ceiling",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "tabhub-large-cluster-"));
+      temporaryDirectories.push(directory);
+      const databasePath = join(directory, "tabhub.sqlite");
+      const app = createApp({
+        databasePath,
+        logger: false,
+        embeddingProvider: {
+          provider: "large-cluster-fake",
+          model: "large-cluster-fake-512",
+          dimensions: 512,
+          async embed(input) {
+            return input.map(() => {
+              const vector = Array.from({ length: 512 }, () => 0);
+              vector[0] = 1;
+              return vector;
+            });
+          },
+        },
+      });
+      apps.push(app);
+
+      const tabCount = 10_001;
+      const snapshot = await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "other",
+          tabs: Array.from({ length: tabCount }, (_, index) => ({
+            index,
+            title: `Cluster tab ${index + 1}`,
+            url: `https://example.com/large-cluster/${index + 1}`,
+            windowId: 1,
+          })),
+        },
+      });
+      expect(snapshot.statusCode).toBe(200);
+
+      const seeder = new Database(databasePath);
+      try {
+        const tabIds = seeder.prepare("SELECT id FROM tabs ORDER BY id").all() as Array<{
+          id: number;
+        }>;
+        expect(tabIds).toHaveLength(tabCount);
+        const insertContent = seeder.prepare(`
+          INSERT INTO contents (tab_id, text, html_excerpt, extracted_at)
+          VALUES (?, ?, ?, ?)
+        `);
+        seeder.transaction(() => {
+          for (const { id } of tabIds) {
+            insertContent.run(
+              id,
+              "Rust compiler clustering content.",
+              "<article>Rust compiler clustering content.</article>",
+              "2026-08-09T00:00:00.000Z",
+            );
+          }
+        })();
+      } finally {
+        seeder.close();
+      }
+
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/clusters/inbox",
+        payload: { maxClusters: 1 },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        indexed: tabCount,
+        unclustered: 0,
+      });
+      expect(
+        response
+          .json()
+          .clusters.reduce(
+            (total: number, cluster: { size: number }) => total + cluster.size,
+            0,
+          ),
+      ).toBe(tabCount);
+    },
+    60_000,
   );
 });

@@ -1,12 +1,60 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  ingestSnapshotBodyLimitBytes,
+  type IngestSnapshot,
+} from "@tabhub/shared";
 
-import { postSnapshot } from "./api";
+import { postSnapshot, snapshotRequestTimeoutMs } from "./api";
+import { REQUEST_TIMEOUT_MS } from "./constants";
 import { PendingRequestError } from "./queue";
 
 const emptySnapshot = { browser: "chrome", tabs: [] };
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+describe("snapshot upload timeout", () => {
+  it("scales through the complete 15 MiB transport budget", () => {
+    expect(snapshotRequestTimeoutMs(0)).toBe(10_000);
+    expect(snapshotRequestTimeoutMs(1024 * 1024)).toBe(18_000);
+    expect(snapshotRequestTimeoutMs(ingestSnapshotBodyLimitBytes)).toBe(
+      130_000,
+    );
+  });
+
+  it("does not abort a large valid snapshot at the former five-second deadline", async () => {
+    vi.useFakeTimers();
+    const largeSnapshot: IngestSnapshot = {
+      browser: "chrome",
+      tabs: Array.from({ length: 600 }, (_, index) => ({
+        index,
+        title: "x".repeat(2_048),
+        url: `https://example.com/${index}`,
+        windowId: 7,
+      })),
+    };
+    let completeFetch: ((response: Response) => void) | undefined;
+    let requestSignal: AbortSignal | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+        requestSignal = init?.signal as AbortSignal | undefined;
+        return new Promise<Response>((resolve) => {
+          completeFetch = resolve;
+        });
+      }),
+    );
+
+    const upload = postSnapshot(largeSnapshot);
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS + 1);
+
+    expect(requestSignal?.aborted).toBe(false);
+    expect(completeFetch).toBeTypeOf("function");
+    completeFetch!(new Response(null, { status: 204 }));
+    await upload;
+  });
 });
 
 describe("HTTP upload failure classification", () => {

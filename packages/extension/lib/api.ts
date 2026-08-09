@@ -1,5 +1,6 @@
 import {
   healthResponseSchema,
+  ingestSnapshotBodyLimitBytes,
   type IngestContent,
   type IngestSnapshot,
 } from "@tabhub/shared";
@@ -8,6 +9,8 @@ import {
   CONTENT_ENDPOINT,
   HEALTH_ENDPOINT,
   REQUEST_TIMEOUT_MS,
+  SNAPSHOT_REQUEST_BASE_TIMEOUT_MS,
+  SNAPSHOT_REQUEST_MIN_THROUGHPUT_BYTES_PER_SECOND,
   SNAPSHOT_ENDPOINT,
 } from "./constants";
 import { PendingRequestError } from "./queue";
@@ -40,9 +43,10 @@ async function responseError(
 
 async function withRequestTimeout<T>(
   request: (signal: AbortSignal) => Promise<T>,
+  timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     return await request(controller.signal);
@@ -51,19 +55,38 @@ async function withRequestTimeout<T>(
   }
 }
 
+export function snapshotRequestTimeoutMs(byteLength: number): number {
+  // IngestSnapshot has already passed the shared 15 MiB transport contract.
+  // Clamp only the timeout calculation defensively; this does not truncate or
+  // reject the payload. At the budget boundary the request gets 130 seconds:
+  // 10 seconds of processing headroom plus 15 MiB at 128 KiB/s.
+  const transportBytes = Math.min(
+    ingestSnapshotBodyLimitBytes,
+    Math.max(0, Math.ceil(byteLength)),
+  );
+  const transferSeconds = Math.ceil(
+    transportBytes / SNAPSHOT_REQUEST_MIN_THROUGHPUT_BYTES_PER_SECOND,
+  );
+  return SNAPSHOT_REQUEST_BASE_TIMEOUT_MS + transferSeconds * 1_000;
+}
+
 export async function postSnapshot(snapshot: IngestSnapshot): Promise<void> {
+  const body = JSON.stringify(snapshot);
+  const timeoutMs = snapshotRequestTimeoutMs(
+    new TextEncoder().encode(body).byteLength,
+  );
   await withRequestTimeout(async (signal) => {
     const response = await fetch(SNAPSHOT_ENDPOINT, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(snapshot),
+      body,
       signal,
     });
 
     if (!response.ok) {
       throw await responseError("Snapshot", response);
     }
-  });
+  }, timeoutMs);
 }
 
 export async function postContent(content: IngestContent): Promise<void> {

@@ -90,7 +90,7 @@ const searchTabsInputSchema = z.object({
   page_size: z.number().int().positive().max(200).default(50),
 });
 
-const tabIdsInputSchema = z.array(z.number().int().positive()).min(1).max(1_000);
+const tabIdsInputSchema = z.array(z.number().int().positive()).min(1);
 
 const setStatusInputSchema = z.object({
   ids: tabIdsInputSchema,

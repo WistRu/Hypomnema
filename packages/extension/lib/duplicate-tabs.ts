@@ -40,9 +40,6 @@ export interface DuplicateCloseResult {
   skipped: number;
 }
 
-const MAX_PLAN_GROUPS = 10_000;
-const MAX_PLAN_TARGETS = 50_000;
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -66,8 +63,7 @@ export function parseDuplicateClosePlan(
   if (
     !isRecord(value) ||
     !hasOnlyKeys(value, ["groups"]) ||
-    !Array.isArray(value.groups) ||
-    value.groups.length > MAX_PLAN_GROUPS
+    !Array.isArray(value.groups)
   ) {
     return undefined;
   }
@@ -75,7 +71,6 @@ export function parseDuplicateClosePlan(
   const groups: DuplicateClosePlanGroup[] = [];
   const seenUrls = new Set<string>();
   const seenTabIds = new Set<number>();
-  let targetCount = 0;
 
   for (const candidate of value.groups) {
     if (
@@ -114,8 +109,6 @@ export function parseDuplicateClosePlan(
         return undefined;
       }
 
-      targetCount += 1;
-      if (targetCount > MAX_PLAN_TARGETS) return undefined;
       seenTabIds.add(targetTabId);
       targetTabIds.push(targetTabId);
     }

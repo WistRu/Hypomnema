@@ -366,6 +366,174 @@ describe("local extension bridge", () => {
     });
   });
 
+  it("sends every one of 501 physical targets without truncation", async () => {
+    const target = new FakeBridgeWindow();
+    const bridge = createExtensionBridge({
+      target,
+      origin: "http://127.0.0.1:7717",
+      requestId: () => "large-tab-command",
+    });
+    const scope = {
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+    };
+    const targets = Array.from({ length: 501 }, (_, tabId) => ({
+      expectedUrl: `https://example.com/tab/${tabId}`,
+      tabId,
+    }));
+
+    const pending = bridge.command({
+      ...scope,
+      command: { kind: "reload", targets },
+    });
+    const posted = target.posted.at(-1)?.message as {
+      command: { targets: typeof targets };
+    };
+    expect(posted.command.targets).toHaveLength(501);
+    expect(posted.command.targets.at(-1)).toEqual(targets.at(-1));
+
+    target.respond({
+      source: "tabhub-extension",
+      channel: "tabhub-extension-bridge",
+      version: 4,
+      requestId: "large-tab-command",
+      type: "tab-command",
+      ok: true,
+      data: {
+        ...scope,
+        result: {
+          failed: [],
+          kind: "reload",
+          requested: 501,
+          skipped: [],
+          succeededTabIds: targets.map(({ tabId }) => tabId),
+        },
+      },
+    });
+
+    await expect(pending).resolves.toMatchObject({
+      result: { kind: "reload", requested: 501 },
+    });
+  });
+
+  it("sends every one of 2,001 workspace tabs without truncation", async () => {
+    const target = new FakeBridgeWindow();
+    const bridge = createExtensionBridge({
+      target,
+      origin: "http://127.0.0.1:7717",
+      requestId: () => "large-workspace-command",
+    });
+    const scope = {
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+    };
+    const tabs = Array.from({ length: 2_001 }, (_, index) => ({
+      muted: index % 2 === 0,
+      pinned: index % 3 === 0,
+      url: `https://example.com/workspace/${index}`,
+    }));
+
+    const pending = bridge.command({
+      ...scope,
+      command: {
+        destination: { kind: "new-window" },
+        kind: "open-workspace",
+        tabs,
+      },
+    });
+    const posted = target.posted.at(-1)?.message as {
+      command: { tabs: typeof tabs };
+    };
+    expect(posted.command.tabs).toHaveLength(2_001);
+    expect(posted.command.tabs.at(-1)).toEqual(tabs.at(-1));
+
+    target.respond({
+      source: "tabhub-extension",
+      channel: "tabhub-extension-bridge",
+      version: 4,
+      requestId: "large-workspace-command",
+      type: "tab-command",
+      ok: true,
+      data: {
+        ...scope,
+        result: {
+          failed: [],
+          kind: "open-workspace",
+          openedTabIds: [],
+          requested: 2_001,
+        },
+      },
+    });
+
+    await expect(pending).resolves.toMatchObject({
+      result: { kind: "open-workspace", requested: 2_001 },
+    });
+  });
+
+  it("keeps minimum, unique-ID, and URL validation without an upper bound", () => {
+    const target = new FakeBridgeWindow();
+    const bridge = createExtensionBridge({
+      target,
+      origin: "http://127.0.0.1:7717",
+    });
+    const scope = {
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+    };
+
+    expect(() =>
+      bridge.command({
+        ...scope,
+        command: { kind: "reload", targets: [] },
+      }),
+    ).toThrow(/at least one physical tab/i);
+    expect(() =>
+      bridge.command({
+        ...scope,
+        command: {
+          kind: "reload",
+          targets: [
+            { expectedUrl: "https://example.com/one", tabId: 1 },
+            { expectedUrl: "https://example.com/two", tabId: 1 },
+          ],
+        },
+      }),
+    ).toThrow(/unique tab IDs/i);
+    expect(() =>
+      bridge.command({
+        ...scope,
+        command: {
+          kind: "reload",
+          targets: [{ expectedUrl: "not a URL", tabId: 1 }],
+        },
+      }),
+    ).toThrow(/current exact URL/i);
+    expect(() =>
+      bridge.command({
+        ...scope,
+        command: {
+          destination: { kind: "app-window" },
+          kind: "open-workspace",
+          tabs: [],
+        },
+      }),
+    ).toThrow(/at least one tab/i);
+    expect(() =>
+      bridge.command({
+        ...scope,
+        command: {
+          destination: { kind: "app-window" },
+          kind: "open-workspace",
+          tabs: [{ muted: false, pinned: false, url: "not a URL" }],
+        },
+      }),
+    ).toThrow(/invalid workspace tab/i);
+    expect(target.posted).toEqual([]);
+  });
+
   it("keeps a workspace restore pending beyond the ordinary command timeout", async () => {
     vi.useFakeTimers();
     const target = new FakeBridgeWindow();

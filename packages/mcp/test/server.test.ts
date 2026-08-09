@@ -429,6 +429,30 @@ describe("TabHub MCP server", () => {
     }
   });
 
+  it("forwards every Library tab ID above the former MCP bulk ceiling", async () => {
+    const ids = Array.from({ length: 1_001 }, (_, index) => index + 1);
+    const setStatus = vi.fn(async () => ({
+      updated: ids.length,
+      status: "done" as const,
+    }));
+    const connection = await connectClient(createApi({ setStatus }));
+
+    try {
+      const result = await connection.client.callTool({
+        name: "set_status",
+        arguments: { ids, status: "done" },
+      });
+
+      expect(setStatus).toHaveBeenCalledWith({ ids, status: "done" });
+      expect(JSON.parse(textResult(result))).toEqual({
+        updated: ids.length,
+        status: "done",
+      });
+    } finally {
+      await connection.close();
+    }
+  });
+
   it("sets importance using the MCP level vocabulary", async () => {
     const setImportance = vi.fn(async () => ({
       updated: 2,

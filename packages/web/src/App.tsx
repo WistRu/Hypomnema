@@ -29,10 +29,12 @@ import {
 import {
   assignTag,
   enqueueShortSummary,
+  fetchAllLibraryTabIds,
   fetchSummaryJob,
   fetchTabs,
   fetchTagTree,
   updateTabStatuses,
+  type LibraryTabFilters,
   type OpenFilter,
 } from "./api";
 import { OpenTabsView } from "./OpenTabsView";
@@ -373,6 +375,17 @@ export function App() {
   const [activeTabId, setActiveTabId] = useState<number | null>(null);
   const debouncedSearch = useDebouncedValue(search, 300);
   const q = debouncedSearch.trim();
+  const libraryFilters: LibraryTabFilters = {
+    browser,
+    importance,
+    openState,
+    q,
+    status,
+    tag,
+  };
+  const libraryFilterKey = JSON.stringify(libraryFilters);
+  const libraryFilterKeyRef = useRef(libraryFilterKey);
+  libraryFilterKeyRef.current = libraryFilterKey;
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(Date.now()), 60_000);
@@ -381,7 +394,7 @@ export function App() {
 
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [browser, importance, openState, page, q, status, tag]);
+  }, [browser, importance, openState, q, status, tag]);
 
   const tabsQuery = useQuery({
     queryKey: ["tabs", { browser, importance, openState, page, q, status, tag }],
@@ -391,6 +404,15 @@ export function App() {
   const tagsQuery = useQuery({
     queryKey: ["tags"],
     queryFn: ({ signal }) => fetchTagTree(signal),
+  });
+  const selectAllLibraryMutation = useMutation({
+    mutationFn: ({ filters }: { filters: LibraryTabFilters; filterKey: string }) =>
+      fetchAllLibraryTabIds(filters),
+    onSuccess: (ids, { filterKey }) => {
+      if (filterKey === libraryFilterKeyRef.current) {
+        setSelectedIds(new Set(ids));
+      }
+    },
   });
   const selectView = (nextView: WorkspaceView) => {
     if (shouldRefreshLibrary(view, nextView)) {
@@ -611,7 +633,10 @@ export function App() {
         ? "Connecting"
         : "Local collection";
   const bulkError = bulkStatusMutation.error ?? bulkTagMutation.error;
-  const bulkBusy = bulkStatusMutation.isPending || bulkTagMutation.isPending;
+  const bulkBusy =
+    selectAllLibraryMutation.isPending ||
+    bulkStatusMutation.isPending ||
+    bulkTagMutation.isPending;
   const closeDrawer = useCallback(() => setActiveTabId(null), []);
   const openRow = (tabId: number, event: MouseEvent<HTMLTableRowElement>) => {
     const target = event.target as HTMLElement;
@@ -859,6 +884,28 @@ export function App() {
                         : "0 tabs"
                       : "Loading collection"}
                 </p>
+                <button
+                  className="clear-button"
+                  disabled={
+                    bulkBusy ||
+                    !tabsQuery.data ||
+                    tabsQuery.data.total === 0
+                  }
+                  type="button"
+                  onClick={() =>
+                    selectAllLibraryMutation.mutate({
+                      filterKey: libraryFilterKey,
+                      filters: libraryFilters,
+                    })
+                  }
+                >
+                  All filtered results
+                </button>
+                {selectAllLibraryMutation.isError ? (
+                  <span className="bulk-error" role="alert">
+                    {selectAllLibraryMutation.error.message}
+                  </span>
+                ) : null}
               </div>
 
               {selectedIds.size > 0 ? (

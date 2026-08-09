@@ -10,6 +10,7 @@ import type {
   SetImportanceResponse,
   SetStatus,
   SetStatusResponse,
+  TabBulkIdsResponse,
   TabDetailResponse,
   TabImportance,
   TabListItem,
@@ -20,21 +21,25 @@ import type {
 import { normalizeUrl } from "./normalize-url.js";
 import type { TabInstanceCatalog } from "./tab-instance-catalog.js";
 
-export interface ListTabsInput {
+export interface FilterTabsInput {
   browser: string | undefined;
   isOpen: boolean | undefined;
-  page: number;
-  pageSize: number;
   q: string | undefined;
   status: TabStatus | undefined;
   importance: TabImportance | undefined;
   tag: string | undefined;
+}
+
+export interface ListTabsInput extends FilterTabsInput {
+  page: number;
+  pageSize: number;
   rankedPage?: { ids: number[]; total: number };
 }
 
 export interface TabCatalog {
   ingestSnapshot(snapshot: IngestSnapshot): IngestSnapshotResponse;
   ingestContent(content: IngestContent): IngestContentResponse;
+  listTabIds(input: FilterTabsInput): TabBulkIdsResponse;
   listTabs(input: ListTabsInput): TabListResponse;
   getTab(id: number): TabDetailResponse | undefined;
   updateTab(id: number, input: PatchTab): TabDetailResponse | undefined;
@@ -129,6 +134,71 @@ function toFtsQuery(query: string): string {
   }
 
   return tokens.map((token) => `"${token}"`).join(" AND ");
+}
+
+function tabFilter(input: FilterTabsInput): {
+  parameters: Array<string | number>;
+  predicates: string[];
+} {
+  const predicates: string[] = [];
+  const parameters: Array<string | number> = [];
+
+  if (input.browser !== undefined) {
+    predicates.push("tabs.browser = ?");
+    parameters.push(input.browser);
+  }
+
+  if (input.isOpen !== undefined) {
+    predicates.push("tabs.is_open = ?");
+    parameters.push(input.isOpen ? 1 : 0);
+  }
+
+  if (input.q !== undefined) {
+    predicates.push(
+      "tabs.id IN (SELECT rowid FROM contents_fts WHERE contents_fts MATCH ?)",
+    );
+    parameters.push(toFtsQuery(input.q));
+  }
+
+  if (input.status !== undefined) {
+    predicates.push("tabs.status = ?");
+    parameters.push(input.status);
+  }
+
+  if (input.importance !== undefined) {
+    predicates.push("tabs.importance = ?");
+    parameters.push(input.importance);
+  }
+
+  if (input.tag !== undefined) {
+    predicates.push(`tabs.id IN (
+      WITH RECURSIVE
+        tag_paths(id, path) AS (
+          SELECT id, name
+          FROM tags
+          WHERE parent_id IS NULL
+          UNION ALL
+          SELECT child.id, tag_paths.path || '/' || child.name
+          FROM tags AS child
+          JOIN tag_paths ON child.parent_id = tag_paths.id
+        ),
+        descendants(id) AS (
+          SELECT id
+          FROM tag_paths
+          WHERE path = ?
+          UNION ALL
+          SELECT child.id
+          FROM tags AS child
+          JOIN descendants ON child.parent_id = descendants.id
+        )
+      SELECT tab_tags.tab_id
+      FROM tab_tags
+      JOIN descendants ON descendants.id = tab_tags.tag_id
+    )`);
+    parameters.push(input.tag);
+  }
+
+  return { parameters, predicates };
 }
 
 function mapTabRow(row: TabRow, tagPaths: string[]): TabListItem {
@@ -447,64 +517,23 @@ export function createTabCatalog(
       return { tabId: tab.id, extractedAt };
     },
 
+    listTabIds(input) {
+      const { parameters, predicates } = tabFilter(input);
+      const whereClause =
+        predicates.length > 0 ? `WHERE ${predicates.join(" AND ")}` : "";
+      const rows = connection
+        .prepare(
+          `SELECT tabs.id
+           FROM tabs
+           ${whereClause}
+           ORDER BY tabs.last_seen_at DESC, tabs.id DESC`,
+        )
+        .all(...parameters) as TabIdRow[];
+      return { ids: rows.map(({ id }) => id) };
+    },
+
     listTabs(input) {
-      const predicates: string[] = [];
-      const parameters: Array<string | number> = [];
-
-      if (input.browser !== undefined) {
-        predicates.push("tabs.browser = ?");
-        parameters.push(input.browser);
-      }
-
-      if (input.isOpen !== undefined) {
-        predicates.push("tabs.is_open = ?");
-        parameters.push(input.isOpen ? 1 : 0);
-      }
-
-      if (input.q !== undefined) {
-        predicates.push(
-          "tabs.id IN (SELECT rowid FROM contents_fts WHERE contents_fts MATCH ?)",
-        );
-        parameters.push(toFtsQuery(input.q));
-      }
-
-      if (input.status !== undefined) {
-        predicates.push("tabs.status = ?");
-        parameters.push(input.status);
-      }
-
-      if (input.importance !== undefined) {
-        predicates.push("tabs.importance = ?");
-        parameters.push(input.importance);
-      }
-
-      if (input.tag !== undefined) {
-        predicates.push(`tabs.id IN (
-          WITH RECURSIVE
-            tag_paths(id, path) AS (
-              SELECT id, name
-              FROM tags
-              WHERE parent_id IS NULL
-              UNION ALL
-              SELECT child.id, tag_paths.path || '/' || child.name
-              FROM tags AS child
-              JOIN tag_paths ON child.parent_id = tag_paths.id
-            ),
-            descendants(id) AS (
-              SELECT id
-              FROM tag_paths
-              WHERE path = ?
-              UNION ALL
-              SELECT child.id
-              FROM tags AS child
-              JOIN descendants ON child.parent_id = descendants.id
-            )
-          SELECT tab_tags.tab_id
-          FROM tab_tags
-          JOIN descendants ON descendants.id = tab_tags.tag_id
-        )`);
-        parameters.push(input.tag);
-      }
+      const { parameters, predicates } = tabFilter(input);
 
       let semanticOrderClause = "tabs.last_seen_at DESC, tabs.id DESC";
       if (input.rankedPage !== undefined) {

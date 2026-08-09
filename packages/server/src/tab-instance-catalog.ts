@@ -380,27 +380,37 @@ export function createTabInstanceCatalog(
       return tagPathsByTab;
     }
 
-    const placeholders = canonicalIds.map(() => "?").join(", ");
-    const tagRows = connection
-      .prepare(`
-        WITH RECURSIVE tag_paths(id, path) AS (
-          SELECT id, name FROM tags WHERE parent_id IS NULL
-          UNION ALL
-          SELECT child.id, tag_paths.path || '/' || child.name
-          FROM tags AS child
-          JOIN tag_paths ON child.parent_id = tag_paths.id
-        )
-        SELECT tab_tags.tab_id, tag_paths.path
-        FROM tab_tags
-        JOIN tag_paths ON tag_paths.id = tab_tags.tag_id
-        WHERE tab_tags.tab_id IN (${placeholders})
-        ORDER BY tab_tags.tab_id, tag_paths.path COLLATE NOCASE, tag_paths.id
-      `)
-      .all(...canonicalIds) as TabTagPathRow[];
-    for (const row of tagRows) {
-      const paths = tagPathsByTab.get(row.tab_id) ?? [];
-      paths.push(row.path);
-      tagPathsByTab.set(row.tab_id, paths);
+    // SQLite limits the number of bound variables in one statement. Querying
+    // in transparent batches keeps the public result unbounded and complete.
+    const sqliteBindBatchSize = 900;
+    for (
+      let offset = 0;
+      offset < canonicalIds.length;
+      offset += sqliteBindBatchSize
+    ) {
+      const batch = canonicalIds.slice(offset, offset + sqliteBindBatchSize);
+      const placeholders = batch.map(() => "?").join(", ");
+      const tagRows = connection
+        .prepare(`
+          WITH RECURSIVE tag_paths(id, path) AS (
+            SELECT id, name FROM tags WHERE parent_id IS NULL
+            UNION ALL
+            SELECT child.id, tag_paths.path || '/' || child.name
+            FROM tags AS child
+            JOIN tag_paths ON child.parent_id = tag_paths.id
+          )
+          SELECT tab_tags.tab_id, tag_paths.path
+          FROM tab_tags
+          JOIN tag_paths ON tag_paths.id = tab_tags.tag_id
+          WHERE tab_tags.tab_id IN (${placeholders})
+          ORDER BY tab_tags.tab_id, tag_paths.path COLLATE NOCASE, tag_paths.id
+        `)
+        .all(...batch) as TabTagPathRow[];
+      for (const row of tagRows) {
+        const paths = tagPathsByTab.get(row.tab_id) ?? [];
+        paths.push(row.path);
+        tagPathsByTab.set(row.tab_id, paths);
+      }
     }
     return tagPathsByTab;
   };

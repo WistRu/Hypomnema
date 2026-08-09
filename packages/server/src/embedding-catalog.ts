@@ -17,7 +17,6 @@ const EMBEDDING_DIMENSIONS = 512 as const;
 const EMBEDDING_BATCH_SIZE = 100;
 const EMBEDDING_SOURCE_CHARACTERS = 32_000;
 const CLUSTER_KEYWORD_CHARACTERS = 4_000;
-const MAX_CLUSTER_TABS = 10_000;
 
 export interface EmbeddingSearchFilters {
   browser?: string;
@@ -284,7 +283,6 @@ export function createEmbeddingCatalog(
       AND metadata.dimensions = @dimensions
       AND metadata.source_content_revision = contents.content_revision
     ORDER BY tabs.id
-    LIMIT ${MAX_CLUSTER_TABS}
   `);
 
   const writeVectors = connection.transaction(
@@ -535,17 +533,15 @@ export function createEmbeddingCatalog(
       };
       let indexed = 0;
       let afterTabId = 0;
-      let considered = 0;
-      while (considered < MAX_CLUSTER_TABS) {
+      while (true) {
         const candidates = selectInboxCandidates.all({
           ...parameters,
           afterTabId,
-          limit: Math.min(EMBEDDING_BATCH_SIZE, MAX_CLUSTER_TABS - considered),
+          limit: EMBEDDING_BATCH_SIZE,
         }) as CandidateRow[];
         if (candidates.length === 0) break;
         const result = await indexCandidates(candidates, activeProvider);
         indexed += result.indexed;
-        considered += candidates.length;
         afterTabId = candidates.at(-1)!.tab_id;
       }
       const rows = (selectInboxEmbeddings.all(parameters) as InboxEmbeddingRow[]).map(

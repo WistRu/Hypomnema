@@ -472,8 +472,8 @@ function validateScope(scope: PhysicalTabScope): void {
 }
 
 function validateTargets(targets: readonly PhysicalTabTarget[]): void {
-  if (targets.length < 1 || targets.length > 500) {
-    throw new ExtensionBridgeError("Select between 1 and 500 physical tabs.");
+  if (targets.length < 1) {
+    throw new ExtensionBridgeError("Select at least one physical tab.");
   }
   const ids = targets.map(({ tabId }) => tabId);
   if (!ids.every(isNonNegativeInteger) || new Set(ids).size !== ids.length) {
@@ -544,8 +544,8 @@ function validatedCommandRequest(request: TabCommandRequest): TabCommandRequest 
       }
       break;
     case "open-workspace":
-      if (command.tabs.length < 1 || command.tabs.length > 500) {
-        throw new ExtensionBridgeError("A workspace must contain between 1 and 500 tabs.");
+      if (command.tabs.length < 1) {
+        throw new ExtensionBridgeError("A workspace must contain at least one tab.");
       }
       if (
         command.tabs.some(
