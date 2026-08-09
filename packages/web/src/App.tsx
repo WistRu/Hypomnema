@@ -35,6 +35,11 @@ import {
   updateTabStatuses,
   type OpenFilter,
 } from "./api";
+import { OpenTabsView } from "./OpenTabsView";
+import {
+  shouldRefreshLibrary,
+  type WorkspaceView,
+} from "./workspace-view";
 import { TabDrawer } from "./TabDrawer";
 
 const GraphView = lazy(() => import("./GraphView"));
@@ -353,7 +358,7 @@ function SearchIcon() {
 
 export function App() {
   const queryClient = useQueryClient();
-  const [view, setView] = useState<"table" | "graph">("table");
+  const [view, setView] = useState<WorkspaceView>("open");
   const [browser, setBrowser] = useState("all");
   const [openState, setOpenState] = useState<OpenFilter>("all");
   const [status, setStatus] = useState<"all" | TabStatus>("all");
@@ -387,6 +392,12 @@ export function App() {
     queryKey: ["tags"],
     queryFn: ({ signal }) => fetchTagTree(signal),
   });
+  const selectView = (nextView: WorkspaceView) => {
+    if (shouldRefreshLibrary(view, nextView)) {
+      void tabsQuery.refetch();
+    }
+    setView(nextView);
+  };
   const bulkStatusMutation = useMutation({
     mutationFn: () => updateTabStatuses([...selectedIds], bulkStatus),
     onSuccess: async () => {
@@ -640,14 +651,20 @@ export function App() {
               <p className="eyebrow">Workspace</p>
               <div className="title-row">
                 <h2 id="tab-list-title">
-                  {view === "graph" ? tag || "Knowledge graph" : tag || "All tabs"}
+                  {view === "open"
+                    ? "Open tabs"
+                    : view === "graph"
+                      ? tag || "Knowledge graph"
+                      : tag || "Library"}
                 </h2>
-                {view === "table" && tabsQuery.data ? (
+                {view === "library" && tabsQuery.data ? (
                   <span>{tabsQuery.data.total.toLocaleString()}</span>
                 ) : null}
               </div>
               <p>
-                {view === "graph"
+                {view === "open"
+                  ? "Every physical browser tab, including repeated URLs."
+                  : view === "graph"
                   ? tag
                     ? `Directed links under ${tag} and its descendants.`
                     : "Explore relationships across every captured tab."
@@ -657,7 +674,7 @@ export function App() {
               </p>
             </div>
             <div className="heading-actions">
-              {view === "table" && tabsQuery.isFetching && !tabsQuery.isPending ? (
+              {view === "library" && tabsQuery.isFetching && !tabsQuery.isPending ? (
                 <span className="refresh-status" role="status">
                   <span aria-hidden="true" />
                   Refreshing
@@ -665,16 +682,23 @@ export function App() {
               ) : null}
               <div className="view-switch" aria-label="Workspace view" role="group">
                 <button
-                  aria-pressed={view === "table"}
+                  aria-pressed={view === "open"}
                   type="button"
-                  onClick={() => setView("table")}
+                  onClick={() => selectView("open")}
                 >
-                  Table
+                  Open tabs
+                </button>
+                <button
+                  aria-pressed={view === "library"}
+                  type="button"
+                  onClick={() => selectView("library")}
+                >
+                  Library
                 </button>
                 <button
                   aria-pressed={view === "graph"}
                   type="button"
-                  onClick={() => setView("graph")}
+                  onClick={() => selectView("graph")}
                 >
                   Graph
                 </button>
@@ -682,8 +706,9 @@ export function App() {
             </div>
           </section>
 
-          <div className="workspace-layout">
-            <aside className="tag-sidebar" aria-labelledby="tag-tree-title">
+          <div className={view === "open" ? "workspace-layout is-open-tabs" : "workspace-layout"}>
+            {view !== "open" ? (
+              <aside className="tag-sidebar" aria-labelledby="tag-tree-title">
               <div className="sidebar-heading">
                 <div>
                   <p>Organize</p>
@@ -726,9 +751,12 @@ export function App() {
                   <p className="sidebar-state">Assign a tag to start your topic tree.</p>
                 ) : null}
               </nav>
-            </aside>
+              </aside>
+            ) : null}
 
-            {view === "table" ? (
+            {view === "open" ? (
+              <OpenTabsView onSelectCanonicalTab={setActiveTabId} />
+            ) : view === "library" ? (
               <section className="table-panel" aria-label="Browser tabs">
               <div className="filter-bar">
                 <div className="filter-label">

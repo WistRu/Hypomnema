@@ -15,9 +15,20 @@ import {
   type CaptureBatchResult,
 } from "../lib/content-capture";
 import {
+  closeObviousDuplicatesAndRefresh,
+  previewObviousDuplicates,
+  type DuplicateTabAdapter,
+} from "../lib/duplicate-tabs";
+import { createDuplicatePreviewRegistry } from "../lib/duplicate-preview-registry";
+import {
+  isAllowedAppMessageSender,
   isExtensionRequest,
+  parseScopedDuplicateUrls,
+  type AppExtensionResponse,
+  type BridgeRequestType,
   type CaptureSummary,
   type ExtensionResponse,
+  type ExtensionRequest,
   type ExtensionStatus,
 } from "../lib/messages";
 import {
@@ -33,14 +44,18 @@ import {
 } from "../lib/queue";
 import {
   getBrowserIdentifier,
+  getOrCreateInstallationId,
   readQueueState,
   writeIdentityAndQueueState,
   writeQueueState,
   type KnownBrowser,
 } from "../lib/storage";
+import { registerTabEventSnapshots } from "../lib/tab-event-snapshots";
 import {
   buildIdentityTransitionSnapshots,
   buildSnapshot,
+  reconcileCapturedTabUrl,
+  type BrowserTabLike,
 } from "../lib/tab-snapshot";
 
 const IDENTITY_REQUIRED_ERROR =
@@ -48,6 +63,16 @@ const IDENTITY_REQUIRED_ERROR =
 
 let syncTail: Promise<void> = Promise.resolve();
 let tabEventTimer: ReturnType<typeof setTimeout> | undefined;
+
+const duplicateTabAdapter: DuplicateTabAdapter = {
+  get: (tabId) => browser.tabs.get(tabId),
+  remove: (tabId) => browser.tabs.remove(tabId),
+};
+const duplicatePreviewRegistry = createDuplicatePreviewRegistry({
+  get: (key) => browser.storage.session.get(key),
+  remove: (key) => browser.storage.session.remove(key),
+  set: (items) => browser.storage.session.set(items),
+});
 
 function serializeSync<T>(operation: () => Promise<T>): Promise<T> {
   const result = syncTail.then(operation, operation);
@@ -103,38 +128,47 @@ async function appendAndFlushUnlocked(
   );
 }
 
+async function captureAndSyncUnlocked(
+  requireConfigured = false,
+): Promise<DrainQueueResult | undefined> {
+  const [browserIdentifier, installationId] = await Promise.all([
+    getBrowserIdentifier(),
+    getOrCreateInstallationId(),
+  ]);
+
+  if (browserIdentifier === undefined) {
+    if (requireConfigured) {
+      throw new Error(IDENTITY_REQUIRED_ERROR);
+    }
+
+    return undefined;
+  }
+
+  const tabs = await browser.tabs.query({});
+  const snapshot = buildSnapshot(browserIdentifier, installationId, tabs);
+  return appendAndFlushUnlocked([createPendingSnapshot(snapshot)]);
+}
+
 function captureAndSync(
   requireConfigured = false,
 ): Promise<DrainQueueResult | undefined> {
-  return serializeSync(async () => {
-    const browserIdentifier = await getBrowserIdentifier();
-
-    if (browserIdentifier === undefined) {
-      if (requireConfigured) {
-        throw new Error(IDENTITY_REQUIRED_ERROR);
-      }
-
-      return undefined;
-    }
-
-    const tabs = await browser.tabs.query({});
-    const snapshot = buildSnapshot(browserIdentifier, tabs);
-    return appendAndFlushUnlocked([createPendingSnapshot(snapshot)]);
-  });
+  return serializeSync(() => captureAndSyncUnlocked(requireConfigured));
 }
 
 function changeBrowserIdentity(
   nextBrowser: KnownBrowser,
 ): Promise<DrainQueueResult> {
   return serializeSync(async () => {
-    const [previousBrowser, tabs, state] = await Promise.all([
+    const [previousBrowser, tabs, state, installationId] = await Promise.all([
       getBrowserIdentifier(),
       browser.tabs.query({}),
       readQueueState(),
+      getOrCreateInstallationId(),
     ]);
     const transition = buildIdentityTransitionSnapshots(
       previousBrowser,
       nextBrowser,
+      installationId,
       tabs,
     ).map((snapshot) => createPendingSnapshot(snapshot));
     const pending = appendPendingItems(state.pending, transition);
@@ -167,27 +201,42 @@ async function extractTabContent(tabId: number): Promise<unknown> {
 function addCapturedUrlsToSnapshot(
   snapshot: ReturnType<typeof buildSnapshot>,
   capture: CaptureBatchResult,
-): void {
-  const urls = new Set(snapshot.tabs.map(({ url }) => url));
+  currentTabs: readonly BrowserTabLike[],
+): Set<number> {
+  const reconciledTabIds = new Set<number>();
+  const currentTabsById = new Map(
+    currentTabs.flatMap((tab) =>
+      tab.id === undefined ? [] : [[tab.id, tab] as const],
+    ),
+  );
 
   for (const { page, tab } of capture.captured) {
-    if (urls.has(page.url)) {
-      continue;
+    if (
+      reconcileCapturedTabUrl(
+        snapshot,
+        {
+          id: tab.id,
+          index: tab.index,
+          url: page.url,
+          windowId: tab.windowId,
+        },
+        currentTabsById.get(tab.id),
+      )
+    ) {
+      reconciledTabIds.add(tab.id);
     }
-
-    snapshot.tabs.push({
-      index: tab.index,
-      url: page.url,
-      windowId: tab.windowId,
-    });
-    urls.add(page.url);
   }
+
+  return reconciledTabIds;
 }
 
 async function captureContentUnlocked(
   mode: "current" | "all",
 ): Promise<ExtensionResponse> {
-  const browserIdentifier = await getBrowserIdentifier();
+  const [browserIdentifier, installationId] = await Promise.all([
+    getBrowserIdentifier(),
+    getOrCreateInstallationId(),
+  ]);
 
   if (browserIdentifier === undefined) {
     throw new Error(IDENTITY_REQUIRED_ERROR);
@@ -213,9 +262,20 @@ async function captureContentUnlocked(
   }
 
   const currentTabs = await browser.tabs.query({});
-  const snapshot = buildSnapshot(browserIdentifier, currentTabs);
-  addCapturedUrlsToSnapshot(snapshot, capture);
-  const contentItems = capture.captured.map(({ page }) =>
+  const snapshot = buildSnapshot(
+    browserIdentifier,
+    installationId,
+    currentTabs,
+  );
+  const reconciledTabIds = addCapturedUrlsToSnapshot(
+    snapshot,
+    capture,
+    currentTabs,
+  );
+  const reconciledCapture = capture.captured.filter(({ tab }) =>
+    reconciledTabIds.has(tab.id),
+  );
+  const contentItems = reconciledCapture.map(({ page }) =>
     createPendingContent({
       browser: browserIdentifier,
       htmlExcerpt: page.htmlExcerpt,
@@ -229,8 +289,10 @@ async function captureContentUnlocked(
     ...contentItems,
   ]);
   const summary: CaptureSummary = {
-    ...baseSummary,
+    captured: reconciledCapture.length,
     queued: drainResult.remaining.filter(({ id }) => contentIds.has(id)).length,
+    requested: capture.requested,
+    skipped: capture.requested - reconciledCapture.length,
   };
 
   return {
@@ -338,12 +400,155 @@ async function handleSnapshotNow(): Promise<ExtensionResponse> {
   }
 }
 
-async function handleMessage(message: unknown): Promise<ExtensionResponse | void> {
+function bridgeTypeForRequest(
+  request: ExtensionRequest,
+): BridgeRequestType | undefined {
+  switch (request.type) {
+    case "tabhub:app-probe":
+      return "probe";
+    case "tabhub:app-preview-obvious-duplicates":
+      return "preview-obvious-duplicates";
+    case "tabhub:app-close-obvious-duplicates":
+      return "close-obvious-duplicates";
+    default:
+      return undefined;
+  }
+}
+
+function scopedUrls(request: {
+  urls?: string[];
+}): string[] | undefined {
+  const parsed = parseScopedDuplicateUrls(request.urls);
+
+  if (parsed === null) {
+    throw new Error("Invalid duplicate URL scope.");
+  }
+
+  return parsed;
+}
+
+async function handleAppRequest(
+  request: Extract<ExtensionRequest, { type: `tabhub:app-${string}` }>,
+): Promise<AppExtensionResponse> {
+  switch (request.type) {
+    case "tabhub:app-probe": {
+      const [browserIdentifier, installationId] = await Promise.all([
+        getBrowserIdentifier(),
+        getOrCreateInstallationId(),
+      ]);
+
+      if (browserIdentifier !== undefined) {
+        // Enqueue this before answering so a following preview is serialized
+        // after a modern physical snapshot, without making the 2s probe wait.
+        void captureAndSync().catch((error: unknown) => {
+          console.error("TabHub app-probe snapshot failed", error);
+        });
+      }
+
+      return {
+        data: {
+          available: true,
+          browser: browserIdentifier ?? null,
+          installationId,
+        },
+        ok: true,
+        type: "probe",
+      };
+    }
+    case "tabhub:app-preview-obvious-duplicates":
+      return serializeSync(async () => {
+        const [browserIdentifier, installationId, tabs] = await Promise.all([
+          getBrowserIdentifier(),
+          getOrCreateInstallationId(),
+          browser.tabs.query({}),
+        ]);
+
+        if (browserIdentifier === undefined) {
+          throw new Error(IDENTITY_REQUIRED_ERROR);
+        }
+
+        const preview = previewObviousDuplicates(tabs, scopedUrls(request));
+        const previewId = await duplicatePreviewRegistry.issue(
+          { browser: browserIdentifier, installationId },
+          preview.plan,
+        );
+        return {
+          data: {
+            browser: browserIdentifier,
+            installationId,
+            previewId,
+            totalCloseCandidates: preview.totalCloseCandidates,
+            totalGroups: preview.totalGroups,
+            totalProtected: preview.totalProtected,
+          },
+          ok: true,
+          type: "preview-obvious-duplicates",
+        };
+      });
+    case "tabhub:app-close-obvious-duplicates":
+      return serializeSync(async () => {
+        const [browserIdentifier, installationId] = await Promise.all([
+          getBrowserIdentifier(),
+          getOrCreateInstallationId(),
+        ]);
+
+        if (browserIdentifier === undefined) {
+          throw new Error(IDENTITY_REQUIRED_ERROR);
+        }
+
+        const plan = await duplicatePreviewRegistry.consume(
+          { browser: browserIdentifier, installationId },
+          request.previewId,
+        );
+        const result = await closeObviousDuplicatesAndRefresh(
+          duplicateTabAdapter,
+          async () => {
+            await captureAndSyncUnlocked(true);
+          },
+          plan,
+        );
+        return {
+          data: { browser: browserIdentifier, installationId, ...result },
+          ok: true,
+          type: "close-obvious-duplicates",
+        };
+      });
+  }
+}
+
+interface MessageSenderLike {
+  tab?: { url?: string | undefined } | undefined;
+  url?: string | undefined;
+}
+
+async function handleMessage(
+  message: unknown,
+  sender: MessageSenderLike,
+): Promise<ExtensionResponse | AppExtensionResponse | void> {
   if (!isExtensionRequest(message)) {
     return;
   }
 
+  const bridgeType = bridgeTypeForRequest(message);
+
+  if (bridgeType !== undefined && !isAllowedAppMessageSender(sender)) {
+    return {
+      error: "Duplicate actions are available only from the local TabHub app.",
+      ok: false,
+      type: bridgeType,
+    };
+  }
+
   try {
+    if (bridgeType !== undefined) {
+      return handleAppRequest(
+        message as Extract<
+          ExtensionRequest,
+          { type: `tabhub:app-${string}` }
+        >,
+      );
+    }
+
     switch (message.type) {
       case "tabhub:get-status":
         return { ok: true, status: await getStatus(true) };
@@ -358,6 +563,14 @@ async function handleMessage(message: unknown): Promise<ExtensionResponse | void
         return { ok: true, status: await getStatus() };
     }
   } catch (error) {
+    if (bridgeType !== undefined) {
+      return {
+        error: errorMessage(error),
+        ok: false,
+        type: bridgeType,
+      };
+    }
+
     let status: ExtensionStatus;
 
     try {
@@ -383,6 +596,7 @@ async function handleMessage(message: unknown): Promise<ExtensionResponse | void
 async function initializeWorker(): Promise<void> {
   await ensureAlarms();
   await flushPending();
+  await captureAndSync();
 }
 
 export default defineBackground(() => {
@@ -423,9 +637,16 @@ export default defineBackground(() => {
     }
   });
 
-  browser.tabs.onCreated.addListener(scheduleTabEventSnapshot);
-  browser.tabs.onUpdated.addListener(scheduleTabEventSnapshot);
-  browser.tabs.onRemoved.addListener(scheduleTabEventSnapshot);
+  registerTabEventSnapshots(scheduleTabEventSnapshot, {
+    activated: (listener) => browser.tabs.onActivated?.addListener(listener),
+    attached: (listener) => browser.tabs.onAttached?.addListener(listener),
+    created: (listener) => browser.tabs.onCreated?.addListener(listener),
+    detached: (listener) => browser.tabs.onDetached?.addListener(listener),
+    moved: (listener) => browser.tabs.onMoved?.addListener(listener),
+    removed: (listener) => browser.tabs.onRemoved?.addListener(listener),
+    replaced: (listener) => browser.tabs.onReplaced?.addListener(listener),
+    updated: (listener) => browser.tabs.onUpdated?.addListener(listener),
+  });
 
   browser.runtime.onMessage.addListener(handleMessage);
 });

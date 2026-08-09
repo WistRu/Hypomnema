@@ -19,6 +19,7 @@ import { createPendingSnapshot } from "./queue";
 import {
   BROWSER_CONFIG_VERSION,
   getBrowserIdentifier,
+  getOrCreateInstallationId,
   readQueueState,
   writeIdentityAndQueueState,
 } from "./storage";
@@ -117,5 +118,55 @@ describe("browser identity storage", () => {
         kind: "snapshot",
       }),
     ]);
+  });
+});
+
+describe("installation identity storage", () => {
+  beforeEach(() => {
+    storage.get.mockReset();
+    storage.set.mockReset();
+  });
+
+  it("creates one stable UUID when concurrent callers find no stored identity", async () => {
+    storage.get.mockResolvedValue({});
+    storage.set.mockResolvedValue(undefined);
+
+    const [first, second] = await Promise.all([
+      getOrCreateInstallationId(),
+      getOrCreateInstallationId(),
+    ]);
+
+    expect(first).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(second).toBe(first);
+    expect(storage.get).toHaveBeenCalledTimes(1);
+    expect(storage.set).toHaveBeenCalledWith({
+      [STORAGE_KEYS.installationId]: first,
+    });
+  });
+
+  it("reuses a valid stored installation UUID without rewriting storage", async () => {
+    const installationId = "123e4567-e89b-42d3-a456-426614174000";
+    storage.get.mockResolvedValue({
+      [STORAGE_KEYS.installationId]: installationId,
+    });
+
+    await expect(getOrCreateInstallationId()).resolves.toBe(installationId);
+    expect(storage.set).not.toHaveBeenCalled();
+  });
+
+  it("replaces malformed stored installation identity", async () => {
+    storage.get.mockResolvedValue({
+      [STORAGE_KEYS.installationId]: "not-an-installation-uuid",
+    });
+    storage.set.mockResolvedValue(undefined);
+
+    const installationId = await getOrCreateInstallationId();
+
+    expect(installationId).not.toBe("not-an-installation-uuid");
+    expect(storage.set).toHaveBeenCalledWith({
+      [STORAGE_KEYS.installationId]: installationId,
+    });
   });
 });

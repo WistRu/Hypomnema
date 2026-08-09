@@ -13,6 +13,8 @@ import Fastify, {
 import { openDatabase } from "./database.js";
 import { createTabCatalog } from "./tab-catalog.js";
 import { registerTabRoutes } from "./tab-routes.js";
+import { createTabInstanceCatalog } from "./tab-instance-catalog.js";
+import { registerTabInstanceRoutes } from "./tab-instance-routes.js";
 import { createTagCatalog } from "./tag-catalog.js";
 import { registerTagRoutes } from "./tag-routes.js";
 import { createStatsCatalog } from "./stats-catalog.js";
@@ -71,7 +73,12 @@ export function createApp(options: CreateAppOptions): TabHubApp {
     bodyLimit: tabHubHttpBodyLimitBytes,
   });
   registerRequestSecurity(app);
-  const tabCatalog = createTabCatalog(database.connection, options.clock);
+  const tabInstanceCatalog = createTabInstanceCatalog(database.connection);
+  const tabCatalog = createTabCatalog(
+    database.connection,
+    tabInstanceCatalog,
+    options.clock,
+  );
   const tagCatalog = createTagCatalog(database.connection);
   const statsCatalog = createStatsCatalog(database.connection);
   const summaryCatalog = createSummaryCatalog(database.connection, options.clock);
@@ -148,6 +155,7 @@ export function createApp(options: CreateAppOptions): TabHubApp {
   );
 
   registerTabRoutes(app, tabCatalog, embeddingCatalog);
+  registerTabInstanceRoutes(app, tabInstanceCatalog);
   registerTagRoutes(app, tagCatalog);
   registerStatsRoutes(app, statsCatalog);
   registerSummaryRoutes(app, {

@@ -18,6 +18,7 @@ import type {
 } from "@tabhub/shared";
 
 import { normalizeUrl } from "./normalize-url.js";
+import type { TabInstanceCatalog } from "./tab-instance-catalog.js";
 
 export interface ListTabsInput {
   browser: string | undefined;
@@ -57,10 +58,6 @@ export class TabIdsNotFoundError extends Error {
     super(`No tabs exist with ids: ${missingIds.join(", ")}`);
     this.name = "TabIdsNotFoundError";
   }
-}
-
-interface OpenTabRow {
-  url_normalized: string;
 }
 
 interface TabRow {
@@ -157,18 +154,9 @@ function mapTabRow(row: TabRow, tagPaths: string[]): TabListItem {
 
 export function createTabCatalog(
   connection: Database.Database,
+  tabInstanceCatalog: TabInstanceCatalog,
   clock: () => Date = () => new Date(),
 ): TabCatalog {
-  const selectOpenTabs = connection.prepare(
-    `SELECT url_normalized
-       FROM tabs
-      WHERE browser = ? AND is_open = 1`,
-  );
-  const closeTab = connection.prepare(
-    `UPDATE tabs
-        SET is_open = 0, closed_at = ?
-      WHERE browser = ? AND url_normalized = ? AND is_open = 1`,
-  );
   const upsertTab = connection.prepare(`
     INSERT INTO tabs (
       url,
@@ -303,20 +291,6 @@ export function createTabCatalog(
       const currentTabs = new Map(
         snapshot.tabs.map((tab) => [normalizeUrl(tab.url), tab]),
       );
-      const previouslyOpen = selectOpenTabs.all(
-        snapshot.browser,
-      ) as OpenTabRow[];
-      let closed = 0;
-
-      for (const previousTab of previouslyOpen) {
-        if (!currentTabs.has(previousTab.url_normalized)) {
-          closed += closeTab.run(
-            now,
-            snapshot.browser,
-            previousTab.url_normalized,
-          ).changes;
-        }
-      }
 
       for (const [urlNormalized, tab] of currentTabs) {
         upsertTab.run({
@@ -331,6 +305,7 @@ export function createTabCatalog(
         });
       }
 
+      const { closed } = tabInstanceCatalog.syncSnapshot(snapshot, now);
       return { upserted: currentTabs.size, closed };
     },
   );

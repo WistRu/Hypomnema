@@ -20,6 +20,10 @@ export const browserIdentifierSchema = z.string().trim().min(1).max(64);
 
 export type BrowserIdentifier = z.infer<typeof browserIdentifierSchema>;
 
+export const installationIdSchema = z.string().uuid();
+
+export type InstallationId = z.infer<typeof installationIdSchema>;
+
 export const browserConfigSchema = z.object({
   browser: browserIdentifierSchema,
 });
@@ -34,11 +38,15 @@ export const tabUrlSchema = z
   .refine((value) => URL.canParse(value), "Invalid URL");
 
 export const snapshotTabSchema = z.object({
+  tabId: z.number().int().nonnegative().optional(),
   url: tabUrlSchema,
   title: z.string().max(snapshotTabTitleMaxLength).optional(),
   windowId: z.number().int(),
   index: z.number().int().nonnegative(),
   faviconUrl: z.string().max(snapshotTabFaviconUrlMaxLength).optional(),
+  active: z.boolean().optional(),
+  pinned: z.boolean().optional(),
+  lastAccessed: z.number().finite().nonnegative().optional(),
 });
 
 export type SnapshotTab = z.infer<typeof snapshotTabSchema>;
@@ -46,9 +54,31 @@ export type SnapshotTab = z.infer<typeof snapshotTabSchema>;
 export const ingestSnapshotSchema = z
   .object({
     browser: browserIdentifierSchema,
+    installationId: installationIdSchema.optional(),
     tabs: z.array(snapshotTabSchema).max(10_000),
   })
   .superRefine((snapshot, context) => {
+    if (snapshot.installationId !== undefined) {
+      const seenTabIds = new Set<number>();
+      snapshot.tabs.forEach((tab, index) => {
+        if (tab.tabId === undefined) {
+          context.addIssue({
+            code: "custom",
+            message: "Modern snapshots require a native tab ID",
+            path: ["tabs", index, "tabId"],
+          });
+        } else if (seenTabIds.has(tab.tabId)) {
+          context.addIssue({
+            code: "custom",
+            message: "Native tab IDs must be unique within a snapshot",
+            path: ["tabs", index, "tabId"],
+          });
+        } else {
+          seenTabIds.add(tab.tabId);
+        }
+      });
+    }
+
     const serialized = JSON.stringify(snapshot);
     const byteLength = new TextEncoder().encode(serialized).byteLength;
 
@@ -335,6 +365,32 @@ export const tabListItemSchema = z.object({
 });
 
 export type TabListItem = z.infer<typeof tabListItemSchema>;
+
+export const tabInstanceSchema = z.object({
+  instanceId: z.number().int().positive(),
+  canonicalTabId: tabIdSchema,
+  installationId: z.string().min(1),
+  browserTabId: z.number().int().nonnegative().nullable(),
+  url: z.string().trim().min(1),
+  urlNormalized: z.string().trim().min(1),
+  title: z.string().nullable(),
+  browser: browserIdentifierSchema,
+  windowId: z.number().int(),
+  index: z.number().int().nonnegative(),
+  faviconUrl: z.string().nullable(),
+  active: z.boolean(),
+  pinned: z.boolean(),
+  lastAccessed: z.number().finite().nonnegative().nullable(),
+  firstSeenAt: z.string().datetime(),
+  lastSeenAt: z.string().datetime(),
+  status: tabStatusSchema,
+  importance: tabImportanceSchema,
+  summary: z.string().nullable(),
+  tagPaths: z.array(z.string()),
+  duplicateGroupSize: z.number().int().positive(),
+});
+
+export type TabInstance = z.infer<typeof tabInstanceSchema>;
 
 const persistedTagNameSchema = z.string();
 const persistedTagPathSchema = z.string();
@@ -700,6 +756,67 @@ export const tabListResponseSchema = z.object({
 });
 
 export type TabListResponse = z.infer<typeof tabListResponseSchema>;
+
+export const tabInstanceListQuerySchema = z.object({
+  browser: browserIdentifierSchema.optional(),
+  q: z.string().trim().min(1).max(500).optional(),
+  duplicates_only: queryBooleanSchema.default(false),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(200).default(50),
+});
+
+export type TabInstanceListQuery = z.infer<
+  typeof tabInstanceListQuerySchema
+>;
+
+export const tabInstanceListResponseSchema = z.object({
+  items: z.array(tabInstanceSchema),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().positive(),
+  pageSize: z.number().int().positive(),
+});
+
+export type TabInstanceListResponse = z.infer<
+  typeof tabInstanceListResponseSchema
+>;
+
+export const duplicateGroupListQuerySchema = z.object({
+  browser: browserIdentifierSchema.optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(200).default(50),
+});
+
+export type DuplicateGroupListQuery = z.infer<
+  typeof duplicateGroupListQuerySchema
+>;
+
+export const duplicateGroupSchema = z.object({
+  installationId: z.string().min(1),
+  browser: browserIdentifierSchema,
+  url: z.string().trim().min(1),
+  count: z.number().int().min(2),
+  keeperInstanceId: z.number().int().positive(),
+  candidateInstanceIds: z.array(z.number().int().positive()),
+  protectedInstanceIds: z.array(z.number().int().positive()),
+  instances: z.array(tabInstanceSchema).min(2),
+});
+
+export type DuplicateGroup = z.infer<typeof duplicateGroupSchema>;
+
+export const duplicateGroupListResponseSchema = z.object({
+  items: z.array(duplicateGroupSchema),
+  totalGroups: z.number().int().nonnegative(),
+  totalTabsInGroups: z.number().int().nonnegative(),
+  totalDuplicateCopies: z.number().int().nonnegative(),
+  totalCloseCandidates: z.number().int().nonnegative(),
+  totalProtected: z.number().int().nonnegative(),
+  page: z.number().int().positive(),
+  pageSize: z.number().int().positive(),
+});
+
+export type DuplicateGroupListResponse = z.infer<
+  typeof duplicateGroupListResponseSchema
+>;
 
 export const healthResponseSchema = z.object({
   status: z.literal("ok"),

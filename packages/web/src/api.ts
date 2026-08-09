@@ -1,12 +1,14 @@
 import {
   assignTagsResponseSchema,
   deleteResponseSchema,
+  duplicateGroupListResponseSchema,
   graphResponseSchema,
   linkListResponseSchema,
   setStatusResponseSchema,
   summaryEnqueueResponseSchema,
   summaryJobSchema,
   tabDetailResponseSchema,
+  tabInstanceListResponseSchema,
   tabLinkSchema,
   tabListResponseSchema,
   tagTreeResponseSchema,
@@ -27,6 +29,18 @@ export interface TabListFilters {
   q: string;
   status: "all" | TabStatus;
   tag: string;
+}
+
+export interface OpenTabListFilters {
+  browser: string;
+  duplicatesOnly: boolean;
+  page: number;
+  q: string;
+}
+
+export interface DuplicateGroupListFilters {
+  browser: string;
+  page: number;
 }
 
 export type PatchTabDetails = PatchTab;
@@ -122,6 +136,71 @@ export async function fetchTabs(
   const parsed = tabListResponseSchema.safeParse(payload);
   if (!parsed.success) {
     throw new Error("TabHub returned an unexpected tab list.");
+  }
+
+  return parsed.data;
+}
+
+export async function fetchOpenTabs(
+  filters: OpenTabListFilters,
+  signal?: AbortSignal,
+) {
+  const searchParams = new URLSearchParams({
+    page: String(filters.page),
+    pageSize: "50",
+  });
+
+  if (filters.browser !== "all") {
+    searchParams.set("browser", filters.browser);
+  }
+  if (filters.duplicatesOnly) {
+    searchParams.set("duplicates_only", "true");
+  }
+  if (filters.q) {
+    searchParams.set("q", filters.q);
+  }
+
+  const payload = await requestJson(
+    `/api/tab-instances?${searchParams.toString()}`,
+    {
+      headers: { Accept: "application/json" },
+      signal: signal ?? null,
+    },
+    "TabHub could not load open tabs",
+    "TabHub returned an unreadable open-tab list.",
+  );
+  const parsed = tabInstanceListResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected open-tab list.");
+  }
+
+  return parsed.data;
+}
+
+export async function fetchDuplicateGroups(
+  filters: DuplicateGroupListFilters,
+  signal?: AbortSignal,
+) {
+  const searchParams = new URLSearchParams({
+    page: String(filters.page),
+    pageSize: "50",
+  });
+  if (filters.browser !== "all") {
+    searchParams.set("browser", filters.browser);
+  }
+
+  const payload = await requestJson(
+    `/api/duplicate-groups?${searchParams.toString()}`,
+    {
+      headers: { Accept: "application/json" },
+      signal: signal ?? null,
+    },
+    "TabHub could not load exact duplicate groups",
+    "TabHub returned an unreadable duplicate-group list.",
+  );
+  const parsed = duplicateGroupListResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected duplicate-group list.");
   }
 
   return parsed.data;

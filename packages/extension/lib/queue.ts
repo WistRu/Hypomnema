@@ -123,6 +123,10 @@ function contentKey(item: PendingContent): string {
   return `${item.payload.browser}\u0000${item.payload.url}`;
 }
 
+function snapshotKey(item: PendingSnapshot): string {
+  return `${item.payload.browser}\u0000${item.payload.installationId ?? "legacy"}`;
+}
+
 /**
  * Keep the newest content for a browser/URL, then remove snapshots superseded
  * by a newer snapshot for that browser. Content is a barrier: the nearest
@@ -154,19 +158,25 @@ export function compactPendingQueue(
   for (const item of deduplicatedContent) {
     if (item.kind === "content") {
       compacted.push(item);
-      replaceableSnapshot.delete(item.payload.browser);
+      const browserPrefix = `${item.payload.browser}\u0000`;
+
+      for (const key of replaceableSnapshot.keys()) {
+        if (key.startsWith(browserPrefix)) {
+          replaceableSnapshot.delete(key);
+        }
+      }
       continue;
     }
 
-    const browser = item.payload.browser;
-    const supersededIndex = replaceableSnapshot.get(browser);
+    const key = snapshotKey(item);
+    const supersededIndex = replaceableSnapshot.get(key);
 
     if (supersededIndex !== undefined) {
       compacted[supersededIndex] = undefined;
     }
 
     compacted.push(item);
-    replaceableSnapshot.set(browser, compacted.length - 1);
+    replaceableSnapshot.set(key, compacted.length - 1);
   }
 
   return compacted.filter((item): item is PendingItem => item !== undefined);
@@ -202,22 +212,44 @@ export function appendPendingItems(
 export function summarizePendingItems(
   queue: readonly PendingItem[],
 ): PendingQueueSummary {
-  const tabs = new Set<string>();
+  const physicalTabs = new Set<string>();
+  const legacyTabs = new Set<string>();
+  const snapshotUrls = new Set<string>();
+  const contentUrls = new Set<string>();
 
   for (const item of queue) {
     if (item.kind === "content") {
-      tabs.add(`${item.payload.browser}\u0000${item.payload.url}`);
+      contentUrls.add(`${item.payload.browser}\u0000${item.payload.url}`);
       continue;
     }
 
     for (const tab of item.payload.tabs) {
-      tabs.add(`${item.payload.browser}\u0000${tab.url}`);
+      const urlKey = `${item.payload.browser}\u0000${tab.url}`;
+      snapshotUrls.add(urlKey);
+
+      if (
+        item.payload.installationId !== undefined &&
+        tab.tabId !== undefined
+      ) {
+        physicalTabs.add(
+          `${item.payload.installationId}\u0000${String(tab.tabId)}`,
+        );
+      } else {
+        legacyTabs.add(
+          `${item.payload.browser}\u0000${String(tab.windowId)}\u0000${String(tab.index)}`,
+        );
+      }
     }
   }
 
+  const contentOnlyCount = [...contentUrls].filter(
+    (key) => !snapshotUrls.has(key),
+  ).length;
+
   return {
     pendingOperationCount: queue.length,
-    pendingTabCount: tabs.size,
+    pendingTabCount:
+      physicalTabs.size + legacyTabs.size + contentOnlyCount,
   };
 }
 

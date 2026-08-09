@@ -18,11 +18,18 @@ function snapshot(
   id: string,
   browser: "chrome" | "edge" = "chrome",
   urls: readonly string[] = [],
+  installationId?: string,
 ) {
   return createPendingSnapshot(
     {
       browser,
-      tabs: urls.map((url, index) => ({ index, url, windowId: 1 })),
+      ...(installationId === undefined ? {} : { installationId }),
+      tabs: urls.map((url, index) => ({
+        index,
+        ...(installationId === undefined ? {} : { tabId: index + 1 }),
+        url,
+        windowId: 1,
+      })),
     },
     id,
     `2026-08-08T00:${id.padStart(2, "0")}:00.000Z`,
@@ -249,6 +256,26 @@ describe("compactPendingQueue", () => {
       "41",
     ]);
   });
+
+  it("does not supersede snapshots from distinct installations of one browser", () => {
+    const first = snapshot(
+      "42",
+      "chrome",
+      ["https://example.com/first"],
+      "123e4567-e89b-42d3-a456-426614174000",
+    );
+    const second = snapshot(
+      "43",
+      "chrome",
+      ["https://example.com/second"],
+      "223e4567-e89b-42d3-a456-426614174000",
+    );
+
+    expect(compactPendingQueue([first, second]).map(({ id }) => id)).toEqual([
+      "42",
+      "43",
+    ]);
+  });
 });
 
 describe("appendPendingItems", () => {
@@ -288,6 +315,38 @@ describe("summarizePendingItems", () => {
       pendingOperationCount: 4,
       pendingTabCount: 3,
     });
+  });
+
+  it("counts duplicate URLs as separate physical tabs when tab IDs are present", () => {
+    const pending = createPendingSnapshot(
+      {
+        browser: "chrome",
+        installationId: "123e4567-e89b-42d3-a456-426614174000",
+        tabs: [
+          { index: 0, tabId: 10, url: "https://same.example", windowId: 1 },
+          { index: 1, tabId: 11, url: "https://same.example", windowId: 1 },
+        ],
+      },
+      "physical",
+    );
+
+    expect(summarizePendingItems([pending]).pendingTabCount).toBe(2);
+  });
+
+  it("uses window and index to retain physical counts for legacy snapshots", () => {
+    const pending = createPendingSnapshot(
+      {
+        browser: "chrome",
+        tabs: [
+          { index: 0, url: "https://same.example", windowId: 1 },
+          { index: 1, url: "https://same.example", windowId: 1 },
+          { index: 0, url: "https://same.example", windowId: 2 },
+        ],
+      },
+      "legacy-physical",
+    );
+
+    expect(summarizePendingItems([pending]).pendingTabCount).toBe(3);
   });
 });
 

@@ -22,6 +22,9 @@ export interface StoredQueueState {
 export const BROWSER_CONFIG_VERSION = 1;
 
 const knownBrowsers = new Set<string>(knownBrowserOptions);
+const installationUuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+let installationIdentityInFlight: Promise<string> | undefined;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -49,6 +52,50 @@ export async function getBrowserIdentifier(): Promise<
     isKnownBrowser(storedBrowser)
     ? storedBrowser
     : undefined;
+}
+
+async function loadOrCreateInstallationId(): Promise<string> {
+  const stored = await browser.storage.local.get(STORAGE_KEYS.installationId);
+  const existing = stored[STORAGE_KEYS.installationId];
+
+  if (
+    typeof existing === "string" &&
+    installationUuidPattern.test(existing)
+  ) {
+    return existing;
+  }
+
+  const installationId = crypto.randomUUID();
+  await browser.storage.local.set({
+    [STORAGE_KEYS.installationId]: installationId,
+  });
+  return installationId;
+}
+
+/**
+ * Stable per-profile routing identity. The in-flight guard prevents two
+ * startup paths from persisting different UUIDs before either write finishes.
+ */
+export function getOrCreateInstallationId(): Promise<string> {
+  if (installationIdentityInFlight !== undefined) {
+    return installationIdentityInFlight;
+  }
+
+  const operation = loadOrCreateInstallationId();
+  installationIdentityInFlight = operation;
+  void operation.then(
+    () => {
+      if (installationIdentityInFlight === operation) {
+        installationIdentityInFlight = undefined;
+      }
+    },
+    () => {
+      if (installationIdentityInFlight === operation) {
+        installationIdentityInFlight = undefined;
+      }
+    },
+  );
+  return operation;
 }
 
 function parsePendingItem(value: unknown): PendingItem | undefined {

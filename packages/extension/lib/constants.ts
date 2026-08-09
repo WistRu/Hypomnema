@@ -13,6 +13,7 @@ export const STORAGE_KEYS = {
   browser: "tabhub.browser",
   browserConfigured: "tabhub.browserConfiguredVersion",
   deadLetters: "tabhub.deadLetters",
+  installationId: "tabhub.installationId",
   pendingSnapshots: "tabhub.pendingSnapshots",
 } as const;
 

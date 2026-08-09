@@ -27,7 +27,7 @@ describe("GET /api/health", () => {
       expect(healthResponseSchema.parse(response.json())).toEqual({
         status: "ok",
         database: "ok",
-        schemaVersion: 5,
+        schemaVersion: 6,
       });
     } finally {
       await app.close();
@@ -54,7 +54,7 @@ describe("GET /api/health", () => {
 
         expect(response.statusCode).toBe(200);
         expect(healthResponseSchema.parse(response.json()).schemaVersion).toBe(
-          5,
+          6,
         );
       } finally {
         await reopenedApp.close();
@@ -109,7 +109,54 @@ describe("GET /api/health", () => {
         method: "GET",
         url: "/api/health",
       });
-      expect(healthResponse.json().schemaVersion).toBe(5);
+      expect(healthResponse.json().schemaVersion).toBe(6);
+
+      const physicalResponse = await app.inject({
+        method: "GET",
+        url: "/api/tab-instances",
+      });
+      expect(physicalResponse.json()).toMatchObject({
+        total: 1,
+        items: [
+          {
+            canonicalTabId: 1,
+            installationId: "legacy:edge",
+            browserTabId: null,
+            url: "https://example.com/legacy",
+          },
+        ],
+      });
+
+      const modernSnapshot = await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "edge",
+          installationId: "75627e90-67b9-4645-a4d2-7c40f65ff64c",
+          tabs: [
+            {
+              tabId: 77,
+              url: "https://example.com/legacy",
+              windowId: 9,
+              index: 2,
+            },
+          ],
+        },
+      });
+      expect(modernSnapshot.statusCode).toBe(200);
+      const replacedPhysical = await app.inject({
+        method: "GET",
+        url: "/api/tab-instances",
+      });
+      expect(replacedPhysical.json()).toMatchObject({
+        total: 1,
+        items: [
+          {
+            installationId: "75627e90-67b9-4645-a4d2-7c40f65ff64c",
+            browserTabId: 77,
+          },
+        ],
+      });
 
       const searchResponse = await app.inject({
         method: "GET",
@@ -159,7 +206,7 @@ describe("GET /api/health", () => {
     try {
       const response = await app.inject({ method: "GET", url: "/api/health" });
       expect(response.statusCode).toBe(200);
-      expect(response.json().schemaVersion).toBe(5);
+      expect(response.json().schemaVersion).toBe(6);
 
       const tags = await app.inject({ method: "GET", url: "/api/tags" });
       const paths = tags
