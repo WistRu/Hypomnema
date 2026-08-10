@@ -74,7 +74,7 @@ describe("tab snapshot ingestion", () => {
           browser: "chrome",
           tabs: [
             {
-              url: "https://example.com/read?utm_source=mail#heading",
+              url: "https://example.com/read?utm_source=mail",
               title: "First title",
               windowId: 1,
               index: 0,
@@ -219,7 +219,7 @@ describe("tab snapshot ingestion", () => {
               index: 0,
             },
             {
-              url: "https://example.com/topic",
+              url: "https://example.com/topic#first",
               title: "Latest duplicate",
               windowId: 2,
               index: 4,
@@ -240,9 +240,55 @@ describe("tab snapshot ingestion", () => {
         items: [
           {
             title: "Latest duplicate",
-            urlNormalized: "https://example.com/topic",
+            urlNormalized: "https://example.com/topic#first",
           },
         ],
+      });
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps different URL fragments as separate Library records", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-fragment-pages-"));
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+    });
+
+    try {
+      const ingestResponse = await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          tabs: ["inbox/message-one", "inbox/message-two"].map(
+            (fragment, index) => ({
+              url: `https://mail.example.com/#${fragment}`,
+              title: `Message ${index + 1}`,
+              windowId: 1,
+              index,
+            }),
+          ),
+        },
+      });
+      expect(ingestResponse.json()).toEqual({ upserted: 2, closed: 0 });
+
+      const library = await app.inject({
+        method: "GET",
+        url: "/api/tabs?browser=chrome",
+      });
+      expect(library.json()).toMatchObject({
+        total: 2,
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            urlNormalized: "https://mail.example.com/#inbox/message-one",
+          }),
+          expect.objectContaining({
+            urlNormalized: "https://mail.example.com/#inbox/message-two",
+          }),
+        ]),
       });
     } finally {
       await app.close();

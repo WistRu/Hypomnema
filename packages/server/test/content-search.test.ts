@@ -78,7 +78,7 @@ describe("captured content search", () => {
         url: "/api/ingest/content",
         payload: {
           browser: "chrome",
-          url: "https://example.com/research",
+          url: "https://example.com/research#intro",
           text: "A field report about quantum wombats and local-first tools.",
           htmlExcerpt: "<article>A field report about quantum wombats.</article>",
         },
@@ -116,7 +116,7 @@ describe("captured content search", () => {
         url: "/api/ingest/content",
         payload: {
           browser: "chrome",
-          url: "https://example.com/research",
+          url: "https://example.com/research#intro",
           text: "The revised field report is about a platypus habitat.",
           htmlExcerpt: "<article>A platypus habitat.</article>",
         },

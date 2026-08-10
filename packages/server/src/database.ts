@@ -31,6 +31,23 @@ interface Migration {
   sql: string;
 }
 
+// Immutable URL contract used by migration 012. Future canonicalization
+// changes must use a new versioned migration function instead of editing this.
+function normalizeUrlV2(input: string): string {
+  const url = new URL(input);
+  const retainedParameters = [...url.searchParams.entries()].filter(
+    ([key]) => !key.toLowerCase().startsWith("utm_"),
+  );
+
+  url.search = "";
+
+  for (const [key, value] of retainedParameters) {
+    url.searchParams.append(key, value);
+  }
+
+  return url.toString();
+}
+
 function loadMigrations(): Migration[] {
   return readdirSync(migrationsDirectory)
     .filter((fileName) => /^\d{3}_.+\.sql$/.test(fileName))
@@ -66,6 +83,11 @@ export function openDatabase(databasePath: string): TabHubDatabase {
   const connection = new Database(databasePath);
   try {
     sqliteVec.load(connection);
+    connection.function(
+      "tabhub_normalize_url_v2",
+      { deterministic: true },
+      normalizeUrlV2,
+    );
     const migrations = loadMigrations();
     const supportedVersion = migrations.at(-1)?.version ?? 0;
     const currentVersion = connection.pragma("user_version", {

@@ -3,7 +3,6 @@ export function normalizeUrl(input: string): string {
   const retainedParameters = [...url.searchParams.entries()]
     .filter(([key]) => !key.toLowerCase().startsWith("utm_"));
 
-  url.hash = "";
   url.search = "";
 
   for (const [key, value] of retainedParameters) {
