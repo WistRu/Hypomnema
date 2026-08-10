@@ -1,4 +1,5 @@
 import {
+  ingestActivitySchema,
   ingestContentSchema,
   ingestSnapshotSchema,
   knownBrowserOptions,
@@ -11,12 +12,24 @@ import {
   type DeadLetter,
   type PendingItem,
 } from "./queue";
+import {
+  isActivityTrackerCheckpoint,
+  type ActivityTrackerCheckpoint,
+} from "./activity-tracker";
 
 export type KnownBrowser = (typeof knownBrowserOptions)[number];
 
 export interface StoredQueueState {
   deadLetters: DeadLetter[];
   pending: PendingItem[];
+}
+
+export interface ScopedActivityCheckpoint {
+  browser: KnownBrowser;
+  browserSessionId: string;
+  installationId: string;
+  sequence: number;
+  tracker: ActivityTrackerCheckpoint;
 }
 
 export const BROWSER_CONFIG_VERSION = 1;
@@ -151,7 +164,9 @@ export function getOrCreateBrowserSessionId(): Promise<string> {
 function parsePendingItem(value: unknown): PendingItem | undefined {
   if (
     !isRecord(value) ||
-    (value.kind !== "snapshot" && value.kind !== "content")
+    (value.kind !== "snapshot" &&
+      value.kind !== "content" &&
+      value.kind !== "activity")
   ) {
     return undefined;
   }
@@ -173,7 +188,15 @@ function parsePendingItem(value: unknown): PendingItem | undefined {
   };
   let pending: PendingItem;
 
-  if (value.kind === "content") {
+  if (value.kind === "activity") {
+    const payload = ingestActivitySchema.safeParse(value.payload);
+
+    if (!payload.success || payload.data.id !== value.id) {
+      return undefined;
+    }
+
+    pending = { ...metadata, kind: "activity", payload: payload.data };
+  } else if (value.kind === "content") {
     const payload = ingestContentSchema.safeParse(value.payload);
 
     if (!payload.success) {
@@ -205,7 +228,9 @@ function parsePendingItem(value: unknown): PendingItem | undefined {
 function parseDeadLetter(value: unknown): DeadLetter | undefined {
   if (
     !isRecord(value) ||
-    (value.kind !== "snapshot" && value.kind !== "content") ||
+    (value.kind !== "snapshot" &&
+      value.kind !== "content" &&
+      value.kind !== "activity") ||
     typeof value.id !== "string" ||
     typeof value.browser !== "string" ||
     typeof value.createdAt !== "string" ||
@@ -248,7 +273,9 @@ function rejectedPendingToDeadLetter(
 ): DeadLetter | undefined {
   if (
     !isRecord(value) ||
-    (value.kind !== "snapshot" && value.kind !== "content")
+    (value.kind !== "snapshot" &&
+      value.kind !== "content" &&
+      value.kind !== "activity")
   ) {
     return undefined;
   }
@@ -276,7 +303,10 @@ function rejectedPendingToDeadLetter(
     kind: value.kind,
   };
 
-  if (value.kind === "content" && typeof payload?.url === "string") {
+  if (
+    (value.kind === "content" || value.kind === "activity") &&
+    typeof payload?.url === "string"
+  ) {
     deadLetter.url = payload.url;
   }
 
@@ -326,11 +356,52 @@ export async function readQueueState(): Promise<StoredQueueState> {
   return { deadLetters, pending };
 }
 
+export async function readActivityCheckpoint(): Promise<
+  ScopedActivityCheckpoint | undefined
+> {
+  const stored = await browser.storage.local.get(
+    STORAGE_KEYS.activityCheckpoint,
+  );
+  const value = stored[STORAGE_KEYS.activityCheckpoint];
+
+  if (!isRecord(value)) return undefined;
+  if (
+    !isKnownBrowser(value.browser) ||
+    !isInstallationId(value.installationId) ||
+    !isBrowserSessionId(value.browserSessionId) ||
+    !Number.isSafeInteger(value.sequence) ||
+    (value.sequence as number) < 0 ||
+    !isActivityTrackerCheckpoint(value.tracker)
+  ) {
+    return undefined;
+  }
+
+  return {
+    browser: value.browser,
+    browserSessionId: value.browserSessionId,
+    installationId: value.installationId,
+    sequence: value.sequence as number,
+    tracker: value.tracker,
+  };
+}
+
 export async function writeQueueState(
   queue: readonly PendingItem[],
   deadLetters: readonly DeadLetter[],
 ): Promise<void> {
   await browser.storage.local.set({
+    [STORAGE_KEYS.deadLetters]: deadLetters.slice(-MAX_DEAD_LETTERS),
+    [STORAGE_KEYS.pendingSnapshots]: queue,
+  });
+}
+
+export async function writeActivityCheckpointAndQueueState(
+  checkpoint: ScopedActivityCheckpoint,
+  queue: readonly PendingItem[],
+  deadLetters: readonly DeadLetter[],
+): Promise<void> {
+  await browser.storage.local.set({
+    [STORAGE_KEYS.activityCheckpoint]: checkpoint,
     [STORAGE_KEYS.deadLetters]: deadLetters.slice(-MAX_DEAD_LETTERS),
     [STORAGE_KEYS.pendingSnapshots]: queue,
   });

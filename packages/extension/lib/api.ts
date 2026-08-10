@@ -1,11 +1,13 @@
 import {
   healthResponseSchema,
   ingestSnapshotBodyLimitBytes,
+  type IngestActivity,
   type IngestContent,
   type IngestSnapshot,
 } from "@tabhub/shared";
 
 import {
+  ACTIVITY_ENDPOINT,
   CONTENT_ENDPOINT,
   HEALTH_ENDPOINT,
   REQUEST_TIMEOUT_MS,
@@ -26,7 +28,7 @@ function isRetryableStatus(status: number): boolean {
 }
 
 async function responseError(
-  operation: "Content" | "Snapshot",
+  operation: "Activity" | "Content" | "Snapshot",
   response: Response,
 ): Promise<PendingRequestError> {
   const detail = (await response.text()).slice(0, 200).trim();
@@ -100,6 +102,21 @@ export async function postContent(content: IngestContent): Promise<void> {
 
     if (!response.ok) {
       throw await responseError("Content", response);
+    }
+  });
+}
+
+export async function postActivity(activity: IngestActivity): Promise<void> {
+  await withRequestTimeout(async (signal) => {
+    const response = await fetch(ACTIVITY_ENDPOINT, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(activity),
+      signal,
+    });
+
+    if (!response.ok) {
+      throw await responseError("Activity", response);
     }
   });
 }

@@ -138,6 +138,59 @@ export type IngestContentResponse = z.infer<
   typeof ingestContentResponseSchema
 >;
 
+export const ingestActivitySchema = z
+  .strictObject({
+    id: z.string().uuid(),
+    browser: browserIdentifierSchema,
+    installationId: installationIdSchema,
+    browserSessionId: browserSessionIdSchema,
+    browserTabId: z.number().int().nonnegative(),
+    sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    url: tabUrlSchema,
+    startedAt: z.string().datetime(),
+    endedAt: z.string().datetime(),
+    foregroundMs: z.number().int().positive().max(120_000),
+    engagedMs: z.number().int().nonnegative().max(120_000),
+  })
+  .superRefine((activity, context) => {
+    const elapsedMs =
+      Date.parse(activity.endedAt) - Date.parse(activity.startedAt);
+
+    if (elapsedMs <= 0) {
+      context.addIssue({
+        code: "custom",
+        message: "Activity must end after it starts",
+        path: ["endedAt"],
+      });
+    }
+
+    if (activity.foregroundMs > elapsedMs) {
+      context.addIssue({
+        code: "custom",
+        message: "Foreground time cannot exceed the activity interval",
+        path: ["foregroundMs"],
+      });
+    }
+
+    if (activity.engagedMs > activity.foregroundMs) {
+      context.addIssue({
+        code: "custom",
+        message: "Engaged time cannot exceed foreground time",
+        path: ["engagedMs"],
+      });
+    }
+  });
+
+export type IngestActivity = z.infer<typeof ingestActivitySchema>;
+
+export const ingestActivityResponseSchema = z.object({
+  accepted: z.boolean(),
+});
+
+export type IngestActivityResponse = z.infer<
+  typeof ingestActivityResponseSchema
+>;
+
 export const tabStatusSchema = z.enum([
   "inbox",
   "in_progress",
@@ -405,6 +458,8 @@ export const tabInstanceSchema = z.object({
   lastAccessed: z.number().finite().nonnegative().nullable(),
   firstSeenAt: z.string().datetime(),
   lastSeenAt: z.string().datetime(),
+  foregroundTimeMs: z.number().int().nonnegative().default(0),
+  engagedTimeMs: z.number().int().nonnegative().default(0),
   status: tabStatusSchema,
   importance: tabImportanceSchema,
   summary: z.string().nullable(),

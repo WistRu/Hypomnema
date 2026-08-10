@@ -2423,7 +2423,7 @@ tbody tr.is-selected {
 }
 
 .workspace-layout .physical-tabs-table {
-  min-width: 810px;
+  min-width: 940px;
 }
 
 .physical-tabs-table th:nth-child(1) {
@@ -2432,19 +2432,45 @@ tbody tr.is-selected {
 }
 
 .physical-tabs-table th:nth-child(2) {
-  width: 42%;
+  width: 38%;
 }
 
 .physical-tabs-table th:nth-child(3) {
-  width: 24%;
+  width: 22%;
 }
 
 .physical-tabs-table th:nth-child(4) {
-  width: 14%;
+  width: 17%;
 }
 
 .physical-tabs-table th:nth-child(5) {
-  width: 17%;
+  width: 12%;
+}
+
+.physical-tabs-table th:nth-child(6) {
+  width: 11%;
+}
+
+.physical-activity {
+  display: grid;
+  gap: 4px;
+  min-width: 118px;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.physical-activity-metric {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: #7f8ba0;
+}
+
+.physical-activity-metric strong {
+  color: #c6d0df;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .duplicate-mode-note {

@@ -37,6 +37,8 @@ function instance(instanceId: number, active = false) {
     pinned: false,
     lastAccessed: 1_754_700_000_000 + instanceId,
     firstSeenAt: "2026-08-09T00:00:00.000Z",
+    foregroundTimeMs: 61_000,
+    engagedTimeMs: 12_000,
     lastSeenAt: "2026-08-09T00:01:00.000Z",
     status: "inbox",
     importance: 0,
@@ -58,7 +60,12 @@ describe("open-tab API", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchCanonicalTabInstances(7)).resolves.toEqual([
-      expect.objectContaining({ canonicalTabId: 7, browserTabId: 101 }),
+      expect.objectContaining({
+        canonicalTabId: 7,
+        browserTabId: 101,
+        foregroundTimeMs: 61_000,
+        engagedTimeMs: 12_000,
+      }),
       expect.objectContaining({
         active: true,
         canonicalTabId: 7,

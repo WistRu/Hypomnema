@@ -43,6 +43,8 @@ import {
   registerTabCommandRelayRoutes,
 } from "./tab-command-relay.js";
 import type { BrowserForegroundHandoff } from "./browser-foreground.js";
+import { createActivityCatalog } from "./activity-catalog.js";
+import { registerActivityRoutes } from "./activity-routes.js";
 
 export interface CreateAppOptions {
   browserForegroundHandoff?: BrowserForegroundHandoff | undefined;
@@ -113,6 +115,10 @@ export function createApp(options: CreateAppOptions): TabHubApp {
   const graphV2Catalog = createGraphV2Catalog(database.connection);
   const relationCatalog = createRelationCatalog(database.connection);
   const workspaceCatalog = createWorkspaceCatalog(
+    database.connection,
+    options.clock,
+  );
+  const activityCatalog = createActivityCatalog(
     database.connection,
     options.clock,
   );
@@ -201,6 +207,7 @@ export function createApp(options: CreateAppOptions): TabHubApp {
   );
 
   registerTabRoutes(app, tabCatalog, embeddingCatalog);
+  registerActivityRoutes(app, activityCatalog);
   registerTabInstanceRoutes(app, tabInstanceCatalog);
   registerTagRoutes(app, tagCatalog);
   registerStatsRoutes(app, statsCatalog);

@@ -493,7 +493,7 @@ export function OpenTabRow({
       }
     | undefined;
 }) {
-  const { formatNumber, t } = useI18n();
+  const { formatDuration, formatNumber, t } = useI18n();
   const label = tab.title?.trim() || hostname(tab.url);
   const activationMessage = activation.kind === "ready" ? undefined : activation.message;
 
@@ -585,6 +585,28 @@ export function OpenTabRow({
         <span className="physical-location">
           {physicalLocation(tab, t, formatNumber)}
         </span>
+      </td>
+      <td>
+        <div className="physical-activity">
+          <span
+            className="physical-activity-metric"
+            title={t(
+              "Selected while its browser window was in the foreground and the computer was active.",
+            )}
+          >
+            <span>{t("On screen")}</span>
+            <strong>{formatDuration(tab.foregroundTimeMs)}</strong>
+          </span>
+          <span
+            className="physical-activity-metric"
+            title={t(
+              "On-screen time within 60 seconds of recent mouse, keyboard, scroll, or touch input.",
+            )}
+          >
+            <span>{t("Active use")}</span>
+            <strong>{formatDuration(tab.engagedTimeMs)}</strong>
+          </span>
+        </div>
       </td>
       <td>
         <div className="physical-flags">
@@ -2352,6 +2374,7 @@ export function OpenTabsView({
                 </th>
                 <th scope="col">{t("Open tab")}</th>
                 <th scope="col">{t("Browser location")}</th>
+                <th scope="col">{t("Activity")}</th>
                 <th scope="col">{t("State / protection")}</th>
                 <th scope="col">
                   {duplicatesOnly ? t("Role in group") : t("Exact copies")}
@@ -2422,7 +2445,7 @@ export function OpenTabsView({
                     key={`${group.installationId}\n${group.browser}\n${group.url}`}
                   >
                     <tr className="duplicate-group-heading-row">
-                      <th colSpan={5} id={groupHeadingId} scope="rowgroup">
+                      <th colSpan={6} id={groupHeadingId} scope="rowgroup">
                         <div className="duplicate-group-heading">
                           <div>
                             <span>{t("Exact duplicate group")}</span>

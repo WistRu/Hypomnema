@@ -20,13 +20,14 @@ vi.mock("wxt/browser", () => ({
 }));
 
 import { STORAGE_KEYS } from "./constants";
-import { createPendingSnapshot } from "./queue";
+import { createPendingActivity, createPendingSnapshot } from "./queue";
 import {
   BROWSER_CONFIG_VERSION,
   getBrowserIdentifier,
   getOrCreateBrowserSessionId,
   getOrCreateInstallationId,
   readQueueState,
+  writeActivityCheckpointAndQueueState,
   writeIdentityAndQueueState,
 } from "./storage";
 
@@ -126,6 +127,71 @@ describe("browser identity storage", () => {
         kind: "snapshot",
       }),
     ]);
+  });
+
+  it("restores durable activity intervals from the offline queue", async () => {
+    const pending = createPendingActivity({
+      id: "323e4567-e89b-42d3-a456-426614174000",
+      browser: "chrome",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      browserTabId: 42,
+      sequence: 1,
+      url: "https://example.com/article",
+      startedAt: "2026-08-10T12:00:00.000Z",
+      endedAt: "2026-08-10T12:00:10.000Z",
+      foregroundMs: 10_000,
+      engagedMs: 4_000,
+    });
+    localStorage.get.mockResolvedValue({
+      [STORAGE_KEYS.deadLetters]: [],
+      [STORAGE_KEYS.pendingSnapshots]: [pending],
+    });
+
+    await expect(readQueueState()).resolves.toEqual({
+      deadLetters: [],
+      pending: [pending],
+    });
+  });
+
+  it("persists an activity checkpoint atomically with its retry-safe queue item", async () => {
+    const pending = createPendingActivity({
+      id: "323e4567-e89b-42d3-a456-426614174000",
+      browser: "chrome",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      browserTabId: 42,
+      sequence: 1,
+      url: "https://example.com/article",
+      startedAt: "2026-08-10T12:00:00.000Z",
+      endedAt: "2026-08-10T12:00:10.000Z",
+      foregroundMs: 10_000,
+      engagedMs: 4_000,
+    });
+    const checkpoint = {
+      browser: "chrome" as const,
+      installationId: pending.payload.installationId,
+      browserSessionId: pending.payload.browserSessionId,
+      sequence: 1,
+      tracker: {
+        engagedUntil: Date.parse(pending.payload.endedAt) + 60_000,
+        lastObservedAt: Date.parse(pending.payload.endedAt),
+        machineActive: true,
+        target: {
+          browserTabId: 42,
+          url: pending.payload.url,
+        },
+      },
+    };
+
+    await writeActivityCheckpointAndQueueState(checkpoint, [pending], []);
+
+    expect(localStorage.set).toHaveBeenCalledOnce();
+    expect(localStorage.set).toHaveBeenCalledWith({
+      [STORAGE_KEYS.activityCheckpoint]: checkpoint,
+      [STORAGE_KEYS.deadLetters]: [],
+      [STORAGE_KEYS.pendingSnapshots]: [pending],
+    });
   });
 });
 

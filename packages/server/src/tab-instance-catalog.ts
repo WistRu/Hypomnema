@@ -87,6 +87,8 @@ interface TabInstanceRow {
   last_accessed: number | null;
   first_seen_at: string;
   last_seen_at: string;
+  foreground_time_ms: number;
+  engaged_time_ms: number;
   status: TabInstance["status"];
   importance: TabInstance["importance"];
   summary: string | null;
@@ -170,6 +172,20 @@ function tabInstanceQuery(input: FilterTabInstancesInput): TabInstanceQuery {
           tab_instances.last_accessed,
           tab_instances.first_seen_at,
           tab_instances.last_seen_at,
+          COALESCE((
+            SELECT activity.foreground_ms
+            FROM tab_activity_totals AS activity
+            WHERE activity.installation_id = tab_instances.installation_id
+              AND activity.browser_session_id IS tab_instances.browser_session_id
+              AND activity.browser_tab_id IS tab_instances.browser_tab_id
+          ), 0) AS foreground_time_ms,
+          COALESCE((
+            SELECT activity.engaged_ms
+            FROM tab_activity_totals AS activity
+            WHERE activity.installation_id = tab_instances.installation_id
+              AND activity.browser_session_id IS tab_instances.browser_session_id
+              AND activity.browser_tab_id IS tab_instances.browser_tab_id
+          ), 0) AS engaged_time_ms,
           tabs.status,
           tabs.importance,
           contents.summary,
@@ -224,6 +240,8 @@ function mapInstanceRow(row: TabInstanceRow, tagPaths: string[]): TabInstance {
     lastAccessed: row.last_accessed,
     firstSeenAt: row.first_seen_at,
     lastSeenAt: row.last_seen_at,
+    foregroundTimeMs: row.foreground_time_ms,
+    engagedTimeMs: row.engaged_time_ms,
     status: row.status,
     importance: row.importance,
     summary: row.summary,
@@ -391,6 +409,20 @@ export function createTabInstanceCatalog(
       tab_instances.last_accessed,
       tab_instances.first_seen_at,
       tab_instances.last_seen_at,
+      COALESCE((
+        SELECT activity.foreground_ms
+        FROM tab_activity_totals AS activity
+        WHERE activity.installation_id = tab_instances.installation_id
+          AND activity.browser_session_id IS tab_instances.browser_session_id
+          AND activity.browser_tab_id IS tab_instances.browser_tab_id
+      ), 0) AS foreground_time_ms,
+      COALESCE((
+        SELECT activity.engaged_ms
+        FROM tab_activity_totals AS activity
+        WHERE activity.installation_id = tab_instances.installation_id
+          AND activity.browser_session_id IS tab_instances.browser_session_id
+          AND activity.browser_tab_id IS tab_instances.browser_tab_id
+      ), 0) AS engaged_time_ms,
       tabs.status,
       tabs.importance,
       contents.summary,

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  formatDuration,
   hasRussianTranslation,
   I18nProvider,
   localizedErrorMessage,
@@ -42,6 +43,14 @@ describe("locale resolution", () => {
   it("falls back to English for unsupported and malformed locales", () => {
     expect(resolveLocale("de", ["de-DE"])).toBe("en");
     expect(resolveLocale(undefined, [])).toBe("en");
+  });
+});
+
+describe("duration formatting", () => {
+  it("formats compact activity durations in English and Russian", () => {
+    expect(formatDuration("en", 3_661_000)).toBe("1h 1m");
+    expect(formatDuration("ru", 125_000)).toBe("2 мин 5 с");
+    expect(formatDuration("ru", 0)).toBe("0 с");
   });
 });
 

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   appendPendingItems,
   compactPendingQueue,
+  createPendingActivity,
   createPendingContent,
   createPendingSnapshot,
   drainPendingQueue,
@@ -211,6 +212,28 @@ describe("drainPendingQueue", () => {
 });
 
 describe("compactPendingQueue", () => {
+  it("keeps durable activity intervals while compacting surrounding snapshots", () => {
+    const before = snapshot("activity-before", "chrome");
+    const activity = createPendingActivity({
+      id: "323e4567-e89b-42d3-a456-426614174000",
+      browser: "chrome",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      browserTabId: 42,
+      sequence: 1,
+      url: "https://example.com/article",
+      startedAt: "2026-08-10T12:00:00.000Z",
+      endedAt: "2026-08-10T12:00:10.000Z",
+      foregroundMs: 10_000,
+      engagedMs: 4_000,
+    });
+    const after = snapshot("activity-after", "chrome");
+
+    expect(
+      compactPendingQueue([before, activity, after]).map(({ id }) => id),
+    ).toEqual([activity.id, "activity-after"]);
+  });
+
   it("keeps only the newest uninterrupted snapshot for each browser", () => {
     const chromeOld = snapshot("10", "chrome");
     const edge = snapshot("11", "edge");
@@ -333,6 +356,42 @@ describe("summarizePendingItems", () => {
     );
 
     expect(summarizePendingItems([pending]).pendingTabCount).toBe(2);
+  });
+
+  it("counts a snapshot and activity for the same physical tab once", () => {
+    const installationId = "123e4567-e89b-42d3-a456-426614174000";
+    const browserSessionId = "223e4567-e89b-42d3-a456-426614174000";
+    const pendingSnapshot = createPendingSnapshot({
+      browser: "chrome",
+      browserSessionId,
+      installationId,
+      tabs: [
+        {
+          index: 0,
+          tabId: 42,
+          url: "https://same.example",
+          windowId: 1,
+        },
+      ],
+    });
+    const pendingActivity = createPendingActivity({
+      browser: "chrome",
+      browserSessionId,
+      browserTabId: 42,
+      engagedMs: 1_000,
+      endedAt: "2026-08-10T12:00:01.000Z",
+      foregroundMs: 1_000,
+      id: "323e4567-e89b-42d3-a456-426614174000",
+      installationId,
+      sequence: 1,
+      startedAt: "2026-08-10T12:00:00.000Z",
+      url: "https://same.example",
+    });
+
+    expect(
+      summarizePendingItems([pendingSnapshot, pendingActivity])
+        .pendingTabCount,
+    ).toBe(1);
   });
 
   it("uses window and index to retain physical counts for legacy snapshots", () => {

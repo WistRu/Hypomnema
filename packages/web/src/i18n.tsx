@@ -60,6 +60,8 @@ const russianMessages: Record<string, Message> = {
   "3 - High": "3 — Высокая",
   Age: "Возраст",
   Agent: "Агент",
+  Activity: "Активность",
+  "Active use": "Активное использование",
   "Add field": "Добавить поле",
   "All browsers": "Все браузеры",
   "All statuses": "Все статусы",
@@ -134,6 +136,9 @@ const russianMessages: Record<string, Message> = {
   "No tabs yet": "Вкладок пока нет",
   "No captured content.": "Сохранённого содержимого нет.",
   "No summary yet.": "Сводки пока нет.",
+  "On screen": "На экране",
+  "On-screen time within 60 seconds of recent mouse, keyboard, scroll, or touch input.":
+    "Время на экране в течение 60 секунд после недавнего действия мышью, клавиатурой, прокрутки или касания.",
   "No tags assigned.": "Теги не назначены.",
   Note: "Примечание",
   Open: "Открыта",
@@ -169,6 +174,8 @@ const russianMessages: Record<string, Message> = {
   "Search tab titles and content": "Поиск по заголовкам и содержимому",
   "Search titles and content": "Найти заголовки и содержимое",
   "Select {tab}": "Выбрать «{tab}»",
+  "Selected while its browser window was in the foreground and the computer was active.":
+    "Вкладка была выбрана, окно браузера находилось на переднем плане, а компьютер был активен.",
   "Select all tabs on this page": "Выбрать все вкладки на этой странице",
   "Show all {count} characters": "Показать все символы: {count}",
   "Show compact view": "Показать сокращённо",
@@ -1060,6 +1067,37 @@ export function resolveLocale(
   return "en";
 }
 
+export function formatDuration(locale: Locale, milliseconds: number): string {
+  const totalSeconds = Number.isFinite(milliseconds)
+    ? Math.max(0, Math.floor(milliseconds / 1_000))
+    : 0;
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  const units =
+    locale === "ru"
+      ? { hour: "ч", minute: "мин", second: "с" }
+      : { hour: "h", minute: "m", second: "s" };
+
+  if (hours > 0) {
+    return [
+      `${hours}${locale === "ru" ? " " : ""}${units.hour}`,
+      ...(minutes > 0
+        ? [`${minutes}${locale === "ru" ? " " : ""}${units.minute}`]
+        : []),
+    ].join(" ");
+  }
+  if (minutes > 0) {
+    return [
+      `${minutes}${locale === "ru" ? " " : ""}${units.minute}`,
+      ...(seconds > 0
+        ? [`${seconds}${locale === "ru" ? " " : ""}${units.second}`]
+        : []),
+    ].join(" ");
+  }
+  return `${seconds}${locale === "ru" ? " " : ""}${units.second}`;
+}
+
 function detectLocale(): Locale {
   if (typeof window === "undefined") return "en";
 
@@ -1083,6 +1121,7 @@ interface I18nContextValue {
   errorMessage: (cause: unknown) => string;
   formatDate: (value: Date | number | string, options?: Intl.DateTimeFormatOptions) => string;
   formatNumber: (value: number) => string;
+  formatDuration: (milliseconds: number) => string;
   locale: Locale;
   localeTag: string;
   setLocale: (locale: Locale) => void;
@@ -1094,6 +1133,7 @@ const defaultContext: I18nContextValue = {
   formatDate: (value, options) =>
     new Intl.DateTimeFormat(LOCALE_TAGS.en, options).format(new Date(value)),
   formatNumber: (value) => new Intl.NumberFormat(LOCALE_TAGS.en).format(value),
+  formatDuration: (value) => formatDuration("en", value),
   locale: "en",
   localeTag: LOCALE_TAGS.en,
   setLocale: () => undefined,
@@ -1130,6 +1170,7 @@ export function I18nProvider({
       formatDate: (input, options) =>
         new Intl.DateTimeFormat(localeTag, options).format(new Date(input)),
       formatNumber: (input) => new Intl.NumberFormat(localeTag).format(input),
+      formatDuration: (input) => formatDuration(locale, input),
       locale,
       localeTag,
       setLocale,

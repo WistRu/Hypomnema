@@ -1,7 +1,9 @@
 import {
+  ingestActivitySchema,
   ingestContentSchema,
   ingestSnapshotSchema,
   type IngestContent,
+  type IngestActivity,
   type IngestSnapshot,
 } from "@tabhub/shared";
 
@@ -23,7 +25,12 @@ export interface PendingContent extends PendingItemMetadata {
   payload: IngestContent;
 }
 
-export type PendingItem = PendingSnapshot | PendingContent;
+export interface PendingActivity extends PendingItemMetadata {
+  kind: "activity";
+  payload: IngestActivity;
+}
+
+export type PendingItem = PendingSnapshot | PendingContent | PendingActivity;
 
 export interface DeadLetter {
   attempts: number;
@@ -113,6 +120,20 @@ export function createPendingContent(
   };
 }
 
+export function createPendingActivity(
+  payload: IngestActivity,
+  createdAt: string = new Date().toISOString(),
+): PendingActivity {
+  const parsed = ingestActivitySchema.parse(payload);
+  return {
+    attempts: 0,
+    createdAt,
+    id: parsed.id,
+    kind: "activity",
+    payload: parsed,
+  };
+}
+
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -166,6 +187,11 @@ export function compactPendingQueue(
       continue;
     }
 
+    if (item.kind === "activity") {
+      compacted.push(item);
+      continue;
+    }
+
     const key = snapshotKey(item);
     const supersededIndex = replaceableSnapshot.get(key);
 
@@ -207,6 +233,14 @@ export function appendPendingItems(
   return compacted;
 }
 
+function physicalTabKey(
+  installationId: string,
+  browserSessionId: string | undefined,
+  browserTabId: number,
+): string {
+  return `${installationId}\u0000${browserSessionId ?? "legacy-session"}\u0000${String(browserTabId)}`;
+}
+
 export function summarizePendingItems(
   queue: readonly PendingItem[],
 ): PendingQueueSummary {
@@ -221,6 +255,17 @@ export function summarizePendingItems(
       continue;
     }
 
+    if (item.kind === "activity") {
+      physicalTabs.add(
+        physicalTabKey(
+          item.payload.installationId,
+          item.payload.browserSessionId,
+          item.payload.browserTabId,
+        ),
+      );
+      continue;
+    }
+
     for (const tab of item.payload.tabs) {
       const urlKey = `${item.payload.browser}\u0000${tab.url}`;
       snapshotUrls.add(urlKey);
@@ -230,7 +275,11 @@ export function summarizePendingItems(
         tab.tabId !== undefined
       ) {
         physicalTabs.add(
-          `${item.payload.installationId}\u0000${String(tab.tabId)}`,
+          physicalTabKey(
+            item.payload.installationId,
+            item.payload.browserSessionId,
+            tab.tabId,
+          ),
         );
       } else {
         legacyTabs.add(
@@ -265,7 +314,10 @@ function toDeadLetter(
     id: item.id,
     kind: item.kind,
   };
-  const url = item.kind === "content" ? item.payload.url : undefined;
+  const url =
+    item.kind === "content" || item.kind === "activity"
+      ? item.payload.url
+      : undefined;
 
   if (url !== undefined) {
     deadLetter.url = url;

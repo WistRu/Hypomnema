@@ -8,7 +8,23 @@ import {
 import { browser } from "wxt/browser";
 import { defineBackground } from "wxt/utils/define-background";
 
-import { isServerReachable, postContent, postSnapshot } from "../lib/api";
+import {
+  isServerReachable,
+  postActivity,
+  postContent,
+  postSnapshot,
+} from "../lib/api";
+import {
+  activityContentScriptPing,
+  isActivityContentScriptPong,
+  parseActivitySignal,
+  type ActivitySignal,
+} from "../lib/activity-message";
+import { createActivityContentInjector } from "../lib/activity-content-injection";
+import {
+  createActivityRecorder,
+  type ActivityRecorderScope,
+} from "../lib/activity-recorder";
 import { createActivationSequencer } from "../lib/activation-sequencer";
 import {
   activateTabForScope,
@@ -19,7 +35,10 @@ import {
   type BrowserStateSource,
 } from "../lib/browser-state";
 import {
+  ACTIVITY_CONTENT_SCRIPT_FILE,
   EXTRACT_CONTENT_SCRIPT_FILE,
+  ACTIVITY_ALARM_NAME,
+  ACTIVITY_INTERVAL_MINUTES,
   RETRY_ALARM_NAME,
   RETRY_INTERVAL_MINUTES,
   SNAPSHOT_ALARM_NAME,
@@ -52,6 +71,7 @@ import {
   appendPendingItems,
   compactPendingQueue,
   createPendingContent,
+  createPendingActivity,
   createPendingSnapshot,
   drainPendingQueue,
   errorMessage,
@@ -64,6 +84,8 @@ import {
   getOrCreateBrowserSessionId,
   getOrCreateInstallationId,
   readQueueState,
+  readActivityCheckpoint,
+  writeActivityCheckpointAndQueueState,
   writeIdentityAndQueueState,
   writeQueueState,
   type KnownBrowser,
@@ -85,6 +107,9 @@ const IDENTITY_REQUIRED_ERROR =
 
 let syncTail: Promise<void> = Promise.resolve();
 let tabEventTimer: ReturnType<typeof setTimeout> | undefined;
+let machineActivityState: "active" | "idle" | "locked" | undefined;
+let machineActivityInitialization: Promise<void> | undefined;
+const activityObservationSequencer = createActivationSequencer();
 const tabCommandSequencer = createActivationSequencer();
 
 const tabActivationAdapter: TabActivationAdapter = {
@@ -123,6 +148,26 @@ const physicalTabCommandAdapter: PhysicalTabCommandAdapter = {
   removeTab: (tabId) => browser.tabs.remove(tabId),
   updateTab: (tabId, properties) => browser.tabs.update(tabId, properties),
 };
+const activityContentInjector = createActivityContentInjector({
+  getTab: (tabId) => browser.tabs.get(tabId),
+  inject: async (tabId) => {
+    await browser.scripting.executeScript({
+      target: { allFrames: true, tabId },
+      files: [ACTIVITY_CONTENT_SCRIPT_FILE],
+    });
+  },
+  ping: async (tabId) => {
+    try {
+      return isActivityContentScriptPong(
+        await browser.tabs.sendMessage(tabId, activityContentScriptPing, {
+          frameId: 0,
+        }),
+      );
+    } catch {
+      return false;
+    }
+  },
+});
 const physicalTabCommandExecutor = createPhysicalTabCommandExecutor({
   adapter: physicalTabCommandAdapter,
   storage: {
@@ -158,6 +203,26 @@ function serializeSync<T>(operation: () => Promise<T>): Promise<T> {
   return result;
 }
 
+const activityRecorder = createActivityRecorder({
+  load: readActivityCheckpoint,
+  persist: (checkpoint, activity) =>
+    serializeSync(async () => {
+      const state = await readQueueState();
+      const pending =
+        activity === undefined
+          ? state.pending
+          : appendPendingItems(state.pending, [
+              createPendingActivity(activity),
+            ]);
+      await writeActivityCheckpointAndQueueState(
+        checkpoint,
+        pending,
+        state.deadLetters,
+      );
+    }),
+  randomUUID: () => crypto.randomUUID(),
+});
+
 async function flushPendingUnlocked(): Promise<DrainQueueResult> {
   const state = await readQueueState();
   const pending = compactPendingQueue(state.pending);
@@ -181,9 +246,102 @@ function flushPending(): Promise<DrainQueueResult> {
 async function sendPendingItem(item: PendingItem): Promise<void> {
   if (item.kind === "snapshot") {
     await postSnapshot(item.payload);
-  } else {
+  } else if (item.kind === "content") {
     await postContent(item.payload);
+  } else {
+    await postActivity(item.payload);
   }
+}
+
+async function currentActivityScope(): Promise<
+  ActivityRecorderScope | undefined
+> {
+  const browserIdentifier = await getBrowserIdentifier();
+  if (browserIdentifier === undefined) return undefined;
+  const [installationId, browserSessionId] = await Promise.all([
+    getOrCreateInstallationId(),
+    getOrCreateBrowserSessionId(),
+  ]);
+  return {
+    browser: browserIdentifier,
+    browserSessionId,
+    installationId,
+  };
+}
+
+async function currentForegroundActivityTarget() {
+  const focusedWindow = await browser.windows.getLastFocused({
+    windowTypes: ["normal"],
+  });
+  if (focusedWindow.focused !== true || focusedWindow.id === undefined) {
+    return undefined;
+  }
+  const [tab] = await browser.tabs.query({
+    active: true,
+    windowId: focusedWindow.id,
+  });
+  const url = tab?.pendingUrl?.trim() || tab?.url?.trim();
+  if (tab?.id === undefined || !url) return undefined;
+  return { browserTabId: tab.id, url };
+}
+
+interface SampledBrowserActivity {
+  persisted: Promise<void>;
+}
+
+async function observeBrowserActivityUnlocked(
+  signal?: ActivitySignal,
+  sender?: MessageSenderLike,
+): Promise<SampledBrowserActivity | undefined> {
+  const [scope, target] = await Promise.all([
+    currentActivityScope(),
+    currentForegroundActivityTarget(),
+  ]);
+  if (scope === undefined) return;
+  const trustedInteraction = signal?.kind === "interaction";
+  const senderFrameId = sender?.frameId;
+  const senderTabId = sender?.tab?.id;
+  if (
+    signal !== undefined &&
+    (!Number.isInteger(senderFrameId) ||
+      (senderFrameId as number) < 0 ||
+      target === undefined ||
+      senderTabId !== target.browserTabId ||
+      (signal.kind === "heartbeat" &&
+        (senderFrameId !== 0 || signal.url !== target.url)))
+  ) {
+    return;
+  }
+  if (machineActivityState === undefined && !trustedInteraction) {
+    await initializeMachineActivity();
+    if (machineActivityState === undefined) return;
+  }
+
+  return {
+    persisted: activityRecorder.observe(scope, {
+      at: Date.now(),
+      interaction: trustedInteraction,
+      machineActive: trustedInteraction || machineActivityState === "active",
+      target,
+    }),
+  };
+}
+
+async function observeBrowserActivity(
+  signal?: ActivitySignal,
+  sender?: MessageSenderLike,
+): Promise<void> {
+  // Serialize sampling itself, not just recorder mutation. Otherwise two
+  // browser API queries may resolve in reverse order and restore a stale tab.
+  const sampled = await activityObservationSequencer.run(() =>
+    observeBrowserActivityUnlocked(signal, sender),
+  );
+  if (sampled === undefined) return;
+
+  // Keep the checkpoint and queue append durable before acknowledging the
+  // browser event, but do HTTP outside the ordered sampling/recorder paths.
+  await sampled.persisted;
+  await flushPending();
 }
 
 async function appendAndFlushUnlocked(
@@ -543,6 +701,7 @@ async function ensureAlarm(
 
 async function ensureAlarms(): Promise<void> {
   await Promise.all([
+    ensureAlarm(ACTIVITY_ALARM_NAME, ACTIVITY_INTERVAL_MINUTES),
     ensureAlarm(SNAPSHOT_ALARM_NAME, SNAPSHOT_INTERVAL_MINUTES),
     ensureAlarm(RETRY_ALARM_NAME, RETRY_INTERVAL_MINUTES),
   ]);
@@ -803,6 +962,7 @@ async function handleAppRequest(
 }
 
 export interface MessageSenderLike {
+  frameId?: number | undefined;
   tab?: {
     id?: number | undefined;
     url?: string | undefined;
@@ -815,6 +975,12 @@ export async function handleMessage(
   message: unknown,
   sender: MessageSenderLike,
 ): Promise<ExtensionResponse | AppExtensionResponse | void> {
+  const activitySignal = parseActivitySignal(message);
+  if (activitySignal !== undefined) {
+    await observeBrowserActivity(activitySignal, sender);
+    return;
+  }
+
   if (!isExtensionRequest(message)) {
     return;
   }
@@ -889,11 +1055,43 @@ export async function handleMessage(
   }
 }
 
+function initializeMachineActivity(): Promise<void> {
+  if (machineActivityInitialization !== undefined) {
+    return machineActivityInitialization;
+  }
+
+  const operation = browser.idle.queryState(60).then(
+    (state) => {
+      machineActivityState = state;
+    },
+    () => {
+      // Unknown is deliberately conservative: periodic/background samples
+      // cannot claim foreground time until idle state is known.
+      machineActivityState = undefined;
+      if (machineActivityInitialization === operation) {
+        machineActivityInitialization = undefined;
+      }
+    },
+  );
+  machineActivityInitialization = operation;
+  return operation;
+}
+
+async function ensureActivityScriptsForOpenTabs(): Promise<void> {
+  const tabs = await browser.tabs.query({});
+  await activityContentInjector.ensureAll(
+    tabs.flatMap((tab) => (tab.id === undefined ? [] : [tab.id])),
+  );
+}
+
 async function initializeWorker(): Promise<void> {
+  // Resolve the conservative activity gate before WebSocket/HTTP startup.
+  await initializeMachineActivity();
   tabCommandRelayAgent.start();
   await ensureAlarms();
   await flushPending();
   await captureAndSync();
+  await observeBrowserActivity();
 }
 
 export default defineBackground(() => {
@@ -903,7 +1101,9 @@ export default defineBackground(() => {
 
   browser.runtime.onInstalled.addListener((details) => {
     void (async () => {
+      await initializeMachineActivity();
       await ensureAlarms();
+      await ensureActivityScriptsForOpenTabs();
 
       if (details.reason === "install") {
         await browser.runtime.openOptionsPage();
@@ -915,6 +1115,7 @@ export default defineBackground(() => {
 
   browser.runtime.onStartup.addListener(() => {
     void (async () => {
+      await initializeMachineActivity();
       tabCommandRelayAgent.restart();
       await ensureAlarms();
       await captureAndSync();
@@ -924,7 +1125,11 @@ export default defineBackground(() => {
   });
 
   browser.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === SNAPSHOT_ALARM_NAME) {
+    if (alarm.name === ACTIVITY_ALARM_NAME) {
+      void observeBrowserActivity().catch((error: unknown) => {
+        console.error("TabHub activity checkpoint failed", error);
+      });
+    } else if (alarm.name === SNAPSHOT_ALARM_NAME) {
       void captureAndSync().catch((error: unknown) => {
         console.error("TabHub periodic snapshot failed", error);
       });
@@ -944,6 +1149,37 @@ export default defineBackground(() => {
     removed: (listener) => browser.tabs.onRemoved?.addListener(listener),
     replaced: (listener) => browser.tabs.onReplaced?.addListener(listener),
     updated: (listener) => browser.tabs.onUpdated?.addListener(listener),
+  });
+
+  browser.tabs.onActivated?.addListener(({ tabId }) => {
+    void Promise.all([
+      observeBrowserActivity(),
+      activityContentInjector.ensure(tabId),
+    ]).catch((error: unknown) => {
+      console.error("TabHub tab-activation activity checkpoint failed", error);
+    });
+  });
+  browser.tabs.onUpdated?.addListener((_tabId, changeInfo) => {
+    if (changeInfo.url === undefined) return;
+    void observeBrowserActivity().catch((error: unknown) => {
+      console.error("TabHub navigation activity checkpoint failed", error);
+    });
+  });
+  browser.tabs.onRemoved?.addListener(() => {
+    void observeBrowserActivity().catch((error: unknown) => {
+      console.error("TabHub tab-removal activity checkpoint failed", error);
+    });
+  });
+  browser.windows.onFocusChanged.addListener(() => {
+    void observeBrowserActivity().catch((error: unknown) => {
+      console.error("TabHub window-focus activity checkpoint failed", error);
+    });
+  });
+  browser.idle.onStateChanged.addListener((state) => {
+    machineActivityState = state;
+    void observeBrowserActivity().catch((error: unknown) => {
+      console.error("TabHub idle-state activity checkpoint failed", error);
+    });
   });
 
   browser.runtime.onMessage.addListener(handleMessage);

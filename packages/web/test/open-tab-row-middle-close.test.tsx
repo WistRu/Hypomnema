@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("../src/i18n", () => ({
   useI18n: () => ({
     formatNumber: (value: number) => String(value),
+    formatDuration: (value: number) => `${value}ms`,
     t: (key: string) => key,
   }),
 }));
@@ -21,6 +22,8 @@ const tab: TabInstance = {
   duplicateGroupSize: 1,
   faviconUrl: null,
   firstSeenAt: "2026-08-10T00:00:00.000Z",
+  foregroundTimeMs: 0,
+  engagedTimeMs: 0,
   importance: "medium",
   index: 2,
   installationId: "123e4567-e89b-42d3-a456-426614174000",

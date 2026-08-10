@@ -40,6 +40,8 @@ function youtubeTab(url: string): TabInstance {
     pinned: false,
     lastAccessed: null,
     firstSeenAt: "2026-08-09T00:00:00.000Z",
+    foregroundTimeMs: 3_661_000,
+    engagedTimeMs: 125_000,
     lastSeenAt: "2026-08-09T00:00:00.000Z",
     status: "inbox",
     importance: 0,
@@ -62,6 +64,22 @@ describe("open-tab presentation", () => {
     );
 
     expect(markup).toContain(`>${url}</span>`);
+  });
+
+  it("shows foreground and recently engaged time for the physical tab", () => {
+    const markup = renderToStaticMarkup(
+      createElement(OpenTabRow, {
+        activation: ready,
+        tab: youtubeTab("https://example.com/activity"),
+        onActivateTab: vi.fn(),
+        onSelectCanonicalTab: vi.fn(),
+      }),
+    );
+
+    expect(markup).toContain("On screen");
+    expect(markup).toContain("1h 1m");
+    expect(markup).toContain("Active use");
+    expect(markup).toContain("2m 5s");
   });
 
   it("makes switching the primary action and never opens a new copy", () => {
