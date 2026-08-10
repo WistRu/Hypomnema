@@ -14,9 +14,16 @@ describe("activateExistingTab", () => {
     });
     const activate = vi.fn().mockResolvedValue({
       id: 42,
+      title: "Exact tab title",
       windowId: 9,
     });
-    const getWindow = vi.fn().mockResolvedValue({ state: "maximized" });
+    const getWindow = vi.fn().mockResolvedValue({
+      height: 900,
+      left: -1920,
+      state: "maximized",
+      top: 0,
+      width: 1920,
+    });
     const focusWindow = vi.fn().mockResolvedValue(undefined);
     const restoreWindow = vi.fn().mockResolvedValue(undefined);
 
@@ -27,7 +34,14 @@ describe("activateExistingTab", () => {
       ),
     ).resolves.toEqual({
       tabId: 42,
+      windowBounds: {
+        height: 900,
+        left: -1920,
+        top: 0,
+        width: 1920,
+      },
       windowId: 9,
+      windowTitle: "Exact tab title",
     });
 
     expect(activate).toHaveBeenCalledWith(42);

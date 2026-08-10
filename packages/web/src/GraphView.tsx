@@ -16,6 +16,10 @@ import { type CSSProperties, type ReactNode, useEffect, useMemo, useState } from
 import { fetchGraph } from "./api";
 import { layoutGraphNodes, reachableFollowsBranch } from "./graph-model";
 import { useI18n } from "./i18n";
+import {
+  handleMiddleClickClose,
+  preventMiddleClickAutoscroll,
+} from "./middle-click-close";
 
 type GraphColorMode = "status" | "browser";
 type FlowData = Record<string, unknown> & {
@@ -24,6 +28,9 @@ type FlowData = Record<string, unknown> & {
 };
 
 interface GraphViewProps {
+  closeErrorForTab: (tabId: number) => string | undefined;
+  isClosingTab: (tabId: number) => boolean;
+  onCloseTab: (tabId: number) => void;
   rootTag: string;
   onSelectTab: (tabId: number) => void;
 }
@@ -85,6 +92,55 @@ function displayTitle(node: GraphNode) {
   }
 }
 
+export function GraphNodeCard({
+  browser,
+  closeError,
+  closeInProgress = false,
+  closingLabel,
+  groupKey,
+  node,
+  onMiddleClose,
+  openLabel,
+  statusLabel,
+}: {
+  browser: string;
+  closeError?: string | undefined;
+  closeInProgress?: boolean | undefined;
+  closingLabel: string;
+  groupKey: string;
+  node: GraphNode;
+  onMiddleClose: (tabId: number) => void;
+  openLabel: string;
+  statusLabel: string;
+}) {
+  return (
+    <div
+      className="graph-node-card"
+      onAuxClick={(event) => {
+        if (!node.isOpen) return;
+        handleMiddleClickClose(event, () => onMiddleClose(node.id));
+      }}
+      onMouseDown={preventMiddleClickAutoscroll}
+    >
+      <div className="graph-node-title" title={displayTitle(node)}>
+        {displayTitle(node)}
+      </div>
+      <div className="graph-node-meta">
+        <span>{statusLabel}</span>
+        <span>{browser}</span>
+        <span>{closeInProgress ? closingLabel : openLabel}</span>
+      </div>
+      <div
+        className="graph-node-topic"
+        role={closeError ? "alert" : undefined}
+        title={closeError ?? groupKey}
+      >
+        {closeError ?? groupKey}
+      </div>
+    </div>
+  );
+}
+
 function GraphState({
   title,
   detail,
@@ -104,7 +160,13 @@ function GraphState({
   );
 }
 
-export default function GraphView({ rootTag, onSelectTab }: GraphViewProps) {
+export default function GraphView({
+  closeErrorForTab,
+  isClosingTab,
+  onCloseTab,
+  rootTag,
+  onSelectTab,
+}: GraphViewProps) {
   const { errorMessage, formatNumber, t } = useI18n();
   const [colorMode, setColorMode] = useState<GraphColorMode>("status");
   const [branchRootId, setBranchRootId] = useState<number | null>(null);
@@ -188,19 +250,17 @@ export default function GraphView({ rootTag, onSelectTab }: GraphViewProps) {
         data: {
           tabId: node.id,
           label: (
-            <div className="graph-node-card">
-              <div className="graph-node-title" title={displayTitle(node)}>
-                {displayTitle(node)}
-              </div>
-              <div className="graph-node-meta">
-                <span>{statusLabel}</span>
-                <span>{browserLabel(node.browser, t)}</span>
-                <span>{node.isOpen ? t("open") : t("closed")}</span>
-              </div>
-              <div className="graph-node-topic" title={positioned.groupKey}>
-                {positioned.groupKey}
-              </div>
-            </div>
+            <GraphNodeCard
+              browser={browserLabel(node.browser, t)}
+              closeError={closeErrorForTab(node.id)}
+              closeInProgress={isClosingTab(node.id)}
+              closingLabel={t("Closing...")}
+              groupKey={positioned.groupKey}
+              node={node}
+              onMiddleClose={onCloseTab}
+              openLabel={node.isOpen ? t("open") : t("closed")}
+              statusLabel={statusLabel}
+            />
           ),
         },
         position: positioned.position,
@@ -221,7 +281,18 @@ export default function GraphView({ rootTag, onSelectTab }: GraphViewProps) {
     });
 
     return [...groupNodes, ...tabNodes];
-  }, [activeBranchRoot, colorMode, formatNumber, layout.groups, layout.nodes, reachable, t]);
+  }, [
+    activeBranchRoot,
+    closeErrorForTab,
+    colorMode,
+    formatNumber,
+    isClosingTab,
+    layout.groups,
+    layout.nodes,
+    onCloseTab,
+    reachable,
+    t,
+  ]);
 
   const flowEdges = useMemo<FlowEdge[]>(() => {
     const branchActive = activeBranchRoot !== null;

@@ -5,6 +5,7 @@ import {
   fetchAllDuplicateGroups,
   fetchAllOpenTabs,
   fetchConnectedTabCommandScopes,
+  fetchCanonicalTabInstances,
   fetchDuplicateGroups,
   fetchOpenTabs,
   TabCommandRelayClientError,
@@ -50,6 +51,26 @@ afterEach(() => {
 });
 
 describe("open-tab API", () => {
+  it("resolves every physical copy for one canonical Library tab", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({ items: [instance(101), instance(102, true)], total: 2 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchCanonicalTabInstances(7)).resolves.toEqual([
+      expect.objectContaining({ canonicalTabId: 7, browserTabId: 101 }),
+      expect.objectContaining({
+        active: true,
+        canonicalTabId: 7,
+        browserTabId: 102,
+      }),
+    ]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/tabs/7/instances",
+      expect.objectContaining({ headers: { Accept: "application/json" } }),
+    );
+  });
+
   it("lists extension sessions that can receive addressed tab commands", async () => {
     const fetchMock = vi.fn(async () =>
       Response.json({
@@ -58,6 +79,7 @@ describe("open-tab API", () => {
             ...relayScope,
             connectedAt: "2026-08-09T06:00:00.000Z",
             lastSeenAt: "2026-08-09T06:00:20.000Z",
+            protocolVersion: 4,
           },
         ],
       }),
@@ -65,7 +87,7 @@ describe("open-tab API", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchConnectedTabCommandScopes()).resolves.toEqual([
-      expect.objectContaining(relayScope),
+      expect.objectContaining({ ...relayScope, protocolVersion: 4 }),
     ]);
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/tab-command-relay/scopes",

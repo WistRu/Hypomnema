@@ -1,3 +1,4 @@
+import { tabCommandRelayCommandSchema } from "@tabhub/shared";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -757,6 +758,234 @@ describe("physical tab command executor", () => {
         version: 1,
       },
     });
+  });
+
+  it("previews a pinned tab for an explicit single close", async () => {
+    const previewId = "323e4567-e89b-42d3-a456-426614174000";
+    const browserAdapter = adapter();
+    vi.mocked(browserAdapter.getTab).mockResolvedValue({
+      active: false,
+      id: 42,
+      index: 2,
+      pinned: true,
+      url: "https://example.com/pinned",
+      windowId: 7,
+    });
+    const sessionStorage = statefulStorage();
+    const executor = createPhysicalTabCommandExecutor({
+      adapter: browserAdapter,
+      createId: () => previewId,
+      now: () => 1_000,
+      storage: sessionStorage,
+    });
+
+    await expect(
+      executor.execute(
+        { currentScope: CURRENT_SCOPE },
+        {
+          ...CURRENT_SCOPE,
+          command: {
+            intent: "explicit-single",
+            kind: "close-preview",
+            targets: [
+              {
+                expectedUrl: "https://example.com/pinned",
+                tabId: 42,
+              },
+            ],
+          },
+        },
+      ),
+    ).resolves.toEqual({
+      candidateTabIds: [42],
+      expiresAt: 301_000,
+      kind: "close-preview",
+      previewId,
+      requested: 1,
+      skipped: [],
+    });
+    expect(
+      sessionStorage.peek(
+        `tabhub:physical-close-preview:${CURRENT_SCOPE.installationId}`,
+      ),
+    ).toMatchObject({
+      intent: "explicit-single",
+      targets: [
+        { expectedUrl: "https://example.com/pinned", tabId: 42 },
+      ],
+    });
+  });
+
+  it("rejects a persisted explicit single preview without exactly one target", async () => {
+    const previewId = "323e4567-e89b-42d3-a456-426614174000";
+    const previewKey =
+      `tabhub:physical-close-preview:${CURRENT_SCOPE.installationId}`;
+    const browserAdapter = adapter();
+    const executor = createPhysicalTabCommandExecutor({
+      adapter: browserAdapter,
+      now: () => 1_000,
+      storage: statefulStorage({
+        [previewKey]: {
+          ...CURRENT_SCOPE,
+          expiresAt: 301_000,
+          intent: "explicit-single",
+          previewId,
+          targets: [],
+          version: 1,
+        },
+      }),
+    });
+
+    await expect(
+      executor.execute(
+        { currentScope: CURRENT_SCOPE },
+        {
+          ...CURRENT_SCOPE,
+          command: { confirmed: true, kind: "close", previewId },
+        },
+      ),
+    ).rejects.toThrow(/preview expired/i);
+    expect(browserAdapter.removeTab).not.toHaveBeenCalled();
+  });
+
+  it("closes and restores an explicitly selected pinned tab as pinned", async () => {
+    const previewId = "323e4567-e89b-42d3-a456-426614174000";
+    const undoId = "423e4567-e89b-42d3-a456-426614174000";
+    const generatedIds = [previewId, undoId];
+    const browserAdapter = adapter();
+    vi.mocked(browserAdapter.getTab).mockResolvedValue({
+      active: true,
+      id: 42,
+      index: 2,
+      mutedInfo: { muted: false },
+      pinned: true,
+      title: "Pinned tab",
+      url: "https://example.com/pinned",
+      windowId: 7,
+    });
+    vi.mocked(browserAdapter.getWindow).mockResolvedValue({
+      id: 7,
+      type: "normal",
+    });
+    vi.mocked(browserAdapter.createTab).mockResolvedValue({
+      id: 142,
+      index: 2,
+      pinned: true,
+      url: "https://example.com/pinned",
+      windowId: 7,
+    });
+    const sessionStorage = statefulStorage();
+    const executor = createPhysicalTabCommandExecutor({
+      adapter: browserAdapter,
+      createId: () => generatedIds.shift()!,
+      now: () => 1_000,
+      storage: sessionStorage,
+    });
+
+    await executor.execute(
+      { currentScope: CURRENT_SCOPE },
+      {
+        ...CURRENT_SCOPE,
+        command: {
+          intent: "explicit-single",
+          kind: "close-preview",
+          targets: [
+            { expectedUrl: "https://example.com/pinned", tabId: 42 },
+          ],
+        },
+      },
+    );
+    await expect(
+      executor.execute(
+        { currentScope: CURRENT_SCOPE },
+        {
+          ...CURRENT_SCOPE,
+          command: { confirmed: true, kind: "close", previewId },
+        },
+      ),
+    ).resolves.toMatchObject({
+      kind: "close",
+      skipped: [],
+      succeededTabIds: [42],
+      undo: { count: 1, undoId },
+    });
+
+    vi.mocked(browserAdapter.getTab).mockRejectedValue(new Error("closed"));
+    await expect(
+      executor.execute(
+        { currentScope: CURRENT_SCOPE },
+        {
+          ...CURRENT_SCOPE,
+          command: { kind: "undo-close", undoId },
+        },
+      ),
+    ).resolves.toMatchObject({
+      failed: [],
+      kind: "undo-close",
+      restoredTabIds: [142],
+      skipped: [],
+    });
+    expect(browserAdapter.removeTab).toHaveBeenCalledWith(42);
+    expect(browserAdapter.createTab).toHaveBeenCalledWith({
+      active: false,
+      index: 2,
+      pinned: true,
+      url: "https://example.com/pinned",
+      windowId: 7,
+    });
+  });
+
+  it("keeps a TabHub control tab protected during explicit single close", async () => {
+    const previewId = "323e4567-e89b-42d3-a456-426614174000";
+    const browserAdapter = adapter();
+    vi.mocked(browserAdapter.getTab).mockResolvedValue({
+      active: true,
+      id: 42,
+      index: 2,
+      pinned: true,
+      url: "http://127.0.0.1:7717/app/",
+      windowId: 7,
+    });
+    const executor = createPhysicalTabCommandExecutor({
+      adapter: browserAdapter,
+      createId: () => previewId,
+      now: () => 1_000,
+      storage: statefulStorage(),
+    });
+
+    await executor.execute(
+      { currentScope: CURRENT_SCOPE },
+      {
+        ...CURRENT_SCOPE,
+        command: {
+          intent: "explicit-single",
+          kind: "close-preview",
+          targets: [
+            {
+              expectedUrl: "http://127.0.0.1:7717/app/",
+              tabId: 42,
+            },
+          ],
+        },
+      },
+    );
+    await expect(
+      executor.execute(
+        { currentScope: CURRENT_SCOPE, protectedTabIds: [42] },
+        {
+          ...CURRENT_SCOPE,
+          command: { confirmed: true, kind: "close", previewId },
+        },
+      ),
+    ).resolves.toEqual({
+      failed: [],
+      kind: "close",
+      requested: 1,
+      skipped: [{ reason: "control-tab-protected", tabId: 42 }],
+      succeededTabIds: [],
+      undo: null,
+    });
+    expect(browserAdapter.removeTab).not.toHaveBeenCalled();
   });
 
   it("previews and closes an active duplicate while preserving its keeper and protected TabHub tab", async () => {
@@ -2476,6 +2705,54 @@ describe("physical tab command executor", () => {
 });
 
 describe("parsePhysicalTabCommand", () => {
+  it("shares the exact-one explicit close contract with the relay schema", () => {
+    const target = {
+      expectedUrl: "https://example.com/pinned",
+      tabId: 42,
+    };
+
+    expect(
+      tabCommandRelayCommandSchema.safeParse({
+        intent: "explicit-single",
+        kind: "close-preview",
+        targets: [target],
+      }).success,
+    ).toBe(true);
+    expect(
+      tabCommandRelayCommandSchema.safeParse({
+        intent: "explicit-single",
+        kind: "close-preview",
+        targets: [target, { ...target, tabId: 43 }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts explicit single close only for exactly one physical tab", () => {
+    const target = {
+      expectedUrl: "https://example.com/pinned",
+      tabId: 42,
+    };
+
+    expect(
+      parsePhysicalTabCommand({
+        intent: "explicit-single",
+        kind: "close-preview",
+        targets: [target],
+      }),
+    ).toEqual({
+      intent: "explicit-single",
+      kind: "close-preview",
+      targets: [target],
+    });
+    expect(
+      parsePhysicalTabCommand({
+        intent: "explicit-single",
+        kind: "close-preview",
+        targets: [target, { ...target, tabId: 43 }],
+      }),
+    ).toBeUndefined();
+  });
+
   it("parses every strict v4 command shape", () => {
     const targets = [{ tabId: 42, expectedUrl: "https://example.com/42" }];
 

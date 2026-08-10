@@ -110,7 +110,7 @@ describe("open-tab presentation", () => {
     );
 
     expect(markup).toContain(
-      'disabled="" title="Switch to this existing browser tab"',
+      'disabled="" title="Switch to this existing browser tab. Middle-click anywhere in the row to close it."',
     );
   });
 });

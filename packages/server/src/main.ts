@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { config as loadEnvironment } from "dotenv";
 
 import { createApp } from "./app.js";
+import { createWindowsBrowserForegroundHandoff } from "./browser-foreground.js";
 import { createAnthropicSummaryProvider } from "./summary-provider.js";
 import { createEmbeddingProviderFromEnv } from "./embedding-provider.js";
 import { resolveServerHost } from "./runtime-config.js";
@@ -84,8 +85,21 @@ const summaryProvider =
         timeoutMs: positiveInteger("TABHUB_SUMMARY_TIMEOUT_MS", 120_000),
       });
 const embeddingProvider = createEmbeddingProviderFromEnv(process.env);
+const foregroundHelperPath = resolve(
+  workspaceRoot,
+  "packages/server/native/bin/tabhub-foreground.exe",
+);
+const browserForegroundHandoff =
+  process.platform === "win32"
+    ? createWindowsBrowserForegroundHandoff({
+        executablePath: foregroundHelperPath,
+      })
+    : undefined;
 
 const app = createApp({
+  ...(browserForegroundHandoff === undefined
+    ? {}
+    : { browserForegroundHandoff }),
   databasePath,
   logger: true,
   tabCommandRelayAppOrigins: [

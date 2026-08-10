@@ -1,0 +1,371 @@
+import {
+  tabCommandRelayLegacyProtocolVersion,
+  tabCommandRelayProtocolVersion,
+  tabCommandScopeSchema,
+  type TabCommandRelayConnectedScope,
+  type TabInstance,
+} from "@tabhub/shared";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useRef } from "react";
+
+import {
+  executeRelayedTabCommand,
+  fetchCanonicalTabInstances,
+  fetchConnectedTabCommandScopes,
+} from "./api";
+import {
+  createWindowExtensionBridge,
+  ExtensionBridgeError,
+  type ExtensionProbe,
+  type PhysicalTabScope,
+  type TabCommand,
+  type TabCommandResult,
+} from "./extension-bridge";
+import { useI18n } from "./i18n";
+import {
+  executeSingleTabClose,
+  type SingleTabCloseCommandExecutor,
+  type SingleTabClosePlan,
+} from "./middle-click-close";
+import {
+  canonicalTabActivationSelection,
+  tabActivationAvailability,
+  type CanonicalTabActivationSelection,
+  type TabActivationTranslator,
+} from "./open-tab-activation";
+
+type SingleTabCloseRequest =
+  | { canonicalTabId: number; kind: "canonical" }
+  | { kind: "physical"; tab: TabInstance };
+
+export interface SingleTabCloseController {
+  busy: boolean;
+  closeCanonical(canonicalTabId: number): void;
+  closePhysical(tab: TabInstance): void;
+  errorForCanonical(canonicalTabId: number): unknown | undefined;
+  errorForPhysical(instanceId: number): unknown | undefined;
+  isClosingCanonical(canonicalTabId: number): boolean;
+  isClosingPhysical(instanceId: number): boolean;
+}
+
+function unavailableProbe(): ExtensionProbe {
+  return {
+    available: false,
+    browser: null,
+    browserSessionId: null,
+    controlWindowId: null,
+    installationId: null,
+    pendingUndos: [],
+    windows: [],
+  };
+}
+
+function planForTab(
+  tab: TabInstance,
+  probe: ExtensionProbe,
+  connectedScopes: readonly PhysicalTabScope[],
+  translate: (key: string) => string,
+): SingleTabClosePlan {
+  const availability = tabActivationAvailability(
+    tab,
+    probe,
+    translate,
+    connectedScopes,
+  );
+  if (availability.kind !== "ready") {
+    throw new ExtensionBridgeError(availability.message);
+  }
+  const scope = tabCommandScopeSchema.parse({
+    browser: availability.target.browser,
+    browserSessionId: availability.target.browserSessionId,
+    installationId: availability.target.installationId,
+  });
+  return {
+    route: availability.route,
+    scope,
+    target: {
+      expectedUrl: tab.url,
+      tabId: availability.target.tabId,
+    },
+  };
+}
+
+function sameScope(
+  left: PhysicalTabScope,
+  right: PhysicalTabScope,
+): boolean {
+  return (
+    left.browser === right.browser &&
+    left.browserSessionId === right.browserSessionId &&
+    left.installationId === right.installationId
+  );
+}
+
+const LEGACY_SINGLE_CLOSE_MESSAGE =
+  "Reload the updated TabHub extension in that browser before closing tabs with the middle mouse button.";
+
+function directProbeSupportsSingleClose(
+  probe: ExtensionProbe | undefined,
+  connectedScopes: readonly TabCommandRelayConnectedScope[],
+): boolean {
+  if (probe?.available !== true || probe.browser === null) return false;
+  const probeScope: PhysicalTabScope = {
+    browser: probe.browser,
+    browserSessionId: probe.browserSessionId,
+    installationId: probe.installationId,
+  };
+  return (
+    (probe.commandProtocolVersion ?? tabCommandRelayLegacyProtocolVersion) ===
+      tabCommandRelayProtocolVersion ||
+    connectedScopes.some(
+      (scope) =>
+        sameScope(scope, probeScope) &&
+        scope.protocolVersion === tabCommandRelayProtocolVersion,
+    )
+  );
+}
+
+/**
+ * Closing a canonical record may choose among several physical copies. Keep
+ * activation compatible with v3, but prefer a copy whose relay understands
+ * the explicit-single close contract. Falling back to all scopes lets the
+ * caller surface a precise upgrade error when only a legacy copy is reachable.
+ */
+export function canonicalSingleTabCloseSelection(
+  tabs: readonly TabInstance[],
+  probe: ExtensionProbe | undefined,
+  connectedScopes: readonly TabCommandRelayConnectedScope[],
+  translate?: TabActivationTranslator,
+): CanonicalTabActivationSelection {
+  const directProbe =
+    directProbeSupportsSingleClose(probe, connectedScopes)
+      ? probe
+      : undefined;
+  const capableSelection = canonicalTabActivationSelection(
+    tabs,
+    directProbe,
+    translate,
+    connectedScopes.filter(
+      ({ protocolVersion }) =>
+        protocolVersion === tabCommandRelayProtocolVersion,
+    ),
+  );
+  return capableSelection.kind === "ready"
+    ? capableSelection
+    : canonicalTabActivationSelection(
+        tabs,
+        probe,
+        translate,
+        connectedScopes,
+      );
+}
+
+export async function executeSingleTabCloseForConnectedScopes(
+  plan: SingleTabClosePlan,
+  probe: ExtensionProbe,
+  connectedScopes: readonly TabCommandRelayConnectedScope[],
+  execute: SingleTabCloseCommandExecutor,
+  translate: TabActivationTranslator = (key) => key,
+) {
+  const selectedDirect =
+    plan.route === "direct" &&
+    probe.available &&
+    probe.browser !== null &&
+    sameScope(
+      {
+        browser: probe.browser,
+        browserSessionId: probe.browserSessionId,
+        installationId: probe.installationId,
+      },
+      plan.scope,
+    )
+      ? probe
+      : undefined;
+  const selectedRelay =
+    plan.route === "relay"
+      ? connectedScopes.find((scope) => sameScope(scope, plan.scope))
+      : undefined;
+  if (
+    (selectedDirect !== undefined &&
+      !directProbeSupportsSingleClose(selectedDirect, connectedScopes)) ||
+    (selectedRelay !== undefined &&
+      selectedRelay.protocolVersion !== tabCommandRelayProtocolVersion)
+  ) {
+    throw new Error(translate(LEGACY_SINGLE_CLOSE_MESSAGE));
+  }
+  return executeSingleTabClose(plan, execute);
+}
+
+function closeCommand(
+  command: TabCommand,
+): asserts command is Extract<
+  TabCommand,
+  { kind: "close-preview" | "close" }
+> {
+  if (command.kind !== "close-preview" && command.kind !== "close") {
+    throw new ExtensionBridgeError("Expected one addressed close command.");
+  }
+}
+
+export function useSingleTabClose(): SingleTabCloseController {
+  const { t } = useI18n();
+  const bridge = useMemo(() => createWindowExtensionBridge(), []);
+  const queryClient = useQueryClient();
+  const inFlight = useRef(false);
+  const probeQuery = useQuery({
+    queryKey: ["extension-bridge", "probe"],
+    queryFn: () => bridge.probe(),
+    refetchOnWindowFocus: "always",
+    retry: false,
+    staleTime: 10_000,
+  });
+  const relayScopesQuery = useQuery({
+    queryKey: ["tab-command-relay", "scopes"],
+    queryFn: ({ signal }) => fetchConnectedTabCommandScopes(signal),
+    refetchInterval: 5_000,
+    refetchOnWindowFocus: "always",
+    retry: false,
+    staleTime: 3_000,
+  });
+
+  const execute: SingleTabCloseCommandExecutor = async (
+    route,
+    scope,
+    command,
+  ) => {
+    closeCommand(command);
+    if (route === "direct") {
+      const response = await bridge.command({ ...scope, command });
+      if (!sameScope(response, scope)) {
+        throw new ExtensionBridgeError(
+          "The extension browser session changed during the action.",
+        );
+      }
+      return response.result;
+    }
+
+    const relayScope = tabCommandScopeSchema.parse(scope);
+    const result = await executeRelayedTabCommand({
+      ...relayScope,
+      command,
+    });
+    if (result.kind !== "close-preview" && result.kind !== "close") {
+      throw new ExtensionBridgeError(
+        "The extension returned a result for a different command.",
+      );
+    }
+    return result as TabCommandResult;
+  };
+
+  const mutation = useMutation({
+    mutationFn: async (request: SingleTabCloseRequest) => {
+      const tabsPromise =
+        request.kind === "canonical"
+          ? fetchCanonicalTabInstances(request.canonicalTabId)
+          : Promise.resolve([request.tab]);
+      const [tabs, probe, connectedScopes] = await Promise.all([
+        tabsPromise,
+        probeQuery.data === undefined
+          ? bridge.probe().catch(() => unavailableProbe())
+          : Promise.resolve(probeQuery.data),
+        relayScopesQuery.data === undefined
+          ? fetchConnectedTabCommandScopes().catch(
+              (): TabCommandRelayConnectedScope[] => [],
+            )
+          : Promise.resolve(relayScopesQuery.data),
+      ]);
+
+      let plan: SingleTabClosePlan;
+      if (request.kind === "canonical") {
+        const selection = canonicalSingleTabCloseSelection(
+          tabs,
+          probe,
+          connectedScopes,
+          t,
+        );
+        if (selection.kind !== "ready") {
+          throw new ExtensionBridgeError(selection.message);
+        }
+        plan = planForTab(selection.tab, probe, connectedScopes, t);
+      } else {
+        plan = planForTab(request.tab, probe, connectedScopes, t);
+      }
+
+      return executeSingleTabCloseForConnectedScopes(
+        plan,
+        probe,
+        connectedScopes,
+        execute,
+        t,
+      );
+    },
+    onSettled: async (_result, _error, request) => {
+      try {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["tab-instances"] }),
+          queryClient.invalidateQueries({ queryKey: ["duplicate-groups"] }),
+          queryClient.invalidateQueries({ queryKey: ["tabs"] }),
+          queryClient.invalidateQueries({ queryKey: ["graph"] }),
+          queryClient.invalidateQueries({
+            queryKey: ["extension-bridge", "probe"],
+          }),
+          queryClient.invalidateQueries({
+            queryKey: ["tab-command-relay", "browser-state"],
+          }),
+          ...(request.kind === "canonical"
+            ? [
+                queryClient.invalidateQueries({
+                  queryKey: ["tab", request.canonicalTabId],
+                }),
+              ]
+            : []),
+        ]);
+      } finally {
+        inFlight.current = false;
+      }
+    },
+  });
+
+  const run = (request: SingleTabCloseRequest) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    mutation.mutate(request);
+  };
+  const matches = (request: SingleTabCloseRequest): boolean => {
+    const current = mutation.variables;
+    if (current?.kind !== request.kind) return false;
+    if (request.kind === "canonical") {
+      return (
+        current.kind === "canonical" &&
+        current.canonicalTabId === request.canonicalTabId
+      );
+    }
+    return (
+      current.kind === "physical" &&
+      current.tab.instanceId === request.tab.instanceId
+    );
+  };
+
+  return {
+    busy: mutation.isPending,
+    closeCanonical: (canonicalTabId) =>
+      run({ canonicalTabId, kind: "canonical" }),
+    closePhysical: (tab) => run({ kind: "physical", tab }),
+    errorForCanonical: (canonicalTabId) =>
+      mutation.isError && matches({ canonicalTabId, kind: "canonical" })
+        ? mutation.error
+        : undefined,
+    errorForPhysical: (instanceId) =>
+      mutation.isError &&
+      mutation.variables?.kind === "physical" &&
+      mutation.variables.tab.instanceId === instanceId
+        ? mutation.error
+        : undefined,
+    isClosingCanonical: (canonicalTabId) =>
+      mutation.isPending && matches({ canonicalTabId, kind: "canonical" }),
+    isClosingPhysical: (instanceId) =>
+      mutation.isPending &&
+      mutation.variables?.kind === "physical" &&
+      mutation.variables.tab.instanceId === instanceId,
+  };
+}

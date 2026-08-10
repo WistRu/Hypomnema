@@ -1,4 +1,7 @@
-import { tabUrlMaxLength } from "@tabhub/shared";
+import {
+  tabUrlMaxLength,
+  type TabCommandRelayClosePreviewIntent,
+} from "@tabhub/shared";
 
 export interface PhysicalTabCommandScope {
   browser: string;
@@ -14,6 +17,8 @@ export interface PhysicalTabTarget {
 export interface ClosePreviewTarget extends PhysicalTabTarget {
   keeper?: PhysicalTabTarget | undefined;
 }
+
+export type ClosePreviewIntent = TabCommandRelayClosePreviewIntent;
 
 export type PhysicalTabMoveDestination =
   | { kind: "app-window" }
@@ -56,6 +61,7 @@ export type PhysicalTabCommand =
       targets: PhysicalTabTarget[];
     }
   | {
+      intent?: ClosePreviewIntent | undefined;
       kind: "close-preview";
       targets: ClosePreviewTarget[];
     }
@@ -220,6 +226,7 @@ function generateOpaqueId(createId: () => string): string {
 
 interface StoredClosePreview extends PhysicalTabCommandScope {
   expiresAt: number;
+  intent?: ClosePreviewIntent | undefined;
   previewId: string;
   targets: ClosePreviewTarget[];
   version: 1;
@@ -387,9 +394,21 @@ export function parsePhysicalTabCommand(
 
   if (value.kind === "close-preview") {
     const targets = parseClosePreviewTargets(value.targets);
-    return targets !== undefined && hasOnlyKeys(value, ["kind", "targets"])
-      ? { kind: "close-preview", targets }
-      : undefined;
+    if (
+      targets === undefined ||
+      !hasOnlyKeys(value, ["intent", "kind", "targets"]) ||
+      (value.intent !== undefined && value.intent !== "explicit-single") ||
+      (value.intent === "explicit-single" && targets.length !== 1)
+    ) {
+      return undefined;
+    }
+    return {
+      ...(value.intent === "explicit-single"
+        ? { intent: value.intent }
+        : {}),
+      kind: "close-preview",
+      targets,
+    };
   }
 
   if (value.kind === "discard") {
@@ -489,6 +508,7 @@ function parseStoredClosePreview(value: unknown): StoredClosePreview | undefined
       "browser",
       "browserSessionId",
       "expiresAt",
+      "intent",
       "installationId",
       "previewId",
       "targets",
@@ -503,17 +523,24 @@ function parseStoredClosePreview(value: unknown): StoredClosePreview | undefined
     !uuidPattern.test(value.previewId) ||
     !Number.isSafeInteger(value.expiresAt) ||
     (value.expiresAt as number) < 0 ||
+    (value.intent !== undefined && value.intent !== "explicit-single") ||
     value.version !== 1 ||
     !Array.isArray(value.targets)
   ) {
     return undefined;
   }
   const targets = parseClosePreviewTargets(value.targets, 0);
-  if (targets === undefined) return undefined;
+  if (
+    targets === undefined ||
+    (value.intent === "explicit-single" && targets.length !== 1)
+  ) {
+    return undefined;
+  }
   return {
     browser: value.browser,
     browserSessionId: value.browserSessionId,
     expiresAt: value.expiresAt as number,
+    ...(value.intent === "explicit-single" ? { intent: value.intent } : {}),
     installationId: value.installationId,
     previewId: value.previewId,
     targets,
@@ -838,7 +865,10 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
 
           if (tab.id !== target.tabId) {
             skipped.push({ reason: "missing", tabId: target.tabId });
-          } else if (tab.pinned === true) {
+          } else if (
+            tab.pinned === true &&
+            request.command.intent !== "explicit-single"
+          ) {
             skipped.push({
               reason: "pinned-protected",
               tabId: target.tabId,
@@ -868,6 +898,9 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
             browserSessionId: request.browserSessionId,
             expiresAt,
             installationId: request.installationId,
+            ...(request.command.intent === undefined
+              ? {}
+              : { intent: request.command.intent }),
             previewId,
             targets: candidates,
             version: 1,
@@ -935,7 +968,10 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
 
           if (tab.id !== target.tabId) {
             result.skipped.push({ reason: "missing", tabId: target.tabId });
-          } else if (tab.pinned === true) {
+          } else if (
+            tab.pinned === true &&
+            preview.intent !== "explicit-single"
+          ) {
             result.skipped.push({
               reason: "pinned-protected",
               tabId: target.tabId,
@@ -948,7 +984,7 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
                 index: tab.index,
                 muted: tab.mutedInfo?.muted === true,
                 originalTabId: target.tabId,
-                pinned: false,
+                pinned: tab.pinned === true,
                 title: tab.title?.slice(0, CLOSE_UNDO_TITLE_MAX_LENGTH) ?? null,
                 url: target.expectedUrl,
                 windowId: tab.windowId,
@@ -1021,7 +1057,10 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
             });
             continue;
           }
-          if (liveTarget.pinned === true) {
+          if (
+            liveTarget.pinned === true &&
+            preview.intent !== "explicit-single"
+          ) {
             result.skipped.push({
               reason: "pinned-protected",
               tabId: target.originalTabId,
@@ -1050,7 +1089,7 @@ export function createPhysicalTabCommandExecutor(options: ExecutorOptions) {
             index: liveTarget.index,
             muted: liveTarget.mutedInfo?.muted === true,
             originalTabId: target.originalTabId,
-            pinned: false,
+            pinned: liveTarget.pinned === true,
             title:
               liveTarget.title?.slice(0, CLOSE_UNDO_TITLE_MAX_LENGTH) ?? null,
             url: target.url,

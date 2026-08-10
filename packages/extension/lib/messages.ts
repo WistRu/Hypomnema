@@ -1,4 +1,7 @@
-import { knownBrowserOptions } from "@tabhub/shared";
+import {
+  knownBrowserOptions,
+  tabCommandRelayProtocolVersion,
+} from "@tabhub/shared";
 import {
   parsePhysicalTabCommand,
   type PhysicalTabCloseUndoSummary,
@@ -46,6 +49,7 @@ export interface AppProbeData {
   available: true;
   browser: KnownBrowser | null;
   browserSessionId: string;
+  commandProtocolVersion?: typeof tabCommandRelayProtocolVersion;
   controlWindowId: number;
   installationId: string;
   pendingUndos: PhysicalTabCloseUndoSummary[];

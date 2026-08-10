@@ -86,6 +86,7 @@ describe("local extension bridge", () => {
       data: {
         available: true,
         browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+        commandProtocolVersion: 4,
         controlWindowId: 7,
         installationId: "123e4567-e89b-42d3-a456-426614174000",
         browser: "chrome",
@@ -103,6 +104,7 @@ describe("local extension bridge", () => {
     await expect(pending).resolves.toEqual({
       available: true,
       browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      commandProtocolVersion: 4,
       controlWindowId: 7,
       installationId: "123e4567-e89b-42d3-a456-426614174000",
       browser: "chrome",
@@ -116,6 +118,39 @@ describe("local extension bridge", () => {
       windows: [{ focused: true, tabCount: 3, windowId: 7 }],
     });
     expect(target.listeners.size).toBe(0);
+  });
+
+  it("normalizes a legacy probe without a command version to protocol v3", async () => {
+    const target = new FakeBridgeWindow();
+    const bridge = createExtensionBridge({
+      target,
+      origin: "http://127.0.0.1:7717",
+      requestId: () => "legacy-probe",
+    });
+
+    const pending = bridge.probe();
+    target.respond({
+      source: "tabhub-extension",
+      channel: "tabhub-extension-bridge",
+      version: 4,
+      requestId: "legacy-probe",
+      type: "probe",
+      ok: true,
+      data: {
+        available: true,
+        browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+        controlWindowId: 7,
+        installationId: "123e4567-e89b-42d3-a456-426614174000",
+        browser: "chrome",
+        pendingUndos: [],
+        windows: [{ focused: true, tabCount: 3, windowId: 7 }],
+      },
+    });
+
+    await expect(pending).resolves.toMatchObject({
+      available: true,
+      commandProtocolVersion: 3,
+    });
   });
 
   it("reports an unavailable extension when the probe times out", async () => {
@@ -363,6 +398,51 @@ describe("local extension bridge", () => {
 
     await expect(pending).resolves.toMatchObject({
       result: { candidateTabIds: [42], kind: "close-preview" },
+    });
+  });
+
+  it("allows explicit-single close intent only for one physical target", () => {
+    const target = new FakeBridgeWindow();
+    const bridge = createExtensionBridge({
+      target,
+      origin: "http://127.0.0.1:7717",
+      requestId: () => "explicit-single-close",
+    });
+    const scope = {
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+    };
+    const first = { expectedUrl: "https://example.com/one", tabId: 41 };
+
+    expect(() =>
+      bridge.command({
+        ...scope,
+        command: {
+          intent: "explicit-single",
+          kind: "close-preview",
+          targets: [
+            first,
+            { expectedUrl: "https://example.com/two", tabId: 42 },
+          ],
+        },
+      }),
+    ).toThrow(/exactly one physical tab/i);
+
+    void bridge.command({
+      ...scope,
+      command: {
+        intent: "explicit-single",
+        kind: "close-preview",
+        targets: [first],
+      },
+    });
+    expect(target.posted.at(-1)?.message).toMatchObject({
+      command: {
+        intent: "explicit-single",
+        kind: "close-preview",
+        targets: [first],
+      },
     });
   });
 

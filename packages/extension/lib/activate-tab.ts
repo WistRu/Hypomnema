@@ -1,10 +1,15 @@
 export interface ActivatableTab {
   id?: number | undefined;
+  title?: string | undefined;
   windowId: number;
 }
 
 export interface ActivatableWindow {
+  height?: number | undefined;
+  left?: number | undefined;
   state?: string | undefined;
+  top?: number | undefined;
+  width?: number | undefined;
 }
 
 export interface TabActivationAdapter {
@@ -17,7 +22,14 @@ export interface TabActivationAdapter {
 
 export interface TabActivationResult {
   tabId: number;
+  windowBounds?: {
+    height: number;
+    left: number;
+    top: number;
+    width: number;
+  } | undefined;
   windowId: number;
+  windowTitle?: string | undefined;
 }
 
 export interface TabActivationScope {
@@ -40,6 +52,24 @@ function isLiveTab(
     Number.isInteger(tab.windowId) &&
     tab.windowId >= 0
   );
+}
+
+function activationWindowBounds(
+  window: ActivatableWindow,
+): TabActivationResult["windowBounds"] {
+  return Number.isInteger(window.height) &&
+    (window.height as number) > 0 &&
+    Number.isInteger(window.left) &&
+    Number.isInteger(window.top) &&
+    Number.isInteger(window.width) &&
+    (window.width as number) > 0
+    ? {
+        height: window.height as number,
+        left: window.left as number,
+        top: window.top as number,
+        width: window.width as number,
+      }
+    : undefined;
 }
 
 /**
@@ -69,7 +99,14 @@ export async function activateExistingTab(
   }
   await adapter.focusWindow(activated.windowId);
 
-  return { tabId, windowId: activated.windowId };
+  const windowBounds = activationWindowBounds(window);
+  const windowTitle = activated.title?.trim();
+  return {
+    tabId,
+    ...(windowBounds === undefined ? {} : { windowBounds }),
+    windowId: activated.windowId,
+    ...(windowTitle ? { windowTitle } : {}),
+  };
 }
 
 export async function activateTabForScope(

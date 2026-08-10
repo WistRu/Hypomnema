@@ -38,8 +38,10 @@ import {
   createTabCommandRelay,
   registerTabCommandRelayRoutes,
 } from "./tab-command-relay.js";
+import type { BrowserForegroundHandoff } from "./browser-foreground.js";
 
 export interface CreateAppOptions {
+  browserForegroundHandoff?: BrowserForegroundHandoff | undefined;
   databasePath: string;
   logger?: boolean | FastifyBaseLogger;
   clock?: () => Date;
@@ -211,6 +213,9 @@ export function createApp(options: CreateAppOptions): TabHubApp {
       ...(options.tabCommandRelayAppOrigins === undefined
         ? {}
         : { appOrigins: options.tabCommandRelayAppOrigins }),
+      ...(options.browserForegroundHandoff === undefined
+        ? {}
+        : { browserForegroundHandoff: options.browserForegroundHandoff }),
     });
   });
 

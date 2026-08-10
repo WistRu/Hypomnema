@@ -1,4 +1,5 @@
 import {
+  tabCommandRelayProtocolVersion,
   tabCommandRelayResultSchema,
   type TabCommandRelayCommand,
   type TabCommandRelayResult,
@@ -674,6 +675,7 @@ async function handleAppRequest(
           available: true,
           browser: browserIdentifier ?? null,
           browserSessionId,
+          commandProtocolVersion: tabCommandRelayProtocolVersion,
           controlWindowId: controlWindowId as number,
           installationId,
           pendingUndos,
@@ -718,7 +720,8 @@ async function handleAppRequest(
             browser: browserIdentifier,
             browserSessionId,
             installationId,
-            ...result,
+            tabId: result.tabId,
+            windowId: result.windowId,
           },
           ok: true,
           type: "activate-tab",

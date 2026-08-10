@@ -61,6 +61,10 @@ import {
   type TabMutationResult,
 } from "./extension-bridge";
 import { useI18n, type TranslationParams } from "./i18n";
+import {
+  handleMiddleClickClose,
+  preventMiddleClickAutoscroll,
+} from "./middle-click-close";
 import { OpenTabBulkToolbar, OpenTabSelectionMenu } from "./OpenTabBulkToolbar";
 import { addressedCloseSelection } from "./open-tab-close-routing";
 import {
@@ -69,6 +73,7 @@ import {
   sameTabCommandScope,
 } from "./open-tab-command-routing";
 import {
+  executeTabActivation,
   tabActivationAvailability,
   type TabActivationAvailability,
 } from "./open-tab-activation";
@@ -87,6 +92,7 @@ import { serializeTabs, type TabExportFormat } from "./tab-export";
 import { TabOperationDialog } from "./TabOperationDialog";
 import type { WorkspaceCommandTarget } from "./workspace-restore-routing";
 import { SavedWorkspacesDrawer } from "./SavedWorkspacesDrawer";
+import { useSingleTabClose } from "./use-single-tab-close";
 
 const BROWSER_LABELS: Record<string, string> = {
   chrome: "Chrome",
@@ -453,9 +459,12 @@ export function OpenTabRow({
   activation,
   activationError,
   activationInProgress = false,
+  closeError,
+  closeInProgress = false,
   isActivating = false,
   tab,
   onActivateTab,
+  onMiddleClose,
   onSelectedChange,
   onSelectCanonicalTab,
   selectionDisabled = false,
@@ -465,9 +474,12 @@ export function OpenTabRow({
   activation: TabActivationAvailability;
   activationError?: string | undefined;
   activationInProgress?: boolean | undefined;
+  closeError?: string | undefined;
+  closeInProgress?: boolean | undefined;
   isActivating?: boolean | undefined;
   tab: TabInstance;
   onActivateTab: (tab: TabInstance) => void;
+  onMiddleClose?: ((tab: TabInstance) => void) | undefined;
   onSelectedChange?: (selected: boolean) => void;
   onSelectCanonicalTab: (id: number) => void;
   selectionDisabled?: boolean | undefined;
@@ -490,8 +502,14 @@ export function OpenTabRow({
       aria-selected={selected}
       className={[
         selected ? "is-selected" : "",
+        closeInProgress ? "is-closing" : "",
         duplicateRelationship ? `duplicate-instance is-${duplicateRelationship.role}` : "",
       ].filter(Boolean).join(" ") || undefined}
+      onAuxClick={(event) => {
+        if (onMiddleClose === undefined) return;
+        handleMiddleClickClose(event, () => onMiddleClose(tab));
+      }}
+      onMouseDown={preventMiddleClickAutoscroll}
     >
       {onSelectedChange ? (
         <td data-column="select">
@@ -510,8 +528,10 @@ export function OpenTabRow({
               <button
                 aria-label={t("Switch to existing tab: {label}", { label })}
                 className="physical-tab-switch"
-                disabled={activationInProgress || isActivating}
-                title={t("Switch to this existing browser tab")}
+                disabled={activationInProgress || isActivating || closeInProgress}
+                title={t(
+                  "Switch to this existing browser tab. Middle-click anywhere in the row to close it.",
+                )}
                 type="button"
                 onClick={() => onActivateTab(tab)}
               >
@@ -531,7 +551,9 @@ export function OpenTabRow({
             </button>
           </div>
           <span className="physical-tab-url" dir="ltr" title={tab.url}>{tab.url}</span>
-          {activation.kind === "ready" ? (
+          {closeInProgress ? (
+            <span className="physical-tab-action-state">{t("Closing...")}</span>
+          ) : activation.kind === "ready" ? (
             isActivating ? (
               <span className="physical-tab-action-state">{t("Switching...")}</span>
             ) : null
@@ -543,6 +565,11 @@ export function OpenTabRow({
           {activationError ? (
             <span className="physical-tab-action-error" role="alert">
               {activationError}
+            </span>
+          ) : null}
+          {closeError ? (
+            <span className="physical-tab-action-error" role="alert">
+              {closeError}
             </span>
           ) : null}
         </div>
@@ -605,6 +632,7 @@ export function OpenTabsView({
   onSelectCanonicalTab: (id: number) => void;
 }) {
   const { errorMessage, formatNumber, t } = useI18n();
+  const singleTabClose = useSingleTabClose();
   const [browser, setBrowser] = useState("all");
   const [duplicatesOnly, setDuplicatesOnly] = useState(false);
   const [page, setPage] = useState(1);
@@ -983,42 +1011,10 @@ export function OpenTabsView({
         throw new ExtensionBridgeError(availability.message);
       }
 
-      if (availability.route === "direct") {
-        const result = await bridge.activate(availability.target);
-        if (
-          result.browser !== availability.target.browser ||
-          result.browserSessionId !== availability.target.browserSessionId ||
-          result.installationId !== availability.target.installationId ||
-          result.tabId !== availability.target.tabId
-        ) {
-          throw new ExtensionBridgeError(
-            "The extension activated a different physical tab than requested.",
-          );
-        }
-        return result;
-      }
-
-      const relayScope = tabCommandScopeSchema.parse({
-        browser: availability.target.browser,
-        browserSessionId: availability.target.browserSessionId,
-        installationId: availability.target.installationId,
+      return executeTabActivation(availability, {
+        direct: (target) => bridge.activate(target),
+        relay: executeRelayedTabCommand,
       });
-      const result = await executeRelayedTabCommand({
-        ...relayScope,
-        command: {
-          kind: "activate-tab",
-          tabId: availability.target.tabId,
-        },
-      });
-      if (
-        result.kind !== "activate-tab" ||
-        result.tabId !== availability.target.tabId
-      ) {
-        throw new ExtensionBridgeError(
-          "The extension activated a different physical tab than requested.",
-        );
-      }
-      return result;
     },
     onError: async () => {
       await Promise.all([
@@ -1830,6 +1826,12 @@ export function OpenTabsView({
           : undefined
       }
       duplicateRelationship={duplicateRelationship}
+      closeError={
+        singleTabClose.errorForPhysical(tab.instanceId) === undefined
+          ? undefined
+          : errorMessage(singleTabClose.errorForPhysical(tab.instanceId))
+      }
+      closeInProgress={singleTabClose.isClosingPhysical(tab.instanceId)}
       isActivating={
         activationMutation.isPending &&
         activationMutation.variables?.instanceId === tab.instanceId
@@ -1839,6 +1841,7 @@ export function OpenTabsView({
       selected={selection.has(tab.instanceId)}
       tab={tab}
       onActivateTab={(target) => activationMutation.mutate(target)}
+      onMiddleClose={singleTabClose.closePhysical}
       onSelectedChange={
         duplicateSelection?.onChange ??
         ((checked) => updateSelection([tab], checked))

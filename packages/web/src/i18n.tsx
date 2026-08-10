@@ -533,8 +533,15 @@ const russianMessages: Record<string, Message> = {
   Standard: "Обычная",
   Summary: "Сводка",
   "Switch to existing tab: {label}": "Перейти к существующей вкладке: {label}",
+  "Switch to open tab": "Перейти к открытой вкладке",
+  "Switch to open tab: {tab}": "Перейти к открытой вкладке: {tab}",
   "Switch to this existing browser tab": "Перейти к этой существующей вкладке браузера",
+  "Switch to this existing browser tab. Middle-click to close it.":
+    "Перейти к этой открытой вкладке браузера. Нажмите колёсиком, чтобы закрыть её.",
+  "Switch to this existing browser tab. Middle-click anywhere in the row to close it.":
+    "Перейти к этой открытой вкладке браузера. Нажмите колёсиком в любом месте строки, чтобы закрыть её.",
   "Switching...": "Переключение...",
+  "Closing...": "Закрытие...",
   "tab {tabId}": "вкладка {tabId}",
   "The extension activated a different physical tab than requested.":
     "Расширение активировало другую физическую вкладку.",
@@ -542,10 +549,24 @@ const russianMessages: Record<string, Message> = {
     "Во время действия изменилась сессия браузера расширения.",
   "This browser action requires TabHub in the owning browser profile.":
     "Для этого действия TabHub должен быть открыт в профиле браузера-владельца.",
+  "This tab is no longer open. Refresh the Library and try again.":
+    "Эта вкладка больше не открыта. Обновите Библиотеку и повторите попытку.",
+  "The tab is closed, but the browser blocked opening it. Try again.":
+    "Вкладка закрыта, но браузер заблокировал её открытие. Повторите попытку.",
+  "Windows activated the tab, but could not bring its browser to the foreground. Try again.":
+    "Windows активировала вкладку, но не смогла вывести её браузер на передний план. Повторите попытку.",
   "This action is unavailable through the connected browser relay.":
     "Это действие недоступно через подключённый браузерный канал.",
   "The extension returned a result for a different command.":
     "Расширение вернуло результат другой команды.",
+  "This tab could not be closed by middle click. Refresh and try again.":
+    "Эту вкладку не удалось закрыть нажатием колёсика. Обновите список и повторите попытку.",
+  "The tab changed during live revalidation and was not closed.":
+    "Вкладка изменилась во время повторной проверки и не была закрыта.",
+  "The TabHub control tab is protected and cannot close itself.":
+    "Управляющая вкладка TabHub защищена и не может закрыть сама себя.",
+  "Reload the updated TabHub extension in that browser before closing tabs with the middle mouse button.":
+    "Перезагрузите обновлённое расширение TabHub в этом браузере, прежде чем закрывать вкладки колёсиком мыши.",
   Unique: "Уникальная",
   "unknown tab": "неизвестная вкладка",
   "Wait for a connected extension to send its next snapshot.":
@@ -584,6 +605,12 @@ const russianMessages: Record<string, Message> = {
     "TabHub вернул нечитаемый список открытых вкладок.",
   "TabHub returned an unexpected open-tab list.":
     "TabHub вернул неожиданный список открытых вкладок.",
+  "TabHub could not resolve this open tab":
+    "TabHub не удалось найти физическую открытую вкладку",
+  "TabHub returned an unreadable open-tab target.":
+    "TabHub вернул нечитаемую цель открытой вкладки.",
+  "TabHub returned an unexpected open-tab target.":
+    "TabHub вернул неожиданную цель открытой вкладки.",
   "TabHub could not load exact duplicate groups":
     "TabHub не удалось загрузить группы точных дубликатов",
   "TabHub returned an unreadable duplicate-group list.":
@@ -722,6 +749,8 @@ const russianMessages: Record<string, Message> = {
     "Для целей физических вкладок требуется их текущий точный URL.",
   "An exact-duplicate close keeper must be a different tab with the same exact URL.":
     "Сохраняемая при закрытии точная копия должна быть другой вкладкой с тем же точным URL.",
+  "An explicit single close requires exactly one physical tab.":
+    "Для явного одиночного закрытия требуется ровно одна физическая вкладка.",
   "Invalid confirmed close preview.":
     "Некорректный подтверждённый предварительный расчёт закрытия.",
   "Invalid destination browser window.": "Некорректное целевое окно браузера.",
@@ -816,6 +845,18 @@ export function localizedErrorMessage(locale: Locale, cause: unknown): string {
       code?: unknown;
       outcome?: unknown;
     };
+    if (relay.code === "EXTENSION_PROTOCOL_UNSUPPORTED") {
+      return translate(
+        locale,
+        "Reload the updated TabHub extension in that browser before closing tabs with the middle mouse button.",
+      );
+    }
+    if (relay.code === "FOREGROUND_HANDOFF_FAILED") {
+      return translate(
+        locale,
+        "Windows activated the tab, but could not bring its browser to the foreground. Try again.",
+      );
+    }
     if (relay.outcome === "unknown") {
       return translate(
         locale,

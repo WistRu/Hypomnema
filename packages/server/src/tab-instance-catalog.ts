@@ -14,6 +14,7 @@ import { normalizeUrl } from "./normalize-url.js";
 
 export interface FilterTabInstancesInput {
   browser: string | undefined;
+  canonicalTabId?: number | undefined;
   q: string | undefined;
   duplicatesOnly: boolean;
 }
@@ -124,6 +125,10 @@ function tabInstanceQuery(input: FilterTabInstancesInput): TabInstanceQuery {
   if (input.browser !== undefined) {
     predicates.push("browser = ?");
     parameters.push(input.browser);
+  }
+  if (input.canonicalTabId !== undefined) {
+    predicates.push("canonical_tab_id = ?");
+    parameters.push(input.canonicalTabId);
   }
   if (input.q !== undefined) {
     predicates.push("(url LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\')");

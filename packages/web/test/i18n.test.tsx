@@ -138,6 +138,35 @@ describe("translations", () => {
     );
   });
 
+  it("localizes a failed Windows foreground handoff distinctly", () => {
+    const message =
+      "Windows activated the tab, but could not bring its browser to the foreground. Try again.";
+    const error = Object.assign(new Error(message), {
+      name: "TabCommandRelayClientError",
+      code: "FOREGROUND_HANDOFF_FAILED",
+      outcome: "unknown",
+    });
+
+    expect(localizedErrorMessage("ru", error)).toBe(
+      translate("ru", message),
+    );
+  });
+
+  it("localizes the relay upgrade required for middle-click close", () => {
+    const message =
+      "Reload the updated TabHub extension in that browser before closing tabs with the middle mouse button.";
+    const error = Object.assign(new Error("legacy relay"), {
+      name: "TabCommandRelayClientError",
+      code: "EXTENSION_PROTOCOL_UNSUPPORTED",
+      outcome: "not-sent",
+    });
+
+    expect(translate("ru", message)).not.toBe(message);
+    expect(localizedErrorMessage("ru", error)).toBe(
+      translate("ru", message),
+    );
+  });
+
   it("provides a Russian page description", () => {
     expect(
       translate(

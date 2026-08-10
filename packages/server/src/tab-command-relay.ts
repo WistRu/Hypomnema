@@ -5,8 +5,10 @@ import {
   tabCommandRelayConnectedScopesResponseSchema,
   tabCommandRelayHttpRequestSchema,
   tabCommandRelayHttpResponseSchema,
+  tabCommandRelayLegacyProtocolVersion,
   tabCommandRelayProtocolVersion,
   type TabCommandRelayClientEnvelope,
+  type TabCommandRelayCompatibleProtocolVersion,
   type TabCommandRelayConnectedScopesResponse,
   type TabCommandRelayHttpRequest,
   type TabCommandRelayHttpResponse,
@@ -14,6 +16,7 @@ import {
 } from "@tabhub/shared";
 import type { FastifyInstance } from "fastify";
 
+import type { BrowserForegroundHandoff } from "./browser-foreground.js";
 import { isExtensionOrigin } from "./request-security.js";
 
 const DEFAULT_INTERACTIVE_COMMAND_TIMEOUT_MS = 5_000;
@@ -28,6 +31,7 @@ const DEFAULT_APP_ORIGINS = [
   "http://localhost:7717",
 ] as const;
 const SOCKET_OPEN = 1;
+type RelayProtocolVersion = TabCommandRelayCompatibleProtocolVersion;
 
 interface RelaySocket {
   readonly readyState: number;
@@ -43,10 +47,16 @@ interface RelayConnection {
   connectedAt: Date;
   lastHeartbeatId?: string;
   lastSeenAt: Date;
+  protocolVersion?: RelayProtocolVersion;
   registrationTimer: ReturnType<typeof setTimeout>;
   scope?: TabCommandScope;
   scopeKey?: string;
   socket: RelaySocket;
+}
+
+interface ParsedClientEnvelope {
+  envelope: TabCommandRelayClientEnvelope;
+  protocolVersion: RelayProtocolVersion;
 }
 
 interface PendingCommand {
@@ -76,6 +86,7 @@ export interface TabCommandRelay {
 
 export interface TabCommandRelayRouteOptions {
   appOrigins?: readonly string[];
+  browserForegroundHandoff?: BrowserForegroundHandoff | undefined;
 }
 
 function defaultCommandTimeoutMs(
@@ -118,6 +129,30 @@ function sameScope(left: TabCommandScope, right: TabCommandScope): boolean {
     left.installationId === right.installationId &&
     left.browserSessionId === right.browserSessionId
   );
+}
+
+function parseClientEnvelope(json: unknown): ParsedClientEnvelope | undefined {
+  if (typeof json !== "object" || json === null || Array.isArray(json)) {
+    return undefined;
+  }
+  const rawVersion = (json as { version?: unknown }).version;
+  if (
+    rawVersion !== tabCommandRelayLegacyProtocolVersion &&
+    rawVersion !== tabCommandRelayProtocolVersion
+  ) {
+    return undefined;
+  }
+  const parsed = tabCommandRelayClientEnvelopeSchema.safeParse(
+    rawVersion === tabCommandRelayProtocolVersion
+      ? json
+      : {
+          ...(json as Record<string, unknown>),
+          version: tabCommandRelayProtocolVersion,
+        },
+  );
+  return parsed.success
+    ? { envelope: parsed.data, protocolVersion: rawVersion }
+    : undefined;
 }
 
 type SuccessfulRelayResult = Extract<
@@ -356,6 +391,7 @@ export function createTabCommandRelay(
   const handleRegister = (
     connection: RelayConnection,
     envelope: Extract<TabCommandRelayClientEnvelope, { type: "register" }>,
+    protocolVersion: RelayProtocolVersion,
   ) => {
     if (connection.scope !== undefined) {
       protocolViolation(connection);
@@ -371,6 +407,7 @@ export function createTabCommandRelay(
     const connectedAt = clock();
     connection.connectedAt = connectedAt;
     connection.lastSeenAt = connectedAt;
+    connection.protocolVersion = protocolVersion;
     connection.scope = envelope.scope;
     connection.scopeKey = key;
     clearTimeout(connection.registrationTimer);
@@ -381,7 +418,7 @@ export function createTabCommandRelay(
         heartbeatIntervalMs,
         scope: envelope.scope,
         type: "ready",
-        version: tabCommandRelayProtocolVersion,
+        version: protocolVersion,
       })
     ) {
       disconnect(connection, true, 1011, "could not acknowledge registration");
@@ -474,21 +511,29 @@ export function createTabCommandRelay(
       protocolViolation(connection);
       return;
     }
-    const parsed = tabCommandRelayClientEnvelopeSchema.safeParse(json);
-    if (!parsed.success) {
+    const parsed = parseClientEnvelope(json);
+    if (
+      parsed === undefined ||
+      (connection.protocolVersion !== undefined &&
+        connection.protocolVersion !== parsed.protocolVersion)
+    ) {
       protocolViolation(connection);
       return;
     }
 
-    switch (parsed.data.type) {
+    switch (parsed.envelope.type) {
       case "register":
-        handleRegister(connection, parsed.data);
+        handleRegister(
+          connection,
+          parsed.envelope,
+          parsed.protocolVersion,
+        );
         break;
       case "pong":
-        handlePong(connection, parsed.data);
+        handlePong(connection, parsed.envelope);
         break;
       case "result":
-        handleResult(connection, parsed.data);
+        handleResult(connection, parsed.envelope);
         break;
     }
   };
@@ -508,7 +553,8 @@ export function createTabCommandRelay(
           heartbeatId,
           sentAt: now.toISOString(),
           type: "ping",
-          version: tabCommandRelayProtocolVersion,
+          version:
+            connection.protocolVersion ?? tabCommandRelayProtocolVersion,
         })
       ) {
         disconnect(connection, true, 1011, "heartbeat send failed");
@@ -567,6 +613,19 @@ export function createTabCommandRelay(
           ),
         );
       }
+      if (
+        connection.protocolVersion === tabCommandRelayLegacyProtocolVersion &&
+        command.command.kind === "close-preview" &&
+        command.command.intent === "explicit-single"
+      ) {
+        return Promise.resolve(
+          relayFailure(
+            "EXTENSION_PROTOCOL_UNSUPPORTED",
+            "Reload the updated TabHub extension in that browser before closing tabs with the middle mouse button.",
+            "not-sent",
+          ),
+        );
+      }
 
       const requestId = createId();
       const timeoutMs =
@@ -600,7 +659,8 @@ export function createTabCommandRelay(
             requestId,
             scope,
             type: "command",
-            version: tabCommandRelayProtocolVersion,
+            version:
+              connection.protocolVersion ?? tabCommandRelayProtocolVersion,
           })
         ) {
           finishPending(
@@ -628,6 +688,8 @@ export function createTabCommandRelay(
           ...connection.scope,
           connectedAt: connection.connectedAt.toISOString(),
           lastSeenAt: connection.lastSeenAt.toISOString(),
+          protocolVersion:
+            connection.protocolVersion ?? tabCommandRelayProtocolVersion,
         }))
         .sort(
           (left, right) =>
@@ -645,6 +707,8 @@ function statusForRelayResponse(response: TabCommandRelayHttpResponse): number {
   switch (response.error) {
     case "SCOPE_OFFLINE":
       return 503;
+    case "EXTENSION_PROTOCOL_UNSUPPORTED":
+      return 409;
     case "COMMAND_TIMEOUT":
       return 504;
     default:
@@ -704,6 +768,62 @@ export function registerTabCommandRelayRoutes(
       }
 
       const response = await relay.dispatch(parsed.data);
+      if (
+        response.ok &&
+        parsed.data.command.kind === "activate-tab" &&
+        response.result.kind === "activate-tab" &&
+        options.browserForegroundHandoff !== undefined
+      ) {
+        const foregroundResult = await options
+          .browserForegroundHandoff({
+            browser: response.scope.browser,
+            ...(response.result.windowBounds === undefined
+              ? {}
+              : { bounds: response.result.windowBounds }),
+            ...(response.result.windowTitle === undefined
+              ? {}
+              : { title: response.result.windowTitle }),
+          })
+          .catch(
+            () =>
+              ({
+                ok: false,
+                reason: "HELPER_EXECUTION_FAILED",
+              }) as const,
+          );
+        if (!foregroundResult.ok) {
+          request.log.warn(
+            {
+              browser: response.scope.browser,
+              browserSessionId: response.scope.browserSessionId,
+              installationId: response.scope.installationId,
+              reason: foregroundResult.reason,
+              tabId: response.result.tabId,
+              windowId: response.result.windowId,
+            },
+            "Browser tab activated but native foreground handoff failed",
+          );
+          const failure = relayFailure(
+            "FOREGROUND_HANDOFF_FAILED",
+            "Windows activated the tab, but could not bring its browser to the foreground. Try again.",
+            "unknown",
+            response.requestId,
+          );
+          return reply.code(statusForRelayResponse(failure)).send(failure);
+        }
+        request.log.info(
+          {
+            browser: response.scope.browser,
+            browserSessionId: response.scope.browserSessionId,
+            foregroundProcessId: foregroundResult.processId,
+            foregroundWindowHandle: foregroundResult.windowHandle,
+            installationId: response.scope.installationId,
+            tabId: response.result.tabId,
+            windowId: response.result.windowId,
+          },
+          "Browser foreground handoff confirmed",
+        );
+      }
       return reply.code(statusForRelayResponse(response)).send(response);
     },
   );

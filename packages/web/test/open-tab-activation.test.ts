@@ -1,7 +1,12 @@
 import type { TabInstance } from "@tabhub/shared";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { tabActivationAvailability } from "../src/open-tab-activation";
+import {
+  canonicalTabActivationSelection,
+  canonicalTabBrowserActionSelection,
+  executeTabActivation,
+  tabActivationAvailability,
+} from "../src/open-tab-activation";
 
 const INSTALLATION_ID = "123e4567-e89b-42d3-a456-426614174000";
 const BROWSER_SESSION_ID = "223e4567-e89b-42d3-a456-426614174000";
@@ -190,5 +195,196 @@ describe("tabActivationAvailability", () => {
       kind: expected,
       message: expect.any(String),
     });
+  });
+});
+
+describe("canonicalTabActivationSelection", () => {
+  const directProbe = {
+    available: true,
+    browser: "chrome" as const,
+    browserSessionId: BROWSER_SESSION_ID,
+    installationId: INSTALLATION_ID,
+  };
+  const relayScope = {
+    browser: "chrome" as const,
+    browserSessionId: "423e4567-e89b-42d3-a456-426614174000",
+    installationId: "323e4567-e89b-42d3-a456-426614174000",
+  };
+
+  it("prefers a directly controlled copy over a newer active relayed copy", () => {
+    const selection = canonicalTabActivationSelection(
+      [
+        tab({ instanceId: 1, lastAccessed: 10 }),
+        tab({
+          active: true,
+          browserSessionId: relayScope.browserSessionId,
+          browserTabId: 84,
+          installationId: relayScope.installationId,
+          instanceId: 2,
+          lastAccessed: 20,
+        }),
+      ],
+      directProbe,
+      undefined,
+      [relayScope],
+    );
+
+    expect(selection).toMatchObject({
+      kind: "ready",
+      activation: { route: "direct", target: { tabId: 42 } },
+      tab: { instanceId: 1 },
+    });
+  });
+
+  it("selects an exact connected relay when no direct copy is available", () => {
+    const selection = canonicalTabActivationSelection(
+      [
+        tab({
+          browserSessionId: relayScope.browserSessionId,
+          browserTabId: 84,
+          installationId: relayScope.installationId,
+        }),
+      ],
+      {
+        available: false,
+        browser: null,
+        browserSessionId: null,
+        installationId: null,
+      },
+      undefined,
+      [relayScope],
+    );
+
+    expect(selection).toMatchObject({
+      kind: "ready",
+      activation: {
+        route: "relay",
+        target: { ...relayScope, tabId: 84 },
+      },
+    });
+  });
+
+  it("chooses the most recently used physical copy within one route", () => {
+    const selection = canonicalTabActivationSelection(
+      [
+        tab({ browserTabId: 41, instanceId: 1, lastAccessed: 30 }),
+        tab({
+          active: true,
+          browserTabId: 42,
+          instanceId: 2,
+          lastAccessed: 10,
+        }),
+        tab({ browserTabId: 43, instanceId: 3, lastAccessed: 20 }),
+      ],
+      directProbe,
+    );
+
+    expect(selection).toMatchObject({
+      kind: "ready",
+      activation: { route: "direct", target: { tabId: 41 } },
+      tab: { instanceId: 1 },
+    });
+  });
+
+  it("fails closed when canonical state is stale and no physical copy exists", () => {
+    expect(canonicalTabActivationSelection([], directProbe)).toEqual({
+      kind: "unavailable",
+      message: "This tab is no longer open. Refresh the Library and try again.",
+    });
+  });
+
+  it("activates a fresh physical copy even when the Library rendered it closed", () => {
+    const selection = canonicalTabBrowserActionSelection(
+      [tab({ browserTabId: 91 })],
+      {
+        canonicalTabId: 7,
+        newTabUrlIfConfirmedClosed: "https://example.com/stale-closed-row",
+      },
+      directProbe,
+    );
+
+    expect(selection).toMatchObject({
+      kind: "ready",
+      activation: { route: "direct", target: { tabId: 91 } },
+    });
+  });
+
+  it("authorizes a new URL tab only after the fresh lookup finds no instances", () => {
+    expect(
+      canonicalTabBrowserActionSelection(
+        [],
+        {
+          canonicalTabId: 7,
+          newTabUrlIfConfirmedClosed: "https://example.com/confirmed-closed",
+        },
+        directProbe,
+      ),
+    ).toEqual({
+      kind: "open-new",
+      url: "https://example.com/confirmed-closed",
+    });
+  });
+});
+
+describe("executeTabActivation", () => {
+  it("uses the exact direct physical target without creating a URL action", async () => {
+    const direct = vi.fn().mockResolvedValue({
+      browser: "chrome",
+      browserSessionId: BROWSER_SESSION_ID,
+      installationId: INSTALLATION_ID,
+      tabId: 42,
+      windowId: 7,
+    });
+    const relay = vi.fn();
+
+    await expect(
+      executeTabActivation(
+        {
+          kind: "ready",
+          route: "direct",
+          target: {
+            browser: "chrome",
+            browserSessionId: BROWSER_SESSION_ID,
+            installationId: INSTALLATION_ID,
+            tabId: 42,
+          },
+        },
+        { direct, relay },
+      ),
+    ).resolves.toMatchObject({ tabId: 42, windowId: 7 });
+    expect(direct).toHaveBeenCalledWith(expect.objectContaining({ tabId: 42 }));
+    expect(relay).not.toHaveBeenCalled();
+  });
+
+  it("addresses the owning browser scope through the relay", async () => {
+    const direct = vi.fn();
+    const relay = vi.fn().mockResolvedValue({
+      kind: "activate-tab",
+      tabId: 84,
+      windowId: 9,
+    });
+
+    await expect(
+      executeTabActivation(
+        {
+          kind: "ready",
+          route: "relay",
+          target: {
+            browser: "yandex",
+            browserSessionId: "423e4567-e89b-42d3-a456-426614174000",
+            installationId: "323e4567-e89b-42d3-a456-426614174000",
+            tabId: 84,
+          },
+        },
+        { direct, relay },
+      ),
+    ).resolves.toMatchObject({ kind: "activate-tab", tabId: 84 });
+    expect(relay).toHaveBeenCalledWith({
+      browser: "yandex",
+      browserSessionId: "423e4567-e89b-42d3-a456-426614174000",
+      installationId: "323e4567-e89b-42d3-a456-426614174000",
+      command: { kind: "activate-tab", tabId: 84 },
+    });
+    expect(direct).not.toHaveBeenCalled();
   });
 });

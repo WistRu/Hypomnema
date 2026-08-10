@@ -1,3 +1,9 @@
+import {
+  tabCommandRelayLegacyProtocolVersion,
+  tabCommandRelayProtocolVersion,
+  type TabCommandRelayCompatibleProtocolVersion,
+} from "@tabhub/shared";
+
 const BRIDGE_CHANNEL = "tabhub-extension-bridge" as const;
 const BRIDGE_VERSION = 4 as const;
 
@@ -23,6 +29,7 @@ export interface ExtensionProbeAvailable {
   installationId: string;
   browserSessionId: string;
   browser: string | null;
+  commandProtocolVersion?: TabCommandRelayCompatibleProtocolVersion;
   controlWindowId: number;
   pendingUndos: CloseUndoSummary[];
   windows: BrowserWindowSummary[];
@@ -69,7 +76,11 @@ export type MoveDestination =
   | { kind: "window"; windowId: number };
 
 export type TabCommand =
-  | { kind: "close-preview"; targets: ClosePreviewTarget[] }
+  | {
+      intent?: "explicit-single" | undefined;
+      kind: "close-preview";
+      targets: ClosePreviewTarget[];
+    }
   | { confirmed: true; kind: "close"; previewId: string }
   | { destination: MoveDestination; kind: "move"; targets: PhysicalTabTarget[] }
   | { kind: "set-pinned"; targets: PhysicalTabTarget[]; value: boolean }
@@ -241,18 +252,29 @@ function isWindowSummary(value: unknown): value is BrowserWindowSummary {
 }
 
 function parseProbe(value: unknown): ExtensionProbeAvailable {
+  const commandProtocolVersion =
+    isRecord(value) && value.commandProtocolVersion === undefined
+      ? tabCommandRelayLegacyProtocolVersion
+      : isRecord(value) &&
+          (value.commandProtocolVersion ===
+            tabCommandRelayLegacyProtocolVersion ||
+            value.commandProtocolVersion === tabCommandRelayProtocolVersion)
+        ? value.commandProtocolVersion
+        : undefined;
   if (
     !isRecord(value) ||
     !hasOnlyKeys(value, [
       "available",
       "browser",
       "browserSessionId",
+      "commandProtocolVersion",
       "controlWindowId",
       "installationId",
       "pendingUndos",
       "windows",
     ]) ||
     value.available !== true ||
+    commandProtocolVersion === undefined ||
     typeof value.browserSessionId !== "string" ||
     !uuidPattern.test(value.browserSessionId) ||
     typeof value.installationId !== "string" ||
@@ -271,6 +293,7 @@ function parseProbe(value: unknown): ExtensionProbeAvailable {
   return {
     available: true,
     browserSessionId: value.browserSessionId,
+    commandProtocolVersion,
     installationId: value.installationId,
     browser: value.browser as string | null,
     controlWindowId: value.controlWindowId,
@@ -521,6 +544,14 @@ function validatedCommandRequest(request: TabCommandRequest): TabCommandRequest 
   switch (command.kind) {
     case "close-preview":
       validateClosePreviewTargets(command.targets);
+      if (
+        command.intent === "explicit-single" &&
+        command.targets.length !== 1
+      ) {
+        throw new ExtensionBridgeError(
+          "An explicit single close requires exactly one physical tab.",
+        );
+      }
       break;
     case "close":
       if (!command.confirmed || !isPreviewId(command.previewId)) {

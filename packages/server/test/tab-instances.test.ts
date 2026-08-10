@@ -48,12 +48,19 @@ describe("physical tab instances", () => {
               pinned: true,
               lastAccessed: 1_754_737_000_000,
             },
+            {
+              tabId: 303,
+              url: "https://example.com/other",
+              title: "Other canonical tab",
+              windowId: 2,
+              index: 5,
+            },
           ],
         },
       });
 
       expect(ingest.statusCode).toBe(200);
-      expect(ingest.json()).toEqual({ upserted: 1, closed: 0 });
+      expect(ingest.json()).toEqual({ upserted: 2, closed: 0 });
 
       const physical = await app.inject({
         method: "GET",
@@ -62,7 +69,7 @@ describe("physical tab instances", () => {
 
       expect(physical.statusCode).toBe(200);
       expect(physical.json()).toMatchObject({
-        total: 2,
+        total: 3,
         page: 1,
         pageSize: 50,
         items: expect.arrayContaining([
@@ -90,15 +97,40 @@ describe("physical tab instances", () => {
         ]),
       });
       const physicalItems = physical.json().items as Array<{
+        browserTabId: number;
         instanceId: number;
         canonicalTabId: number;
       }>;
       expect(new Set(physicalItems.map(({ instanceId }) => instanceId)).size).toBe(
-        2,
+        3,
       );
       expect(new Set(physicalItems.map(({ canonicalTabId }) => canonicalTabId)).size).toBe(
-        1,
+        2,
       );
+      const duplicatedCanonicalId = physicalItems.find(
+        ({ browserTabId }) => browserTabId === 101,
+      )!.canonicalTabId;
+
+      const canonicalInstances = await app.inject({
+        method: "GET",
+        url: `/api/tabs/${duplicatedCanonicalId}/instances`,
+      });
+      expect(canonicalInstances.statusCode).toBe(200);
+      expect(canonicalInstances.json()).toMatchObject({
+        total: 2,
+        items: expect.arrayContaining([
+          expect.objectContaining({ browserTabId: 101 }),
+          expect.objectContaining({ browserTabId: 202 }),
+        ]),
+      });
+      expect(
+        canonicalInstances
+          .json()
+          .items.every(
+            (item: { canonicalTabId: number }) =>
+              item.canonicalTabId === duplicatedCanonicalId,
+          ),
+      ).toBe(true);
 
       const searched = await app.inject({
         method: "GET",
@@ -115,7 +147,7 @@ describe("physical tab instances", () => {
         method: "GET",
         url: "/api/tabs?browser=chrome&pageSize=50",
       });
-      expect(canonical.json()).toMatchObject({ total: 1 });
+      expect(canonical.json()).toMatchObject({ total: 2 });
     } finally {
       await app.close();
       await rm(directory, { recursive: true, force: true });

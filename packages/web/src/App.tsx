@@ -38,12 +38,19 @@ import {
   type OpenFilter,
 } from "./api";
 import { OpenTabsView } from "./OpenTabsView";
+import { TabBrowserAction } from "./TabBrowserAction";
 import { useI18n, type TranslationParams } from "./i18n";
+import {
+  handleMiddleClickClose,
+  preventMiddleClickAutoscroll,
+} from "./middle-click-close";
 import {
   shouldRefreshLibrary,
   type WorkspaceView,
 } from "./workspace-view";
 import { TabDrawer } from "./TabDrawer";
+import { useCanonicalTabActivation } from "./use-canonical-tab-activation";
+import { useSingleTabClose } from "./use-single-tab-close";
 
 const GraphView = lazy(() => import("./GraphView"));
 
@@ -371,6 +378,8 @@ export function App() {
   const queryClient = useQueryClient();
   const { errorMessage: localizeError, formatNumber, locale, setLocale, t } =
     useI18n();
+  const canonicalTabActivation = useCanonicalTabActivation();
+  const singleTabClose = useSingleTabClose();
   const [view, setView] = useState<WorkspaceView>("open");
   const [browser, setBrowser] = useState("all");
   const [openState, setOpenState] = useState<OpenFilter>("all");
@@ -522,18 +531,25 @@ export function App() {
               >
                 {tabItem.title?.trim() || hostname(tabItem.url)}
               </button>
-              <a
-                aria-label={t("Open {tab} in browser", {
-                  tab: tabItem.title?.trim() || hostname(tabItem.url),
-                })}
-                href={tabItem.url}
-                rel="noreferrer"
-                target="_blank"
-                title={tabItem.url}
-                onClick={(event) => event.stopPropagation()}
-              >
-                {t("Open in browser")}
-              </a>
+              <TabBrowserAction
+                activationError={
+                  singleTabClose.errorForCanonical(tabItem.id) !== undefined
+                    ? localizeError(singleTabClose.errorForCanonical(tabItem.id))
+                    : canonicalTabActivation.errorFor(tabItem.id) === undefined
+                      ? undefined
+                      : localizeError(canonicalTabActivation.errorFor(tabItem.id))
+                }
+                activationInProgress={
+                  canonicalTabActivation.busy || singleTabClose.busy
+                }
+                className="tab-browser-action"
+                closeInProgress={singleTabClose.isClosingCanonical(tabItem.id)}
+                isActivating={canonicalTabActivation.isActivating(tabItem.id)}
+                stopPropagation
+                tab={tabItem}
+                onBrowserAction={canonicalTabActivation.run}
+                onMiddleClose={singleTabClose.closeCanonical}
+              />
             </div>
             <span>{hostname(tabItem.url)} | #{tabItem.id}</span>
             <SummaryAction tab={tabItem} />
@@ -1052,10 +1068,17 @@ export function App() {
                               ref={(element) => rowVirtualizer.measureElement(element)}
                               style={{ transform: `translateY(${virtualRow.start}px)` }}
                               tabIndex={0}
+                              onAuxClick={(event) => {
+                                if (!row.original.isOpen) return;
+                                handleMiddleClickClose(event, () =>
+                                  singleTabClose.closeCanonical(row.original.id),
+                                );
+                              }}
                               onClick={(event) => openRow(row.original.id, event)}
                               onKeyDown={(event) =>
                                 openRowFromKeyboard(row.original.id, event)
                               }
+                              onMouseDown={preventMiddleClickAutoscroll}
                             >
                               {row.getAllCells().map((cell) => (
                                 <td data-column={cell.column.id} key={cell.id}>
@@ -1162,7 +1185,16 @@ export function App() {
                   </section>
                 }
               >
-                <GraphView rootTag={tag} onSelectTab={setActiveTabId} />
+                <GraphView
+                  closeErrorForTab={(tabId) => {
+                    const error = singleTabClose.errorForCanonical(tabId);
+                    return error === undefined ? undefined : localizeError(error);
+                  }}
+                  isClosingTab={singleTabClose.isClosingCanonical}
+                  rootTag={tag}
+                  onCloseTab={singleTabClose.closeCanonical}
+                  onSelectTab={setActiveTabId}
+                />
               </Suspense>
             )}
           </div>
@@ -1170,7 +1202,23 @@ export function App() {
       </div>
 
       {activeTabId !== null ? (
-        <TabDrawer key={activeTabId} tabId={activeTabId} onClose={closeDrawer} />
+        <TabDrawer
+          activationError={
+            singleTabClose.errorForCanonical(activeTabId) !== undefined
+              ? localizeError(singleTabClose.errorForCanonical(activeTabId))
+              : canonicalTabActivation.errorFor(activeTabId) === undefined
+                ? undefined
+                : localizeError(canonicalTabActivation.errorFor(activeTabId))
+          }
+          activationInProgress={canonicalTabActivation.busy || singleTabClose.busy}
+          closeInProgress={singleTabClose.isClosingCanonical(activeTabId)}
+          isActivating={canonicalTabActivation.isActivating(activeTabId)}
+          key={activeTabId}
+          tabId={activeTabId}
+          onBrowserAction={canonicalTabActivation.run}
+          onClose={closeDrawer}
+          onMiddleClose={singleTabClose.closeCanonical}
+        />
       ) : null}
     </CurrentTimeContext.Provider>
   );

@@ -73,6 +73,16 @@ const extensionBrowser = vi.hoisted(() => {
         { id: 13, url: "https://example.com/article", windowId: 9 },
       ]),
     },
+    windows: {
+      getAll: vi.fn(async () => [
+        {
+          focused: true,
+          id: 9,
+          tabs: [{ id: 11 }, { id: 12 }, { id: 13 }],
+          type: "normal",
+        },
+      ]),
+    },
   };
 });
 
@@ -92,6 +102,27 @@ const CURRENT_SCOPE = {
 describe("background app tab command messages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("reports the current physical-command protocol in a direct probe", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 200 })));
+
+    await expect(
+      handleMessage(
+        { type: "tabhub:app-probe" },
+        {
+          tab: {
+            id: 11,
+            url: "http://127.0.0.1:7717/app/",
+            windowId: 9,
+          },
+        },
+      ),
+    ).resolves.toMatchObject({
+      data: { available: true, commandProtocolVersion: 4 },
+      ok: true,
+      type: "probe",
+    });
   });
 
   it("queries and protects every TabHub app tab during a direct close preview", async () => {

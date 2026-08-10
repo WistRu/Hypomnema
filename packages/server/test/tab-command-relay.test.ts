@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WebSocket } from "ws";
 
 import { createApp, type TabHubApp } from "../src/app.js";
+import type { BrowserForegroundHandoff } from "../src/browser-foreground.js";
 import { createTabCommandRelay } from "../src/tab-command-relay.js";
 
 const scope = {
@@ -25,12 +26,19 @@ const commandHeaders = {
 
 describe("tab command relay", () => {
   let app: TabHubApp;
+  let browserForegroundHandoff: ReturnType<
+    typeof vi.fn<BrowserForegroundHandoff>
+  >;
   let directory: string;
   let sockets: WebSocket[];
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "tabhub-command-relay-"));
+    browserForegroundHandoff = vi
+      .fn<BrowserForegroundHandoff>()
+      .mockResolvedValue({ ok: true });
     app = createApp({
+      browserForegroundHandoff,
       databasePath: join(directory, "tabhub.sqlite"),
       logger: false,
       tabCommandRelayCommandTimeoutMs: 75,
@@ -102,6 +110,7 @@ describe("tab command relay", () => {
           ...scope,
           connectedAt: expect.any(String),
           lastSeenAt: expect.any(String),
+          protocolVersion: tabCommandRelayProtocolVersion,
         },
       ],
     });
@@ -162,6 +171,135 @@ describe("tab command relay", () => {
       result,
       scope,
     });
+  });
+
+  it("keeps a legacy v3 extension connected during a v4 rollout", async () => {
+    const socket = await app.injectWS("/api/tab-command-relay/ws", {
+      headers: {
+        host: "127.0.0.1:7717",
+        origin: "chrome-extension://tabhubtest",
+      },
+    });
+    sockets.push(socket);
+
+    const readyMessage = nextMessage(socket);
+    socket.send(
+      JSON.stringify({
+        scope,
+        type: "register",
+        version: 3,
+      }),
+    );
+    await expect(readyMessage).resolves.toMatchObject({
+      scope,
+      type: "ready",
+      version: 3,
+    });
+
+    const scopes = await app.inject({
+      method: "GET",
+      url: "/api/tab-command-relay/scopes",
+    });
+    expect(scopes.statusCode).toBe(200);
+    expect(scopes.json()).toEqual({
+      items: [
+        {
+          ...scope,
+          connectedAt: expect.any(String),
+          lastSeenAt: expect.any(String),
+          protocolVersion: 3,
+        },
+      ],
+    });
+
+    const commandMessage = nextMessage(socket);
+    const responsePromise = app.inject({
+      headers: commandHeaders,
+      method: "POST",
+      payload: { ...scope, command: { kind: "get-browser-state" } },
+      url: "/api/tab-command-relay/commands",
+    });
+    const envelope = await commandMessage;
+    expect(envelope).toMatchObject({
+      command: { kind: "get-browser-state" },
+      scope,
+      type: "command",
+      version: 3,
+    });
+    socket.send(
+      JSON.stringify({
+        ok: true,
+        requestId: (envelope as { requestId: string }).requestId,
+        result: {
+          kind: "get-browser-state",
+          pendingUndos: [],
+          windows: [{ focused: true, tabCount: 2, windowId: 7 }],
+        },
+        scope,
+        type: "result",
+        version: 3,
+      }),
+    );
+
+    const response = await responsePromise;
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      ok: true,
+      result: { kind: "get-browser-state" },
+      scope,
+    });
+  });
+
+  it("does not dispatch an explicit-single close preview to a legacy v3 extension", async () => {
+    const socket = await app.injectWS("/api/tab-command-relay/ws", {
+      headers: {
+        host: "127.0.0.1:7717",
+        origin: "chrome-extension://tabhubtest",
+      },
+    });
+    sockets.push(socket);
+
+    const readyMessage = nextMessage(socket);
+    socket.send(
+      JSON.stringify({
+        scope,
+        type: "register",
+        version: 3,
+      }),
+    );
+    await readyMessage;
+
+    const receivedAfterRegistration = vi.fn();
+    socket.on("message", receivedAfterRegistration);
+    const response = await app.inject({
+      headers: commandHeaders,
+      method: "POST",
+      payload: {
+        ...scope,
+        command: {
+          intent: "explicit-single",
+          kind: "close-preview",
+          targets: [
+            {
+              expectedUrl: "https://example.com/exact",
+              tabId: 43,
+            },
+          ],
+        },
+      },
+      url: "/api/tab-command-relay/commands",
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error: "EXTENSION_PROTOCOL_UNSUPPORTED",
+      message:
+        "Reload the updated TabHub extension in that browser before closing tabs with the middle mouse button.",
+      ok: false,
+      outcome: "not-sent",
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(receivedAfterRegistration).not.toHaveBeenCalled();
   });
 
   it("routes a physical tab mutation to a different connected browser", async () => {
@@ -236,7 +374,14 @@ describe("tab command relay", () => {
     const result = {
       kind: "activate-tab" as const,
       tabId: 41,
+      windowBounds: {
+        height: 900,
+        left: -1920,
+        top: 0,
+        width: 1920,
+      },
       windowId: 7,
+      windowTitle: "Remote Edge tab",
     };
     socket.send(
       JSON.stringify({
@@ -252,6 +397,54 @@ describe("tab command relay", () => {
     const response = await responsePromise;
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ ok: true, result, scope });
+    expect(browserForegroundHandoff).toHaveBeenCalledWith({
+      browser: "chrome",
+      bounds: result.windowBounds,
+      title: result.windowTitle,
+    });
+  });
+
+  it("reports a failed native foreground handoff after activating the exact tab", async () => {
+    browserForegroundHandoff.mockResolvedValue({
+      ok: false,
+      reason: "FOCUS_FAILED",
+    });
+    const socket = await registeredSocket(app, sockets);
+    const commandMessage = nextMessage(socket);
+    const responsePromise = app.inject({
+      headers: commandHeaders,
+      method: "POST",
+      payload: {
+        ...scope,
+        command: { kind: "activate-tab", tabId: 41 },
+      },
+      url: "/api/tab-command-relay/commands",
+    });
+    const envelope = await commandMessage;
+    socket.send(
+      JSON.stringify({
+        ok: true,
+        requestId: (envelope as { requestId: string }).requestId,
+        result: {
+          kind: "activate-tab",
+          tabId: 41,
+          windowBounds: { height: 900, left: 0, top: 0, width: 1600 },
+          windowId: 7,
+          windowTitle: "Remote Edge tab",
+        },
+        scope,
+        type: "result",
+        version: tabCommandRelayProtocolVersion,
+      }),
+    );
+
+    const response = await responsePromise;
+    expect(response.statusCode).toBe(502);
+    expect(response.json()).toMatchObject({
+      error: "FOREGROUND_HANDOFF_FAILED",
+      ok: false,
+      outcome: "unknown",
+    });
   });
 
   it("rejects an activation receipt for a different tab", async () => {

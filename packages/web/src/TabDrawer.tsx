@@ -26,6 +26,8 @@ import {
   unassignTag,
 } from "./api";
 import { useI18n } from "./i18n";
+import { TabBrowserAction } from "./TabBrowserAction";
+import type { CanonicalTabBrowserActionRequest } from "./open-tab-activation";
 
 const STATUS_OPTIONS: Array<{ labelKey: string; value: TabStatus }> = [
   { labelKey: "Inbox", value: "inbox" },
@@ -35,8 +37,14 @@ const STATUS_OPTIONS: Array<{ labelKey: string; value: TabStatus }> = [
 ];
 
 interface TabDrawerProps {
+  activationError?: string | undefined;
+  activationInProgress?: boolean | undefined;
+  closeInProgress?: boolean | undefined;
+  isActivating?: boolean | undefined;
   tabId: number;
+  onBrowserAction: (request: CanonicalTabBrowserActionRequest) => void;
   onClose: () => void;
+  onMiddleClose?: ((canonicalTabId: number) => void) | undefined;
 }
 
 function displayTitle(tab: TabDetailResponse) {
@@ -212,7 +220,16 @@ function LinkRow({
   );
 }
 
-export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
+export function TabDrawer({
+  activationError,
+  activationInProgress = false,
+  closeInProgress = false,
+  isActivating = false,
+  tabId,
+  onBrowserAction,
+  onClose,
+  onMiddleClose,
+}: TabDrawerProps) {
   const queryClient = useQueryClient();
   const { formatDate, formatNumber, t } = useI18n();
   const headingId = useId();
@@ -405,9 +422,16 @@ export function TabDrawer({ tabId, onClose }: TabDrawerProps) {
         {tab ? (
           <div className="drawer-body">
             <section className="drawer-overview">
-              <a className="primary-link" href={tab.url} rel="noreferrer" target="_blank">
-                {t("Open in browser")}
-              </a>
+              <TabBrowserAction
+                activationError={activationError}
+                activationInProgress={activationInProgress}
+                className="primary-link"
+                closeInProgress={closeInProgress}
+                isActivating={isActivating}
+                tab={tab}
+                onBrowserAction={onBrowserAction}
+                onMiddleClose={onMiddleClose}
+              />
               <p className="drawer-url" title={tab.url}>
                 {tab.url}
               </p>

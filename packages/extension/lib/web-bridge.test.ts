@@ -134,6 +134,7 @@ describe("createBridgeResponse", () => {
           available: true,
           browser: "chrome",
           browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+          commandProtocolVersion: 4,
           controlWindowId: 90,
           installationId: "123e4567-e89b-42d3-a456-426614174000",
           pendingUndos: [
@@ -157,6 +158,7 @@ describe("createBridgeResponse", () => {
         available: true,
         browser: "chrome",
         browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+        commandProtocolVersion: 4,
         controlWindowId: 90,
         installationId: "123e4567-e89b-42d3-a456-426614174000",
         pendingUndos: [

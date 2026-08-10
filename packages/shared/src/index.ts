@@ -992,7 +992,16 @@ export const healthResponseSchema = z.object({
 
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
 
-export const tabCommandRelayProtocolVersion = 3 as const;
+export const tabCommandRelayLegacyProtocolVersion = 3 as const;
+export const tabCommandRelayProtocolVersion = 4 as const;
+export const tabCommandRelayCompatibleProtocolVersionSchema = z.union([
+  z.literal(tabCommandRelayLegacyProtocolVersion),
+  z.literal(tabCommandRelayProtocolVersion),
+]);
+
+export type TabCommandRelayCompatibleProtocolVersion = z.infer<
+  typeof tabCommandRelayCompatibleProtocolVersionSchema
+>;
 
 const tabCommandRelayKnownBrowserSchema = z.enum(knownBrowserOptions);
 const tabCommandRelayRequestIdSchema = z.string().uuid();
@@ -1109,6 +1118,13 @@ export const tabCommandRelayClosePreviewTargetsSchema = z
     });
   });
 
+export const tabCommandRelayClosePreviewIntentSchema =
+  z.literal("explicit-single");
+
+export type TabCommandRelayClosePreviewIntent = z.infer<
+  typeof tabCommandRelayClosePreviewIntentSchema
+>;
+
 export const tabCommandRelayCommandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("get-browser-state") }).strict(),
   z
@@ -1119,10 +1135,23 @@ export const tabCommandRelayCommandSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
+      intent: tabCommandRelayClosePreviewIntentSchema.optional(),
       kind: z.literal("close-preview"),
       targets: tabCommandRelayClosePreviewTargetsSchema,
     })
-    .strict(),
+    .strict()
+    .superRefine((command, context) => {
+      if (
+        command.intent === "explicit-single" &&
+        command.targets.length !== 1
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: "An explicit single close must target exactly one tab",
+          path: ["targets"],
+        });
+      }
+    }),
   z
     .object({
       confirmed: z.literal(true),
@@ -1220,6 +1249,15 @@ const tabCommandRelayMutationResultFields = {
   succeededTabIds: z.array(z.number().int().nonnegative()),
 } as const;
 
+const tabCommandRelayWindowBoundsSchema = z
+  .object({
+    height: z.number().int().positive(),
+    left: z.number().int(),
+    top: z.number().int(),
+    width: z.number().int().positive(),
+  })
+  .strict();
+
 export const tabCommandRelayResultSchema = z.discriminatedUnion("kind", [
   z
     .object({
@@ -1232,7 +1270,9 @@ export const tabCommandRelayResultSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("activate-tab"),
       tabId: z.number().int().nonnegative(),
+      windowBounds: tabCommandRelayWindowBoundsSchema.optional(),
       windowId: z.number().int().nonnegative(),
+      windowTitle: z.string().min(1).optional(),
     })
     .strict(),
   z
@@ -1327,6 +1367,7 @@ export const tabCommandRelayConnectedScopeSchema = tabCommandScopeSchema
   .extend({
     connectedAt: tabCommandRelayTimestampSchema,
     lastSeenAt: tabCommandRelayTimestampSchema,
+    protocolVersion: tabCommandRelayCompatibleProtocolVersionSchema,
   })
   .strict();
 
@@ -1437,10 +1478,12 @@ export type TabCommandRelayServerEnvelope = z.infer<
 
 export const tabCommandRelayErrorCodeSchema = z.enum([
   "SCOPE_OFFLINE",
+  "EXTENSION_PROTOCOL_UNSUPPORTED",
   "COMMAND_TIMEOUT",
   "EXTENSION_DISCONNECTED",
   "EXTENSION_COMMAND_FAILED",
   "INVALID_COMMAND_RECEIPT",
+  "FOREGROUND_HANDOFF_FAILED",
 ]);
 
 export type TabCommandRelayErrorCode = z.infer<

@@ -7,6 +7,7 @@ import {
   tabInstanceBulkResponseSchema,
   tabInstanceListQuerySchema,
   tabInstanceListResponseSchema,
+  tabIdParamSchema,
 } from "@tabhub/shared";
 import type { FastifyInstance } from "fastify";
 
@@ -50,6 +51,25 @@ export function registerTabInstanceRoutes(
         browser: parsed.data.browser,
         q: parsed.data.q,
         duplicatesOnly: parsed.data.duplicates_only,
+      }),
+    );
+  });
+
+  app.get("/api/tabs/:id/instances", async (request, reply) => {
+    const parsed = tabIdParamSchema.safeParse(request.params);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "VALIDATION_ERROR",
+        issues: parsed.error.issues,
+      });
+    }
+
+    return tabInstanceBulkResponseSchema.parse(
+      catalog.listAllInstances({
+        browser: undefined,
+        canonicalTabId: parsed.data.id,
+        q: undefined,
+        duplicatesOnly: false,
       }),
     );
   });

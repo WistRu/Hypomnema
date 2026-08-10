@@ -344,6 +344,27 @@ export async function fetchAllOpenTabs(
   return parsed.data.items;
 }
 
+export async function fetchCanonicalTabInstances(
+  canonicalTabId: number,
+  signal?: AbortSignal,
+) {
+  const payload = await requestJson(
+    `/api/tabs/${canonicalTabId}/instances`,
+    {
+      headers: { Accept: "application/json" },
+      signal: signal ?? null,
+    },
+    "TabHub could not resolve this open tab",
+    "TabHub returned an unreadable open-tab target.",
+  );
+  const parsed = tabInstanceBulkResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected open-tab target.");
+  }
+
+  return parsed.data.items;
+}
+
 export async function fetchAllDuplicateGroups(
   filters: Omit<DuplicateGroupListFilters, "page">,
   signal?: AbortSignal,

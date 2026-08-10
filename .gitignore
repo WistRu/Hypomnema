@@ -9,3 +9,4 @@ data/
 backups/
 packages/server/data/
 packages/server/backups/
+packages/server/native/bin/

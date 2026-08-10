@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "node scripts/build-foreground-helper.mjs && tsx watch src/main.ts",
     "start": "node dist/main.js",
-    "build": "tsup src/main.ts --format esm --platform node --target node22 --clean",
+    "build": "tsup src/main.ts --format esm --platform node --target node22 --clean && node scripts/build-foreground-helper.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "backup": "tsx src/backup.ts"
