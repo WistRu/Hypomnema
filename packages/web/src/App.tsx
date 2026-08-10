@@ -35,6 +35,7 @@ import {
   type LibraryTabFilters,
   type OpenFilter,
 } from "./api";
+import { ActivityMetrics, OpenCopyCount } from "./ActivityMetrics";
 import { OpenTabsView } from "./OpenTabsView";
 import { TabBrowserAction } from "./TabBrowserAction";
 import { useI18n, type TranslationParams } from "./i18n";
@@ -388,6 +389,8 @@ export function App() {
     queryKey: ["tabs", { browser, importance, openState, page, q, status, tag }],
     queryFn: ({ signal }) =>
       fetchTabs({ browser, importance, openState, page, q, status, tag }, signal),
+    refetchInterval: view === "library" ? 15_000 : false,
+    refetchOnWindowFocus: view === "library" ? "always" : false,
   });
   const selectAllLibraryMutation = useMutation({
     mutationFn: ({ filters }: { filters: LibraryTabFilters; filterKey: string }) =>
@@ -539,6 +542,36 @@ export function App() {
     columnHelper.accessor("browser", {
       header: t("Browser"),
       cell: ({ getValue }) => <BrowserBadge browser={getValue()} />,
+    }),
+    columnHelper.accessor("openInstanceCount", {
+      id: "activity",
+      header: t("Open-tab activity"),
+      cell: ({ getValue, row }) => {
+        const count = getValue();
+        if (count === 0) {
+          return (
+            <span className="no-library-activity" title={t("No open copies")}>
+              <span aria-hidden="true">—</span>
+              <span className="sr-only">{t("No open copies")}</span>
+            </span>
+          );
+        }
+
+        return (
+          <div
+            className="library-activity"
+            title={t("Combined across currently open physical copies.")}
+          >
+            <ActivityMetrics
+              engagedTimeMs={row.original.openEngagedTimeMs}
+              foregroundTimeMs={row.original.openForegroundTimeMs}
+            />
+            <span>
+              <OpenCopyCount count={count} />
+            </span>
+          </div>
+        );
+      },
     }),
     columnHelper.accessor("status", {
       header: t("Status"),

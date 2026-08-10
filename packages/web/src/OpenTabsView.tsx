@@ -20,6 +20,7 @@ import {
   isRelayedTabCommandOutcomeUnknown,
   TabCommandRelayClientError,
 } from "./api";
+import { ActivityMetrics, OpenCopyCount } from "./ActivityMetrics";
 import { ActionReceipt } from "./ActionReceipt";
 import {
   closeUndoIsDismissed,
@@ -493,7 +494,7 @@ export function OpenTabRow({
       }
     | undefined;
 }) {
-  const { formatDuration, formatNumber, t } = useI18n();
+  const { formatNumber, t } = useI18n();
   const label = tab.title?.trim() || hostname(tab.url);
   const activationMessage = activation.kind === "ready" ? undefined : activation.message;
 
@@ -587,26 +588,10 @@ export function OpenTabRow({
         </span>
       </td>
       <td>
-        <div className="physical-activity">
-          <span
-            className="physical-activity-metric"
-            title={t(
-              "Selected while its browser window was in the foreground and the computer was active.",
-            )}
-          >
-            <span>{t("On screen")}</span>
-            <strong>{formatDuration(tab.foregroundTimeMs)}</strong>
-          </span>
-          <span
-            className="physical-activity-metric"
-            title={t(
-              "On-screen time within 60 seconds of recent mouse, keyboard, scroll, or touch input.",
-            )}
-          >
-            <span>{t("Active use")}</span>
-            <strong>{formatDuration(tab.engagedTimeMs)}</strong>
-          </span>
-        </div>
+        <ActivityMetrics
+          engagedTimeMs={tab.engagedTimeMs}
+          foregroundTimeMs={tab.foregroundTimeMs}
+        />
       </td>
       <td>
         <div className="physical-flags">
@@ -2461,10 +2446,7 @@ export function OpenTabsView({
                                 })}
                               </span>
                               <span>
-                                {t("{count} open copies", {
-                                  count: formatNumber(group.count),
-                                  rawCount: group.count,
-                                })}
+                                <OpenCopyCount count={group.count} />
                               </span>
                             </div>
                             <div className="duplicate-group-actions">

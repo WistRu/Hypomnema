@@ -62,6 +62,7 @@ const russianMessages: Record<string, Message> = {
   Agent: "Агент",
   Activity: "Активность",
   "Active use": "Активное использование",
+  "How activity is measured": "Как измеряется активность",
   "Add field": "Добавить поле",
   "All browsers": "Все браузеры",
   "All statuses": "Все статусы",
@@ -137,6 +138,10 @@ const russianMessages: Record<string, Message> = {
   "No captured content.": "Сохранённого содержимого нет.",
   "No summary yet.": "Сводки пока нет.",
   "On screen": "На экране",
+  "Open-tab activity": "Активность открытых вкладок",
+  "No open copies": "Нет открытых копий",
+  "Combined across currently open physical copies.":
+    "Сумма по физическим копиям, открытым сейчас.",
   "On-screen time within 60 seconds of recent mouse, keyboard, scroll, or touch input.":
     "Время на экране в течение 60 секунд после недавнего действия мышью, клавиатурой, прокрутки или касания.",
   "No tags assigned.": "Теги не назначены.",
@@ -148,6 +153,12 @@ const russianMessages: Record<string, Message> = {
   "Open only": "Только открытые",
   "Open tab details": "Открыть сведения о вкладке",
   "Open tabs": "Открытые вкладки",
+  "Open copies": "Открытые копии",
+  "Activity is tracked separately for each physical tab in its current browser session.":
+    "Активность учитывается отдельно для каждой физической вкладки в текущей сессии браузера.",
+  "Loading open copies...": "Загрузка открытых копий...",
+  "No open copies in the current browser session.":
+    "В текущей сессии браузера нет открытых копий.",
   Organize: "Организация",
   Other: "Другой",
   "another browser": "другом браузере",
@@ -532,6 +543,7 @@ const russianMessages: Record<string, Message> = {
   "Pinned; kept copy: {location}":
     "Закреплена; сохраняемая копия: {location}",
   "Installation {id}": "Установка {id}",
+  "{count} open copy": "{count} открытая копия",
   "{count} open copies": (params) => {
     const count = numericParam(params, "rawCount");
     return `${params.count} ${russianPlural(count, "открытая копия", "открытые копии", "открытых копий")}`;

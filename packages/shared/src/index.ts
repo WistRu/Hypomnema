@@ -433,6 +433,9 @@ export const tabListItemSchema = z.object({
   closedAt: z.string().datetime().nullable(),
   summary: z.string().nullable(),
   tagPaths: z.array(z.string()),
+  openInstanceCount: z.number().int().nonnegative().default(0),
+  openForegroundTimeMs: z.number().int().nonnegative().default(0),
+  openEngagedTimeMs: z.number().int().nonnegative().default(0),
 });
 
 export type TabListItem = z.infer<typeof tabListItemSchema>;

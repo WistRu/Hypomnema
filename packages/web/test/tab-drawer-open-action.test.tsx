@@ -1,4 +1,4 @@
-import type { TabDetailResponse } from "@tabhub/shared";
+import type { TabDetailResponse, TabInstance } from "@tabhub/shared";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -25,6 +25,9 @@ function tabDetail(isOpen: boolean): TabDetailResponse {
     isOpen,
     lastSeenAt: "2026-08-09T00:15:00.000Z",
     links: [],
+    openEngagedTimeMs: isOpen ? 17_000 : 0,
+    openForegroundTimeMs: isOpen ? 361_000 : 0,
+    openInstanceCount: isOpen ? 2 : 0,
     status: "inbox",
     summary: null,
     tagPaths: [],
@@ -39,10 +42,15 @@ function tabDetail(isOpen: boolean): TabDetailResponse {
 function renderDrawer(
   tab: TabDetailResponse,
   activationError?: string,
+  instances: TabInstance[] = [],
 ): string {
   const queryClient = new QueryClient();
   queryClient.setQueryData(["tab", tab.id], tab);
   queryClient.setQueryData(["links", tab.id], { items: [] });
+  queryClient.setQueryData(
+    ["tab-instances", { canonicalTabId: tab.id }],
+    instances,
+  );
   queryClient.setQueryData(["tags"], {
     items: [
       {
@@ -80,6 +88,73 @@ function renderDrawer(
 }
 
 describe("tab drawer browser action", () => {
+  it("shows current-session activity separately for every open physical copy", () => {
+    const common = {
+      active: false,
+      audible: false,
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      canonicalTabId: 17,
+      discarded: false,
+      duplicateGroupSize: 2,
+      faviconUrl: null,
+      firstSeenAt: "2026-08-09T00:00:00.000Z",
+      importance: 0 as const,
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      lastAccessed: null,
+      lastSeenAt: "2026-08-09T00:15:00.000Z",
+      muted: false,
+      pinned: false,
+      status: "inbox" as const,
+      summary: null,
+      tagPaths: [],
+      url: "https://example.com/existing",
+      urlNormalized: "https://example.com/existing",
+    };
+    const instances: TabInstance[] = [
+      {
+        ...common,
+        browserTabId: 101,
+        engagedTimeMs: 12_000,
+        foregroundTimeMs: 61_000,
+        index: 2,
+        instanceId: 1,
+        title: "First copy",
+        windowId: 7,
+      },
+      {
+        ...common,
+        browserTabId: 202,
+        engagedTimeMs: 5_000,
+        foregroundTimeMs: 300_000,
+        index: 4,
+        instanceId: 2,
+        title: "Second copy",
+        windowId: 8,
+      },
+    ];
+
+    const markup = renderDrawer(tabDetail(true), undefined, instances);
+
+    expect(markup).toContain("Open copies");
+    expect(markup).toContain("2 open copies");
+    expect(markup).toContain("First copy");
+    expect(markup).toContain("Window 7 | position 3 | tab 101");
+    expect(markup).toContain("1m 1s");
+    expect(markup).toContain("12s");
+    expect(markup).toContain("Second copy");
+    expect(markup).toContain("Window 8 | position 5 | tab 202");
+    expect(markup).toContain("5m");
+    expect(markup).toContain("5s");
+  });
+
+  it("does not present a closed canonical record as zero lifetime activity", () => {
+    const markup = renderDrawer(tabDetail(false));
+
+    expect(markup).toContain("No open copies in the current browser session.");
+    expect(markup).not.toContain(">0s<");
+  });
+
   it("offers existing topics when assigning the tab", () => {
     const markup = renderDrawer(tabDetail(true));
 

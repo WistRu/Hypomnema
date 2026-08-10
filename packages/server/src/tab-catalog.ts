@@ -105,6 +105,19 @@ interface TabTagPathRow {
   path: string;
 }
 
+interface TabActivitySummaryRow {
+  tab_id: number;
+  open_instance_count: number;
+  open_foreground_time_ms: number;
+  open_engaged_time_ms: number;
+}
+
+interface TabActivitySummary {
+  openInstanceCount: number;
+  openForegroundTimeMs: number;
+  openEngagedTimeMs: number;
+}
+
 interface TabLinkRow {
   id: number;
   from_tab: number;
@@ -202,7 +215,17 @@ function tabFilter(input: FilterTabsInput): {
   return { parameters, predicates };
 }
 
-function mapTabRow(row: TabRow, tagPaths: string[]): TabListItem {
+const emptyTabActivitySummary: TabActivitySummary = {
+  openInstanceCount: 0,
+  openForegroundTimeMs: 0,
+  openEngagedTimeMs: 0,
+};
+
+function mapTabRow(
+  row: TabRow,
+  tagPaths: string[],
+  activity: TabActivitySummary = emptyTabActivitySummary,
+): TabListItem {
   return {
     id: row.id,
     url: row.url,
@@ -220,6 +243,7 @@ function mapTabRow(row: TabRow, tagPaths: string[]): TabListItem {
     closedAt: row.closed_at,
     summary: row.summary,
     tagPaths,
+    ...activity,
   };
 }
 
@@ -368,6 +392,43 @@ export function createTabCatalog(
     "SELECT id FROM tabs WHERE id = ?",
   );
 
+  const loadActivitySummaries = (
+    tabIds: number[],
+  ): Map<number, TabActivitySummary> => {
+    if (tabIds.length === 0) return new Map();
+
+    const placeholders = tabIds.map(() => "?").join(", ");
+    const rows = connection
+      .prepare(`
+        SELECT
+          tab_instances.tab_id,
+          COUNT(*) AS open_instance_count,
+          COALESCE(SUM(tab_activity_totals.foreground_ms), 0)
+            AS open_foreground_time_ms,
+          COALESCE(SUM(tab_activity_totals.engaged_ms), 0)
+            AS open_engaged_time_ms
+        FROM tab_instances
+        LEFT JOIN tab_activity_totals
+          ON tab_activity_totals.installation_id = tab_instances.installation_id
+         AND tab_activity_totals.browser_session_id IS tab_instances.browser_session_id
+         AND tab_activity_totals.browser_tab_id IS tab_instances.browser_tab_id
+        WHERE tab_instances.tab_id IN (${placeholders})
+        GROUP BY tab_instances.tab_id
+      `)
+      .all(...tabIds) as TabActivitySummaryRow[];
+
+    return new Map(
+      rows.map((row) => [
+        row.tab_id,
+        {
+          openInstanceCount: row.open_instance_count,
+          openForegroundTimeMs: row.open_foreground_time_ms,
+          openEngagedTimeMs: row.open_engaged_time_ms,
+        },
+      ]),
+    );
+  };
+
   const ingestTransaction = connection.transaction(
     (snapshot: IngestSnapshot): IngestSnapshotResponse => {
       const now = clock().toISOString();
@@ -444,11 +505,13 @@ export function createTabCatalog(
         field.value,
       ]),
     );
+    const activity = loadActivitySummaries([id]).get(id);
 
     return {
       ...mapTabRow(
         row,
         tags.map((tag) => tag.path),
+        activity,
       ),
       content:
         row.content_tab_id === null
@@ -599,6 +662,7 @@ export function createTabCatalog(
            LIMIT ? OFFSET ?`,
         )
         .all(...parameters, input.pageSize, offset) as TabRow[];
+      const activityByTab = loadActivitySummaries(rows.map(({ id }) => id));
       const tagPathsByTab = new Map<number, string[]>();
       if (rows.length > 0) {
         const placeholders = rows.map(() => "?").join(", ");
@@ -633,7 +697,13 @@ export function createTabCatalog(
       }
 
       return {
-        items: rows.map((row) => mapTabRow(row, tagPathsByTab.get(row.id) ?? [])),
+        items: rows.map((row) =>
+          mapTabRow(
+            row,
+            tagPathsByTab.get(row.id) ?? [],
+            activityByTab.get(row.id),
+          ),
+        ),
         total,
         page: input.page,
         pageSize: input.pageSize,

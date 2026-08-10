@@ -469,6 +469,7 @@ thead {
 
 .virtual-table {
   display: grid;
+  min-width: 930px;
 }
 
 .virtual-table thead {
@@ -484,13 +485,14 @@ thead {
   width: 100%;
   grid-template-columns:
     42px
-    minmax(250px, 34fr)
-    minmax(120px, 17fr)
-    minmax(90px, 11fr)
-    minmax(90px, 11fr)
-    minmax(90px, 10fr)
-    minmax(75px, 8fr)
-    minmax(75px, 8fr);
+    minmax(240px, 31fr)
+    minmax(110px, 14fr)
+    minmax(85px, 9fr)
+    minmax(120px, 14fr)
+    minmax(85px, 9fr)
+    minmax(80px, 8fr)
+    minmax(70px, 7fr)
+    minmax(70px, 7fr);
 }
 
 .virtual-table-body {
@@ -1556,6 +1558,73 @@ tbody tr.is-selected {
   padding: 16px 17px;
 }
 
+.drawer-activity-summary {
+  display: grid;
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) minmax(118px, 150px);
+  gap: 14px;
+  margin-top: 10px;
+  border: 1px solid #252d3a;
+  border-radius: 7px;
+  padding: 10px 12px;
+  background: #111720;
+}
+
+.drawer-activity-summary p,
+.drawer-activity-note {
+  margin: 0;
+  color: #7d8898;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.drawer-activity-note {
+  margin-top: 9px;
+}
+
+.drawer-activity-copies {
+  display: grid;
+  gap: 7px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.drawer-activity-copy {
+  display: grid;
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) minmax(118px, 150px);
+  gap: 14px;
+  border: 1px solid #222a36;
+  border-radius: 6px;
+  padding: 9px 11px;
+  background: #10141b;
+}
+
+.drawer-copy-identity {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.drawer-copy-identity strong,
+.drawer-copy-identity span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawer-copy-identity strong {
+  color: #c7cfdb;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.drawer-copy-identity span {
+  color: #717d8d;
+  font-size: 9px;
+}
+
 .primary-link {
   display: inline-flex;
   min-height: 30px;
@@ -1939,6 +2008,11 @@ tbody tr.is-selected {
   .tab-drawer {
     width: 100vw;
     max-width: none;
+  }
+
+  .drawer-activity-summary,
+  .drawer-activity-copy {
+    grid-template-columns: 1fr;
   }
 
   .bulk-toolbar > strong {
@@ -2451,15 +2525,25 @@ tbody tr.is-selected {
   width: 11%;
 }
 
-.physical-activity {
+.activity-metrics-block {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  width: max-content;
+  max-width: 100%;
+}
+
+.activity-metrics {
   display: grid;
   gap: 4px;
+  margin: 0;
   min-width: 118px;
   font-size: 9px;
   font-variant-numeric: tabular-nums;
 }
 
-.physical-activity-metric {
+.activity-metric {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -2467,10 +2551,101 @@ tbody tr.is-selected {
   color: #7f8ba0;
 }
 
-.physical-activity-metric strong {
+.activity-metric dd {
+  margin: 0;
   color: #c6d0df;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.activity-metrics-help {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.activity-metrics-help > summary {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  cursor: help;
+  list-style: none;
+  place-items: center;
+  user-select: none;
+}
+
+.activity-metrics-help > summary > span[aria-hidden="true"] {
+  display: grid;
+  width: 14px;
+  height: 14px;
+  border: 1px solid #39445a;
+  border-radius: 50%;
+  color: #8290a7;
+  font-size: 9px;
+  line-height: 1;
+  place-items: center;
+}
+
+.activity-metrics-help > summary::-webkit-details-marker {
+  display: none;
+}
+
+.activity-metrics-help > summary:hover > span[aria-hidden="true"],
+.activity-metrics-help > summary:focus-visible > span[aria-hidden="true"],
+.activity-metrics-help[open] > summary > span[aria-hidden="true"] {
+  border-color: #718cff;
+  color: #b8c4ff;
+}
+
+.activity-metrics-help > summary:focus-visible {
+  outline: 2px solid #718cff;
+  outline-offset: 1px;
+}
+
+.activity-metrics-help > summary:not(:focus-visible) {
+  outline: none;
+}
+
+.activity-metrics-help-copy {
+  position: absolute;
+  z-index: 30;
+  top: 26px;
+  right: 0;
+  width: min(280px, 72vw);
+  border: 1px solid #34415a;
+  border-radius: 7px;
+  padding: 8px 9px;
+  color: #aeb9ca;
+  background: #111826;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 42%);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.activity-metrics-help-copy p {
+  margin: 0;
+}
+
+.activity-metrics-help-copy p + p {
+  margin-top: 6px;
+}
+
+.activity-metrics-help-copy strong {
+  color: #d4dbe8;
+}
+
+.library-activity {
+  display: grid;
+  gap: 4px;
+}
+
+.library-activity > span {
+  color: #667286;
+  font-size: 9px;
+}
+
+.no-library-activity {
+  color: #596271;
 }
 
 .duplicate-mode-note {

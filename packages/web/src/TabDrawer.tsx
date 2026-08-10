@@ -2,6 +2,7 @@ import {
   type CustomFields,
   type TabDetailResponse,
   type TabImportance,
+  type TabInstance,
   type TabLink,
   type TabStatus,
 } from "@tabhub/shared";
@@ -19,12 +20,14 @@ import {
   assignTag,
   createLink,
   deleteLink,
+  fetchCanonicalTabInstances,
   fetchLinks,
   fetchTabDetail,
   patchLink,
   patchTabDetails,
   unassignTag,
 } from "./api";
+import { ActivityMetrics, OpenCopyCount } from "./ActivityMetrics";
 import { useI18n } from "./i18n";
 import { defaultTopicPath } from "./system-topics";
 import { TabBrowserAction } from "./TabBrowserAction";
@@ -37,6 +40,12 @@ const STATUS_OPTIONS: Array<{ labelKey: string; value: TabStatus }> = [
   { labelKey: "Done", value: "done" },
   { labelKey: "Archived", value: "archived" },
 ];
+
+const BROWSER_LABELS: Record<string, string> = {
+  chrome: "Chrome",
+  edge: "Edge",
+  yandex: "Yandex",
+};
 
 interface TabDrawerProps {
   activationError?: string | undefined;
@@ -57,6 +66,22 @@ function displayTitle(tab: TabDetailResponse) {
   } catch {
     return tab.url;
   }
+}
+
+function instanceLocation(
+  tab: TabInstance,
+  formatNumber: (value: number) => string,
+  t: ReturnType<typeof useI18n>["t"],
+) {
+  const tabLabel =
+    tab.browserTabId === null
+      ? t("unknown tab")
+      : t("tab {tabId}", { tabId: formatNumber(tab.browserTabId) });
+  return t("Window {windowId} | position {position} | {tab}", {
+    position: formatNumber(tab.index + 1),
+    tab: tabLabel,
+    windowId: formatNumber(tab.windowId),
+  });
 }
 
 function SectionError({ error }: { error: unknown }) {
@@ -254,6 +279,12 @@ export function TabDrawer({
     queryKey: ["links", tabId],
     queryFn: ({ signal }) => fetchLinks(tabId, signal),
   });
+  const instancesQuery = useQuery({
+    queryKey: ["tab-instances", { canonicalTabId: tabId }],
+    queryFn: ({ signal }) => fetchCanonicalTabInstances(tabId, signal),
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: "always",
+  });
 
   const refreshTab = async () => {
     await Promise.all([
@@ -327,6 +358,17 @@ export function TabDrawer({
   }, [onClose, tabId]);
 
   const tab = detailQuery.data;
+  const openCopyCount = instancesQuery.data?.length ?? tab?.openInstanceCount ?? 0;
+  const openForegroundTimeMs =
+    instancesQuery.data?.reduce(
+      (total, instance) => total + instance.foregroundTimeMs,
+      0,
+    ) ?? tab?.openForegroundTimeMs ?? 0;
+  const openEngagedTimeMs =
+    instancesQuery.data?.reduce(
+      (total, instance) => total + instance.engagedTimeMs,
+      0,
+    ) ?? tab?.openEngagedTimeMs ?? 0;
   const mutationError =
     patchMutation.error ??
     assignMutation.error ??
@@ -472,6 +514,69 @@ export function TabDrawer({
                 </fieldset>
               </div>
               {mutationError ? <SectionError error={mutationError} /> : null}
+            </section>
+
+            <section className="drawer-section" aria-labelledby={`${headingId}-activity`}>
+              <div className="section-heading">
+                <h3 id={`${headingId}-activity`}>{t("Open copies")}</h3>
+                <span>
+                  <OpenCopyCount count={openCopyCount} />
+                </span>
+              </div>
+              {openCopyCount > 0 ? (
+                <>
+                  <div className="drawer-activity-summary">
+                    <p>{t("Combined across currently open physical copies.")}</p>
+                    <ActivityMetrics
+                      engagedTimeMs={openEngagedTimeMs}
+                      foregroundTimeMs={openForegroundTimeMs}
+                    />
+                  </div>
+                  <p className="drawer-activity-note">
+                    {t(
+                      "Activity is tracked separately for each physical tab in its current browser session.",
+                    )}
+                  </p>
+                </>
+              ) : null}
+              {instancesQuery.isPending ? (
+                <p className="muted-copy">{t("Loading open copies...")}</p>
+              ) : null}
+              {instancesQuery.isError ? <SectionError error={instancesQuery.error} /> : null}
+              {instancesQuery.data?.length === 0 ? (
+                <p className="muted-copy">
+                  {t("No open copies in the current browser session.")}
+                </p>
+              ) : null}
+              {instancesQuery.data && instancesQuery.data.length > 0 ? (
+                <ul className="drawer-activity-copies">
+                  {instancesQuery.data.map((instance) => {
+                    const installationLabel = instance.installationId.slice(0, 8);
+                    return (
+                      <li className="drawer-activity-copy" key={instance.instanceId}>
+                        <div className="drawer-copy-identity">
+                          <strong>{instance.title?.trim() || displayTitle(tab)}</strong>
+                          <span>
+                            {BROWSER_LABELS[instance.browser.toLowerCase()] ??
+                              (instance.browser.toLowerCase() === "other"
+                                ? t("Other")
+                                : instance.browser)}{" "}
+                            ·{" "}
+                            <span title={instance.installationId}>
+                              {t("Installation {id}", { id: installationLabel })}
+                            </span>
+                          </span>
+                          <span>{instanceLocation(instance, formatNumber, t)}</span>
+                        </div>
+                        <ActivityMetrics
+                          engagedTimeMs={instance.engagedTimeMs}
+                          foregroundTimeMs={instance.foregroundTimeMs}
+                        />
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
             </section>
 
             <section className="drawer-section" aria-labelledby={`${headingId}-summary`}>
