@@ -26,6 +26,7 @@ import {
   deleteRelation,
   fetchKnowledgeGraph,
 } from "./api";
+import { InitialGraphAutoFit } from "./graph-camera";
 import {
   buildGraphScene,
   graphNodeRef,
@@ -573,6 +574,7 @@ export default function GraphView({
   const queryClient = useQueryClient();
   const { errorMessage, formatNumber, t } = useI18n();
   const graphRef = useRef<GraphRef | undefined>(undefined);
+  const initialAutoFitRef = useRef(new InitialGraphAutoFit());
   const hoveredNodeRef = useRef<GraphSceneNode | null>(null);
   const nodeObjectCacheRef = useRef<Map<GraphNodeKey, GraphNodeMesh>>(
     new Map(),
@@ -662,6 +664,7 @@ export default function GraphView({
   useEffect(() => {
     setSelectedKey(null);
     hoveredNodeRef.current = null;
+    initialAutoFitRef.current = new InitialGraphAutoFit();
   }, [rootTopicId]);
 
   useEffect(() => {
@@ -889,6 +892,16 @@ export default function GraphView({
           ref={hostRef}
           onAuxClick={closeHoveredTabOnMiddleMouse}
           onMouseDown={preventHoveredTabMiddleMouse}
+          onPointerDown={(event) => {
+            if (event.target instanceof HTMLCanvasElement) {
+              initialAutoFitRef.current.cancel();
+            }
+          }}
+          onWheel={(event) => {
+            if (event.target instanceof HTMLCanvasElement) {
+              initialAutoFitRef.current.cancel();
+            }
+          }}
         >
           {graphQuery.isPending ? (
             <GraphState
@@ -974,7 +987,11 @@ export default function GraphView({
                 width={size.width}
                 onBackgroundClick={() => setSelectedKey(null)}
                 onEngineStop={() => {
-                  if (selectedNode) return;
+                  if (selectedNode) {
+                    initialAutoFitRef.current.cancel();
+                    return;
+                  }
+                  if (!initialAutoFitRef.current.consume()) return;
                   graphRef.current?.zoomToFit(500, 70);
                 }}
                 onNodeClick={(node) => selectNode(node.key)}
