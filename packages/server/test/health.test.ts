@@ -82,7 +82,7 @@ describe("GET /api/health", () => {
     const app = createApp({ databasePath, logger: false });
     try {
       const health = await app.inject({ method: "GET", url: "/api/health" });
-      expect(health.json().schemaVersion).toBe(9);
+      expect(health.json().schemaVersion).toBe(11);
 
       const physical = await app.inject({
         method: "GET",
@@ -99,6 +99,100 @@ describe("GET /api/health", () => {
       });
       expect(workspaces.statusCode).toBe(200);
       expect(workspaces.json()).toEqual({ items: [] });
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("migrates existing untagged tabs without taking over a user topic name", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-v9-default-topic-"));
+    const databasePath = join(directory, "tabhub.sqlite");
+    const legacyDatabase = new Database(databasePath);
+
+    try {
+      sqliteVec.load(legacyDatabase);
+      legacyDatabase.pragma("foreign_keys = ON");
+      for (const fileName of [
+        "001_initial.sql",
+        "002_full_text_search.sql",
+        "003_tag_indexes.sql",
+        "004_summary_jobs.sql",
+        "005_embeddings.sql",
+        "006_tab_instances.sql",
+        "007_browser_session_identity.sql",
+        "008_tab_operations_and_workspaces.sql",
+        "009_knowledge_graph_relations.sql",
+      ]) {
+        legacyDatabase.exec(
+          await readFile(
+            new URL(`../migrations/${fileName}`, import.meta.url),
+            "utf8",
+          ),
+        );
+      }
+      legacyDatabase.pragma("user_version = 9");
+      const insertTab = legacyDatabase.prepare(`
+        INSERT INTO tabs (
+          id, url, url_normalized, title, browser, first_seen_at, last_seen_at
+        ) VALUES (?, ?, ?, ?, 'chrome', ?, ?)
+      `);
+      insertTab.run(
+        1,
+        "https://example.com/sorted-legacy",
+        "https://example.com/sorted-legacy",
+        "Sorted legacy",
+        "2026-08-10T00:00:00.000Z",
+        "2026-08-10T00:00:00.000Z",
+      );
+      insertTab.run(
+        2,
+        "https://example.com/unsorted-legacy",
+        "https://example.com/unsorted-legacy",
+        "Unsorted legacy",
+        "2026-08-10T00:00:00.000Z",
+        "2026-08-10T00:00:00.000Z",
+      );
+      const userTopicId = Number(
+        legacyDatabase
+          .prepare("INSERT INTO tags (name, parent_id) VALUES ('Без темы', NULL)")
+          .run().lastInsertRowid,
+      );
+      legacyDatabase
+        .prepare(
+          "INSERT INTO tab_tags (tab_id, tag_id, assigned_by) VALUES (1, ?, 'user')",
+        )
+        .run(userTopicId);
+    } finally {
+      legacyDatabase.close();
+    }
+
+    const app = createApp({ databasePath, logger: false });
+    try {
+      const tree = await app.inject({ method: "GET", url: "/api/tags" });
+      const topics = tree.json().items as Array<{
+        name: string;
+        path: string;
+        tabCount: number;
+      }>;
+      expect(topics).toContainEqual(
+        expect.objectContaining({ path: "Без темы", tabCount: 1 }),
+      );
+      expect(topics).toContainEqual(
+        expect.objectContaining({
+          path: expect.stringMatching(/^Без темы \[user topic #\d+;/),
+          tabCount: 1,
+        }),
+      );
+
+      const unsorted = await app.inject({
+        method: "GET",
+        url: `/api/tabs?tag=${encodeURIComponent("Без темы")}`,
+      });
+      expect(unsorted.json()).toMatchObject({
+        total: 1,
+        items: [{ title: "Unsorted legacy", tagPaths: ["Без темы"] }],
+      });
     } finally {
       await app.close();
       await rm(directory, { recursive: true, force: true });
@@ -122,7 +216,7 @@ describe("GET /api/health", () => {
       expect(healthResponseSchema.parse(response.json())).toEqual({
         status: "ok",
         database: "ok",
-        schemaVersion: 9,
+        schemaVersion: 11,
       });
     } finally {
       await app.close();
@@ -149,7 +243,7 @@ describe("GET /api/health", () => {
 
         expect(response.statusCode).toBe(200);
         expect(healthResponseSchema.parse(response.json()).schemaVersion).toBe(
-          9,
+          11,
         );
       } finally {
         await reopenedApp.close();
@@ -204,7 +298,7 @@ describe("GET /api/health", () => {
         method: "GET",
         url: "/api/health",
       });
-      expect(healthResponse.json().schemaVersion).toBe(9);
+      expect(healthResponse.json().schemaVersion).toBe(11);
 
       const physicalResponse = await app.inject({
         method: "GET",
@@ -301,16 +395,17 @@ describe("GET /api/health", () => {
     try {
       const response = await app.inject({ method: "GET", url: "/api/health" });
       expect(response.statusCode).toBe(200);
-      expect(response.json().schemaVersion).toBe(9);
+      expect(response.json().schemaVersion).toBe(11);
 
       const tags = await app.inject({ method: "GET", url: "/api/tags" });
       const paths = tags
         .json()
         .items.map((tag: { path: string }) => tag.path) as string[];
-      expect(paths).toHaveLength(3);
-      expect(new Set(paths).size).toBe(3);
+      expect(paths).toHaveLength(4);
+      expect(new Set(paths).size).toBe(4);
       expect(paths).toContain("AI");
       expect(paths).toContain("AI [legacy duplicate #2]");
+      expect(paths).toContain("Без темы");
       expect(
         paths.some((path) => path.startsWith("AI [legacy duplicate #2;")),
       ).toBe(true);

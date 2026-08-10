@@ -78,4 +78,35 @@ describe("topic tree presentation", () => {
     expect(markup).toMatch(/aria-label="Delete topic Work"[^>]*disabled/);
     expect(markup).toMatch(/aria-label="Delete topic Work\/Crypto\/Research"(?![^>]*disabled)/);
   });
+
+  it("renders the default topic as a localized filter without mutation controls", () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider initialLocale="en">
+        <TopicTree
+          nodes={[
+            {
+              id: 9,
+              name: "Без темы",
+              path: "Без темы",
+              color: "#64748b",
+              tabCount: 12,
+              children: [],
+            },
+          ]}
+          selectedTopic={{ id: 9, path: "Без темы" }}
+          onAddChild={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+          onSelect={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    expect(markup).toContain("No topic");
+    expect(markup).toContain(">12</strong>");
+    expect(markup).toContain('aria-current="page"');
+    expect(markup).not.toContain("Add subtopic to Без темы");
+    expect(markup).not.toContain("Edit topic Без темы");
+    expect(markup).not.toContain("Delete topic Без темы");
+  });
 });

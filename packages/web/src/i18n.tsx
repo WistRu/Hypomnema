@@ -195,6 +195,7 @@ const russianMessages: Record<string, Message> = {
   Tags: "Теги",
   "This tab to target": "От этой вкладки к целевой",
   Topics: "Темы",
+  "No topic": "Без темы",
   "Try again": "Повторить",
   "Try another search, topic, browser, or tab state.":
     "Измените запрос, тему, браузер или состояние вкладки.",
@@ -316,6 +317,8 @@ const russianMessages: Record<string, Message> = {
     "Тему нельзя переместить внутрь неё самой или одной из её подтем.",
   "Move or delete the subtopics before deleting this topic.":
     "Перед удалением темы переместите или удалите её подтемы.",
+  "The default topic is managed automatically.":
+    "Тема «Без темы» управляется автоматически.",
   "This topic no longer exists.": "Эта тема больше не существует.",
   "This topic is no longer assigned to the tab.":
     "Эта тема больше не назначена вкладке.",
@@ -961,6 +964,7 @@ const apiErrorTranslationKeys: Record<string, string> = {
   KNOWLEDGE_NODE_NOT_FOUND: "One of the relation endpoints no longer exists.",
   RELATION_NOT_FOUND: "This relation no longer exists.",
   SELF_RELATION_NOT_ALLOWED: "A node cannot be related to itself.",
+  SYSTEM_TAG_IMMUTABLE: "The default topic is managed automatically.",
   TAB_NOT_FOUND: "This tab no longer exists.",
   TAG_ASSIGNMENT_NOT_FOUND: "This topic is no longer assigned to the tab.",
   TAG_CONFLICT: "A topic with this name already exists at that level.",

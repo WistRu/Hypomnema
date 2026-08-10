@@ -75,6 +75,15 @@ export class TagAssignmentNotFoundError extends Error {
   }
 }
 
+export class SystemTagMutationError extends Error {
+  readonly code = "SYSTEM_TAG_IMMUTABLE";
+
+  constructor(readonly tagId: number) {
+    super(`System tag ${tagId} cannot be changed manually`);
+    this.name = "SystemTagMutationError";
+  }
+}
+
 interface IdRow {
   id: number;
 }
@@ -109,6 +118,11 @@ export function createTagCatalog(connection: Database.Database): TagCatalog {
     SELECT id, name, parent_id, color
     FROM tags
     WHERE id = ?
+  `);
+  const selectSystemTagById = connection.prepare(`
+    SELECT id
+    FROM tags
+    WHERE id = ? AND system_kind IS NOT NULL
   `);
   const insertTag = connection.prepare(`
     INSERT OR IGNORE INTO tags (name, parent_id)
@@ -213,6 +227,9 @@ export function createTagCatalog(connection: Database.Database): TagCatalog {
         }
 
         parentId = tag.id;
+        if (selectSystemTagById.get(parentId) !== undefined) {
+          throw new SystemTagMutationError(parentId);
+        }
       }
 
       if (parentId === null) {
@@ -236,6 +253,12 @@ export function createTagCatalog(connection: Database.Database): TagCatalog {
       ) {
         throw new TagNotFoundError(input.parentId);
       }
+      if (
+        input.parentId !== undefined &&
+        selectSystemTagById.get(input.parentId) !== undefined
+      ) {
+        throw new SystemTagMutationError(input.parentId);
+      }
 
       const inserted = insertTagRecord.run(
         input.name,
@@ -258,6 +281,9 @@ export function createTagCatalog(connection: Database.Database): TagCatalog {
       if (current === undefined) {
         throw new TagNotFoundError(id);
       }
+      if (selectSystemTagById.get(id) !== undefined) {
+        throw new SystemTagMutationError(id);
+      }
 
       const name = input.name ?? current.name;
       const parentId =
@@ -267,6 +293,9 @@ export function createTagCatalog(connection: Database.Database): TagCatalog {
       if (parentId !== null) {
         if (selectTagById.get(parentId) === undefined) {
           throw new TagNotFoundError(parentId);
+        }
+        if (selectSystemTagById.get(parentId) !== undefined) {
+          throw new SystemTagMutationError(parentId);
         }
         if (
           parentId === id ||
@@ -288,6 +317,9 @@ export function createTagCatalog(connection: Database.Database): TagCatalog {
     if (selectTagById.get(id) === undefined) {
       throw new TagNotFoundError(id);
     }
+    if (selectSystemTagById.get(id) !== undefined) {
+      throw new SystemTagMutationError(id);
+    }
     if (selectChild.get(id) !== undefined) {
       throw new TagHasChildrenError(id);
     }
@@ -301,6 +333,9 @@ export function createTagCatalog(connection: Database.Database): TagCatalog {
       }
       if (selectTagById.get(tagId) === undefined) {
         throw new TagNotFoundError(tagId);
+      }
+      if (selectSystemTagById.get(tagId) !== undefined) {
+        throw new SystemTagMutationError(tagId);
       }
       if (deleteTagAssignment.run(tabId, tagId).changes === 0) {
         throw new TagAssignmentNotFoundError(tabId, tagId);

@@ -80,7 +80,7 @@ describe("knowledge graph migration", () => {
 
     const upgraded = openDatabase(databasePath);
     try {
-      expect(upgraded.schemaVersion).toBe(9);
+      expect(upgraded.schemaVersion).toBe(11);
       expect(
         upgraded.connection
           .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'links'")
@@ -94,6 +94,7 @@ describe("knowledge graph migration", () => {
         { kind: "tab", tab_id: 10, topic_id: null },
         { kind: "tab", tab_id: 20, topic_id: null },
         { kind: "topic", tab_id: null, topic_id: 30 },
+        { kind: "topic", tab_id: null, topic_id: 31 },
       ]);
       expect(
         upgraded.connection

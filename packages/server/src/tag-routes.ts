@@ -17,6 +17,7 @@ import {
   TagHasChildrenError,
   TagHierarchyConflictError,
   TagNotFoundError,
+  SystemTagMutationError,
   TabsNotFoundError,
   type TagCatalog,
 } from "./tag-catalog.js";
@@ -47,6 +48,12 @@ export function registerTagRoutes(
           error: error.code,
           message: error.message,
           missingIds: error.missingIds,
+        });
+      }
+      if (error instanceof SystemTagMutationError) {
+        return reply.code(409).send({
+          error: error.code,
+          message: error.message,
         });
       }
 
@@ -80,6 +87,12 @@ export function registerTagRoutes(
           message: error.message,
         });
       }
+      if (error instanceof SystemTagMutationError) {
+        return reply.code(409).send({
+          error: error.code,
+          message: error.message,
+        });
+      }
 
       throw error;
     }
@@ -103,6 +116,12 @@ export function registerTagRoutes(
         });
       }
       if (error instanceof TagConflictError) {
+        return reply.code(409).send({
+          error: error.code,
+          message: error.message,
+        });
+      }
+      if (error instanceof SystemTagMutationError) {
         return reply.code(409).send({
           error: error.code,
           message: error.message,
@@ -136,7 +155,8 @@ export function registerTagRoutes(
       }
       if (
         error instanceof TagConflictError ||
-        error instanceof TagHierarchyConflictError
+        error instanceof TagHierarchyConflictError ||
+        error instanceof SystemTagMutationError
       ) {
         return reply.code(409).send({
           error: error.code,
@@ -165,6 +185,12 @@ export function registerTagRoutes(
         });
       }
       if (error instanceof TagHasChildrenError) {
+        return reply.code(409).send({
+          error: error.code,
+          message: error.message,
+        });
+      }
+      if (error instanceof SystemTagMutationError) {
         return reply.code(409).send({
           error: error.code,
           message: error.message,

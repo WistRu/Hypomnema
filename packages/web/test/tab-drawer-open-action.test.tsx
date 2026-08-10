@@ -59,6 +59,25 @@ function renderDrawer(
 }
 
 describe("tab drawer browser action", () => {
+  it("shows the default topic without a removal action", () => {
+    const tab = tabDetail(true);
+    tab.tags = [
+      {
+        id: 6,
+        name: "Без темы",
+        path: "Без темы",
+        color: "#64748b",
+        assignedBy: "agent",
+      },
+    ];
+    tab.tagPaths = ["Без темы"];
+
+    const markup = renderDrawer(tab);
+
+    expect(markup).toContain("No topic");
+    expect(markup).not.toContain("Remove Без темы");
+  });
+
   it("switches to an already-open tab instead of linking to a new copy", () => {
     const markup = renderDrawer(tabDetail(true));
 

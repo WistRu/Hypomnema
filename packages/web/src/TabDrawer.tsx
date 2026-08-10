@@ -26,6 +26,7 @@ import {
   unassignTag,
 } from "./api";
 import { useI18n } from "./i18n";
+import { defaultTopicPath } from "./system-topics";
 import { TabBrowserAction } from "./TabBrowserAction";
 import type { CanonicalTabBrowserActionRequest } from "./open-tab-activation";
 
@@ -491,28 +492,37 @@ export function TabDrawer({
               </div>
               {tab.tags.length > 0 ? (
                 <ul className="tag-pills">
-                  {tab.tags.map((tag) => (
-                    <li key={tag.id}>
-                      <span>{tag.path}</span>
-                      <span className={`provenance-badge is-${tag.assignedBy}`}>
-                        {tag.assignedBy === "agent" ? t("Agent") : t("User")}
-                      </span>
-                      <button
-                        aria-label={t("Remove {topic}, assigned by {source}", {
-                          source: tag.assignedBy === "agent" ? t("Agent") : t("User"),
-                          topic: tag.path,
-                        })}
-                        disabled={unassignMutation.isPending}
-                        title={t("Assigned by {source}", {
-                          source: tag.assignedBy === "agent" ? t("Agent") : t("User"),
-                        })}
-                        type="button"
-                        onClick={() => unassignMutation.mutate(tag.id)}
-                      >
-                        X
-                      </button>
-                    </li>
-                  ))}
+                  {tab.tags.map((tag) => {
+                    const isDefaultTopic = tag.path === defaultTopicPath;
+                    const displayPath = isDefaultTopic ? t("No topic") : tag.path;
+
+                    return (
+                      <li key={tag.id}>
+                        <span>{displayPath}</span>
+                        <span className={`provenance-badge is-${tag.assignedBy}`}>
+                          {tag.assignedBy === "agent" ? t("Agent") : t("User")}
+                        </span>
+                        {!isDefaultTopic ? (
+                          <button
+                            aria-label={t("Remove {topic}, assigned by {source}", {
+                              source:
+                                tag.assignedBy === "agent" ? t("Agent") : t("User"),
+                              topic: tag.path,
+                            })}
+                            disabled={unassignMutation.isPending}
+                            title={t("Assigned by {source}", {
+                              source:
+                                tag.assignedBy === "agent" ? t("Agent") : t("User"),
+                            })}
+                            type="button"
+                            onClick={() => unassignMutation.mutate(tag.id)}
+                          >
+                            X
+                          </button>
+                        ) : null}
+                      </li>
+                    );
+                  })}
                 </ul>
               ) : (
                 <p className="muted-copy">{t("No topics assigned.")}</p>

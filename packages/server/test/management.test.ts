@@ -58,7 +58,7 @@ describe("tab management REST behavior", () => {
         status: "done",
         importance: 0,
         content: { text: "Detailed managed content" },
-        tags: [],
+        tags: [expect.objectContaining({ path: "Без темы" })],
         links: [],
         customFields: {},
       });
@@ -79,7 +79,7 @@ describe("tab management REST behavior", () => {
           summary: null,
           extractedAt: "2026-08-08T20:00:00.000Z",
         },
-        tags: [],
+        tags: [expect.objectContaining({ path: "Без темы" })],
         links: [],
         customFields: {},
       });
@@ -344,7 +344,7 @@ describe("tab management REST behavior", () => {
       expect(compactTagsByTitle).toEqual({
         One: ["AI/LLM/Agents"],
         Two: ["AI/LLM/Agents"],
-        Untagged: [],
+        Untagged: ["Без темы"],
       });
 
       const bulkStatus = await app.inject({
@@ -387,6 +387,12 @@ describe("tab management REST behavior", () => {
                 ],
               },
             ],
+          },
+          {
+            name: "Без темы",
+            path: "Без темы",
+            tabCount: 1,
+            children: [],
           },
         ],
       });
@@ -546,6 +552,17 @@ describe("tab management REST behavior", () => {
               { status: "archived", count: 0 },
             ],
           },
+          {
+            name: "Без темы",
+            path: "Без темы",
+            total: 1,
+            byStatus: [
+              { status: "inbox", count: 1 },
+              { status: "in_progress", count: 0 },
+              { status: "done", count: 0 },
+              { status: "archived", count: 0 },
+            ],
+          },
         ],
       });
 
@@ -694,7 +711,7 @@ describe("tab management REST behavior", () => {
 
       const tags = await app.inject({ method: "GET", url: "/api/tags" });
       expect(tags.statusCode).toBe(200);
-      expect(tags.json().items).toHaveLength(1_001);
+      expect(tags.json().items).toHaveLength(1_002);
     } finally {
       await app.close();
       await rm(directory, { recursive: true, force: true });

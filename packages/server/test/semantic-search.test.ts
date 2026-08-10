@@ -192,7 +192,7 @@ describe("semantic tab search", () => {
     ]);
 
     const health = await app.inject({ method: "GET", url: "/api/health" });
-    expect(health.json().schemaVersion).toBe(9);
+    expect(health.json().schemaVersion).toBe(11);
   });
 
   it("maps embedding provider failures without hiding their retry metadata", async () => {

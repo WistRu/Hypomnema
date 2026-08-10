@@ -2,11 +2,401 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "../src/app.js";
 
 describe("tag CRUD REST behavior", () => {
+  it("places newly ingested tabs in the default topic", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-default-topic-"));
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+    });
+
+    try {
+      await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          tabs: [
+            {
+              url: "https://example.com/unsorted",
+              title: "Unsorted",
+              windowId: 1,
+              index: 0,
+            },
+          ],
+        },
+      });
+
+      const tree = await app.inject({ method: "GET", url: "/api/tags" });
+      expect(tree.statusCode).toBe(200);
+      expect(tree.json().items).toContainEqual(
+        expect.objectContaining({
+          name: "Без темы",
+          path: "Без темы",
+          tabCount: 1,
+          children: [],
+        }),
+      );
+
+      const tabs = await app.inject({ method: "GET", url: "/api/tabs" });
+      expect(tabs.json()).toMatchObject({
+        total: 1,
+        items: [{ title: "Unsorted", tagPaths: ["Без темы"] }],
+      });
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("removes the default topic when a real topic is assigned", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-sort-topic-"));
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+    });
+
+    try {
+      await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          tabs: [
+            {
+              url: "https://example.com/sorted",
+              title: "Sorted",
+              windowId: 1,
+              index: 0,
+            },
+          ],
+        },
+      });
+      const tabs = await app.inject({ method: "GET", url: "/api/tabs" });
+      const tabId = tabs.json().items[0].id as number;
+
+      const assigned = await app.inject({
+        method: "POST",
+        url: "/api/tags/assign",
+        payload: {
+          ids: [tabId],
+          tagPath: "Work",
+          assignedBy: "user",
+        },
+      });
+      expect(assigned.statusCode).toBe(200);
+
+      const detail = await app.inject({
+        method: "GET",
+        url: `/api/tabs/${tabId}`,
+      });
+      expect(detail.json().tags).toEqual([
+        expect.objectContaining({ path: "Work", assignedBy: "user" }),
+      ]);
+
+      const tree = await app.inject({ method: "GET", url: "/api/tags" });
+      expect(
+        tree.json().items.find((topic: { path: string }) => topic.path === "Без темы"),
+      ).toMatchObject({ tabCount: 0 });
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("restores the default topic after the last real topic is removed", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-unsort-topic-"));
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+    });
+
+    try {
+      await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          tabs: [
+            {
+              url: "https://example.com/remove-last-topic",
+              title: "Remove last topic",
+              windowId: 1,
+              index: 0,
+            },
+          ],
+        },
+      });
+      const tabs = await app.inject({ method: "GET", url: "/api/tabs" });
+      const tabId = tabs.json().items[0].id as number;
+      const assigned = await app.inject({
+        method: "POST",
+        url: "/api/tags/assign",
+        payload: {
+          ids: [tabId],
+          tagPath: "Work",
+          assignedBy: "user",
+        },
+      });
+
+      const removed = await app.inject({
+        method: "DELETE",
+        url: `/api/tabs/${tabId}/tags/${assigned.json().tagId}`,
+      });
+      expect(removed.statusCode).toBe(200);
+
+      const detail = await app.inject({
+        method: "GET",
+        url: `/api/tabs/${tabId}`,
+      });
+      expect(detail.json().tags).toEqual([
+        expect.objectContaining({ path: "Без темы", assignedBy: "agent" }),
+      ]);
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("restores the default topic when the last real topic is deleted", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-delete-last-topic-"));
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+    });
+
+    try {
+      await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          tabs: [
+            {
+              url: "https://example.com/deleted-topic",
+              title: "Deleted topic",
+              windowId: 1,
+              index: 0,
+            },
+          ],
+        },
+      });
+      const tabs = await app.inject({ method: "GET", url: "/api/tabs" });
+      const tabId = tabs.json().items[0].id as number;
+      const assigned = await app.inject({
+        method: "POST",
+        url: "/api/tags/assign",
+        payload: {
+          ids: [tabId],
+          tagPath: "Temporary",
+          assignedBy: "user",
+        },
+      });
+
+      const deleted = await app.inject({
+        method: "DELETE",
+        url: `/api/tags/${assigned.json().tagId}`,
+      });
+      expect(deleted.statusCode).toBe(200);
+
+      const detail = await app.inject({
+        method: "GET",
+        url: `/api/tabs/${tabId}`,
+      });
+      expect(detail.json().tags).toEqual([
+        expect.objectContaining({ path: "Без темы", assignedBy: "agent" }),
+      ]);
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects manual mutations of the default topic", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-protected-topic-"));
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+    });
+
+    try {
+      await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          tabs: [
+            {
+              url: "https://example.com/protected-default",
+              title: "Protected default",
+              windowId: 1,
+              index: 0,
+            },
+          ],
+        },
+      });
+      const tree = await app.inject({ method: "GET", url: "/api/tags" });
+      const defaultTopic = tree
+        .json()
+        .items.find((topic: { path: string }) => topic.path === "Без темы") as {
+        id: number;
+      };
+      const tabs = await app.inject({ method: "GET", url: "/api/tabs" });
+      const tabId = tabs.json().items[0].id as number;
+
+      const attempts = [
+        await app.inject({
+          method: "POST",
+          url: "/api/tags/assign",
+          payload: {
+            ids: [tabId],
+            tagPath: "Без темы",
+            assignedBy: "user",
+          },
+        }),
+        await app.inject({
+          method: "POST",
+          url: "/api/tags/assign",
+          payload: {
+            ids: [tabId],
+            tagPath: "Без темы/Child",
+            assignedBy: "user",
+          },
+        }),
+        await app.inject({
+          method: "DELETE",
+          url: `/api/tabs/${tabId}/tags/${defaultTopic.id}`,
+        }),
+        await app.inject({
+          method: "PATCH",
+          url: `/api/tags/${defaultTopic.id}`,
+          payload: { name: "Renamed" },
+        }),
+        await app.inject({
+          method: "DELETE",
+          url: `/api/tags/${defaultTopic.id}`,
+        }),
+        await app.inject({
+          method: "POST",
+          url: "/api/tags",
+          payload: { name: "Child", parentId: defaultTopic.id },
+        }),
+      ];
+
+      for (const attempt of attempts) {
+        expect(attempt.statusCode).toBe(409);
+        expect(attempt.json()).toMatchObject({
+          error: "SYSTEM_TAG_IMMUTABLE",
+        });
+      }
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("enforces the default topic invariants for direct database writes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-default-invariant-"));
+    const databasePath = join(directory, "tabhub.sqlite");
+    const app = createApp({ databasePath, logger: false });
+
+    try {
+      await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          tabs: ["Sorted", "Unsorted"].map((title, index) => ({
+            url: `https://example.com/${title.toLowerCase()}`,
+            title,
+            windowId: 1,
+            index,
+          })),
+        },
+      });
+      const listed = (
+        await app.inject({ method: "GET", url: "/api/tabs?pageSize=10" })
+      ).json().items as Array<{ id: number; title: string }>;
+      const tabIds = Object.fromEntries(
+        listed.map((tab) => [tab.title, tab.id]),
+      );
+      const assigned = await app.inject({
+        method: "POST",
+        url: "/api/tags/assign",
+        payload: {
+          ids: [tabIds.Sorted!],
+          tagPath: "Work",
+          assignedBy: "user",
+        },
+      });
+      const temporary = await app.inject({
+        method: "POST",
+        url: "/api/tags",
+        payload: { name: "Temporary" },
+      });
+      const defaultTopic = (
+        await app.inject({ method: "GET", url: "/api/tags" })
+      )
+        .json()
+        .items.find((topic: { path: string }) => topic.path === "Без темы") as {
+        id: number;
+      };
+
+      const direct = new Database(databasePath);
+      try {
+        expect(() =>
+          direct
+            .prepare("INSERT INTO tags (name, parent_id) VALUES ('Child', ?)")
+            .run(defaultTopic.id),
+        ).toThrow("system tag cannot contain children");
+        expect(() =>
+          direct
+            .prepare("UPDATE tags SET parent_id = ? WHERE id = ?")
+            .run(defaultTopic.id, temporary.json().id),
+        ).toThrow("system tag cannot contain children");
+        expect(() =>
+          direct
+            .prepare(
+              "UPDATE tab_tags SET tag_id = ? WHERE tab_id = ? AND tag_id = ?",
+            )
+            .run(defaultTopic.id, tabIds.Sorted!, assigned.json().tagId),
+        ).toThrow("tab topic assignment keys are immutable");
+        expect(() =>
+          direct
+            .prepare(
+              "UPDATE tab_tags SET tab_id = ? WHERE tab_id = ? AND tag_id = ?",
+            )
+            .run(tabIds.Sorted!, tabIds.Unsorted!, defaultTopic.id),
+        ).toThrow("tab topic assignment keys are immutable");
+      } finally {
+        direct.close();
+      }
+
+      const sorted = await app.inject({
+        method: "GET",
+        url: `/api/tabs/${tabIds.Sorted!}`,
+      });
+      const unsorted = await app.inject({
+        method: "GET",
+        url: `/api/tabs/${tabIds.Unsorted!}`,
+      });
+      expect(sorted.json().tags).toEqual([
+        expect.objectContaining({ path: "Work" }),
+      ]);
+      expect(unsorted.json().tags).toEqual([
+        expect.objectContaining({ path: "Без темы" }),
+      ]);
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("creates hierarchical tags and distinguishes conflicts from missing parents", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-tag-create-"));
     const app = createApp({
@@ -51,6 +441,12 @@ describe("tag CRUD REST behavior", () => {
                 path: "Work/Research",
               },
             ],
+          },
+          {
+            name: "Без темы",
+            path: "Без темы",
+            tabCount: 0,
+            children: [],
           },
         ],
       });
@@ -277,7 +673,9 @@ describe("tag CRUD REST behavior", () => {
         method: "GET",
         url: `/api/tabs/${agentTabId}`,
       });
-      expect(manualAfter.json().tags).toEqual([]);
+      expect(manualAfter.json().tags).toEqual([
+        expect.objectContaining({ path: "Без темы", assignedBy: "agent" }),
+      ]);
       expect(agentAfter.json().tags).toEqual([
         expect.objectContaining({ id: tagId, assignedBy: "agent" }),
       ]);

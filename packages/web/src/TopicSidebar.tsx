@@ -18,6 +18,7 @@ import {
   type UpdateTopicInput,
 } from "./api";
 import { useI18n } from "./i18n";
+import { defaultTopicPath } from "./system-topics";
 import "./TopicSidebar.css";
 
 export interface SelectedTopic {
@@ -221,6 +222,8 @@ export function TopicTree({
     <ul className="topic-tree">
       {nodes.map((node) => {
         const hasChildren = node.children.length > 0;
+        const isDefaultTopic = node.path === defaultTopicPath;
+        const displayName = isDefaultTopic ? t("No topic") : node.name;
         const colorStyle = node.color
           ? ({ "--topic-color": node.color } as CSSProperties)
           : undefined;
@@ -230,45 +233,47 @@ export function TopicTree({
               <button
                 aria-current={selectedTopic?.id === node.id ? "page" : undefined}
                 className="topic-tree-select"
-                title={node.path}
+                title={isDefaultTopic ? displayName : node.path}
                 type="button"
                 onClick={() => onSelect({ id: node.id, path: node.path })}
               >
                 <span className="topic-color-dot" aria-hidden="true" />
-                <span>{node.name}</span>
+                <span>{displayName}</span>
                 <strong>{formatNumber(node.tabCount)}</strong>
               </button>
-              <div className="topic-tree-actions">
-                <button
-                  aria-label={t("Add subtopic to {topic}", { topic: node.path })}
-                  title={t("Add subtopic")}
-                  type="button"
-                  onClick={() => onAddChild(node)}
-                >
-                  +
-                </button>
-                <button
-                  aria-label={t("Edit topic {topic}", { topic: node.path })}
-                  title={t("Rename or move topic")}
-                  type="button"
-                  onClick={() => onEdit(node)}
-                >
-                  ···
-                </button>
-                <button
-                  aria-label={t("Delete topic {topic}", { topic: node.path })}
-                  disabled={hasChildren}
-                  title={
-                    hasChildren
-                      ? t("Topics with subtopics cannot be deleted.")
-                      : t("Delete topic")
-                  }
-                  type="button"
-                  onClick={() => onDelete(node)}
-                >
-                  ×
-                </button>
-              </div>
+              {!isDefaultTopic ? (
+                <div className="topic-tree-actions">
+                  <button
+                    aria-label={t("Add subtopic to {topic}", { topic: node.path })}
+                    title={t("Add subtopic")}
+                    type="button"
+                    onClick={() => onAddChild(node)}
+                  >
+                    +
+                  </button>
+                  <button
+                    aria-label={t("Edit topic {topic}", { topic: node.path })}
+                    title={t("Rename or move topic")}
+                    type="button"
+                    onClick={() => onEdit(node)}
+                  >
+                    ···
+                  </button>
+                  <button
+                    aria-label={t("Delete topic {topic}", { topic: node.path })}
+                    disabled={hasChildren}
+                    title={
+                      hasChildren
+                        ? t("Topics with subtopics cannot be deleted.")
+                        : t("Delete topic")
+                    }
+                    type="button"
+                    onClick={() => onDelete(node)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ) : null}
             </div>
             {hasChildren ? (
               <TopicTree
@@ -451,7 +456,7 @@ export function TopicSidebar({
           key={editor.mode === "edit" ? `edit:${editor.topic.id}` : `create:${editor.parentId}`}
           editor={editor}
           isSaving={busy}
-          topics={flatTopics}
+          topics={flatTopics.filter((topic) => topic.path !== defaultTopicPath)}
           onCancel={() => {
             resetMutationErrors();
             setEditor(null);

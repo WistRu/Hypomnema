@@ -100,12 +100,19 @@ describe("translations", () => {
       new Error("topic:7 cannot relate to itself"),
       { code: "SELF_RELATION_NOT_ALLOWED" },
     );
+    const systemTopic = Object.assign(
+      new Error("System tag 1 cannot be changed manually"),
+      { code: "SYSTEM_TAG_IMMUTABLE" },
+    );
 
     expect(localizedErrorMessage("ru", conflict)).toBe(
       "Тема с таким названием уже существует на этом уровне.",
     );
     expect(localizedErrorMessage("ru", selfRelation)).toBe(
       "Нельзя создать связь узла с самим собой.",
+    );
+    expect(localizedErrorMessage("ru", systemTopic)).toBe(
+      "Тема «Без темы» управляется автоматически.",
     );
   });
 
