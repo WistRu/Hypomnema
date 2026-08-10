@@ -47,6 +47,7 @@ import {
   type WorkspaceView,
 } from "./workspace-view";
 import { TabDrawer } from "./TabDrawer";
+import { TopicPathInput } from "./TopicPathInput";
 import { TopicSidebar, type SelectedTopic } from "./TopicSidebar";
 import { useCanonicalTabActivation } from "./use-canonical-tab-activation";
 import { useSingleTabClose } from "./use-single-tab-close";
@@ -920,13 +921,12 @@ export function App() {
                   >
                     <label>
                       <span>{t("Topic path")}</span>
-                      <input
+                      <TopicPathInput
                         disabled={bulkBusy}
-                        maxLength={2_048}
                         placeholder={t("Research/AI")}
                         required
                         value={bulkTag}
-                        onChange={(event) => setBulkTag(event.target.value)}
+                        onChange={setBulkTag}
                       />
                     </label>
                     <button disabled={bulkBusy || !bulkTag.trim()} type="submit">

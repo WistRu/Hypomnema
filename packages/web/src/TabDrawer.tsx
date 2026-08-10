@@ -28,6 +28,7 @@ import {
 import { useI18n } from "./i18n";
 import { defaultTopicPath } from "./system-topics";
 import { TabBrowserAction } from "./TabBrowserAction";
+import { TopicPathInput } from "./TopicPathInput";
 import type { CanonicalTabBrowserActionRequest } from "./open-tab-activation";
 
 const STATUS_OPTIONS: Array<{ labelKey: string; value: TabStatus }> = [
@@ -536,13 +537,12 @@ export function TabDrawer({
               >
                 <label>
                   <span>{t("Topic path")}</span>
-                  <input
+                  <TopicPathInput
                     disabled={assignMutation.isPending}
-                    maxLength={2_048}
                     placeholder={t("Research/AI/Agents")}
                     required
                     value={tagPath}
-                    onChange={(event) => setTagPath(event.target.value)}
+                    onChange={setTagPath}
                   />
                 </label>
                 <button disabled={assignMutation.isPending || !tagPath.trim()} type="submit">

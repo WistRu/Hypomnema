@@ -43,6 +43,27 @@ function renderDrawer(
   const queryClient = new QueryClient();
   queryClient.setQueryData(["tab", tab.id], tab);
   queryClient.setQueryData(["links", tab.id], { items: [] });
+  queryClient.setQueryData(["tags"], {
+    items: [
+      {
+        id: 2,
+        name: "Работа",
+        path: "Работа",
+        color: "#3b82f6",
+        tabCount: 3,
+        children: [
+          {
+            id: 5,
+            name: "ИИ",
+            path: "Работа/ИИ",
+            color: "#8b5cf6",
+            tabCount: 2,
+            children: [],
+          },
+        ],
+      },
+    ],
+  });
 
   return renderToStaticMarkup(
     <I18nProvider initialLocale="en">
@@ -59,6 +80,13 @@ function renderDrawer(
 }
 
 describe("tab drawer browser action", () => {
+  it("offers existing topics when assigning the tab", () => {
+    const markup = renderDrawer(tabDetail(true));
+
+    expect(markup).toContain('<option value="Работа"></option>');
+    expect(markup).toContain('<option value="Работа/ИИ"></option>');
+  });
+
   it("shows the default topic without a removal action", () => {
     const tab = tabDetail(true);
     tab.tags = [
