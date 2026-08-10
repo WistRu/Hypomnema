@@ -101,24 +101,46 @@ const selectedGraphCte = `
       JOIN selected_topic_ids ON selected_topic_ids.id = tab_tags.tag_id
       WHERE @rootTopicId IS NOT NULL
     ),
+    visible_entities(id) AS MATERIALIZED (
+      SELECT knowledge_entities.id
+      FROM knowledge_entities
+      LEFT JOIN tags
+        ON knowledge_entities.kind = 'topic'
+       AND tags.id = knowledge_entities.topic_id
+      WHERE knowledge_entities.kind = 'tab'
+         OR (
+           knowledge_entities.kind = 'topic'
+           AND tags.system_kind IS NULL
+         )
+    ),
     core_entities(id) AS (
       SELECT knowledge_entities.id
       FROM knowledge_entities
       JOIN selected_tabs ON selected_tabs.id = knowledge_entities.tab_id
+      JOIN visible_entities ON visible_entities.id = knowledge_entities.id
       WHERE knowledge_entities.kind = 'tab'
       UNION ALL
       SELECT knowledge_entities.id
       FROM knowledge_entities
       JOIN selected_topic_ids
         ON selected_topic_ids.id = knowledge_entities.topic_id
+      JOIN visible_entities ON visible_entities.id = knowledge_entities.id
       WHERE knowledge_entities.kind = 'topic'
     ),
     graph_connections(from_entity_id, to_entity_id) AS (
       SELECT from_entity_id, to_entity_id
       FROM relations
+      JOIN visible_entities AS visible_from
+        ON visible_from.id = relations.from_entity_id
+      JOIN visible_entities AS visible_to
+        ON visible_to.id = relations.to_entity_id
       UNION
       SELECT to_entity_id, from_entity_id
       FROM relations
+      JOIN visible_entities AS visible_from
+        ON visible_from.id = relations.from_entity_id
+      JOIN visible_entities AS visible_to
+        ON visible_to.id = relations.to_entity_id
       UNION
       SELECT parent_entity.id, child_entity.id
       FROM tags AS child
@@ -128,6 +150,10 @@ const selectedGraphCte = `
       JOIN knowledge_entities AS parent_entity
         ON parent_entity.kind = 'topic'
        AND parent_entity.topic_id = child.parent_id
+      JOIN visible_entities AS visible_child
+        ON visible_child.id = child_entity.id
+      JOIN visible_entities AS visible_parent
+        ON visible_parent.id = parent_entity.id
       WHERE child.parent_id IS NOT NULL
       UNION
       SELECT child_entity.id, parent_entity.id
@@ -138,6 +164,10 @@ const selectedGraphCte = `
       JOIN knowledge_entities AS parent_entity
         ON parent_entity.kind = 'topic'
        AND parent_entity.topic_id = child.parent_id
+      JOIN visible_entities AS visible_child
+        ON visible_child.id = child_entity.id
+      JOIN visible_entities AS visible_parent
+        ON visible_parent.id = parent_entity.id
       WHERE child.parent_id IS NOT NULL
       UNION
       SELECT topic_entity.id, tab_entity.id
@@ -148,6 +178,9 @@ const selectedGraphCte = `
       JOIN knowledge_entities AS tab_entity
         ON tab_entity.kind = 'tab'
        AND tab_entity.tab_id = tab_tags.tab_id
+      JOIN visible_entities AS visible_topic
+        ON visible_topic.id = topic_entity.id
+      JOIN visible_entities AS visible_tab ON visible_tab.id = tab_entity.id
       UNION
       SELECT tab_entity.id, topic_entity.id
       FROM tab_tags
@@ -157,10 +190,14 @@ const selectedGraphCte = `
       JOIN knowledge_entities AS tab_entity
         ON tab_entity.kind = 'tab'
        AND tab_entity.tab_id = tab_tags.tab_id
+      JOIN visible_entities AS visible_topic
+        ON visible_topic.id = topic_entity.id
+      JOIN visible_entities AS visible_tab ON visible_tab.id = tab_entity.id
     ),
     focus_walk(entity_id, depth) AS (
       SELECT knowledge_entities.id, 0
       FROM knowledge_entities
+      JOIN visible_entities ON visible_entities.id = knowledge_entities.id
       WHERE @focusNodeType IS NOT NULL
         AND knowledge_entities.kind = @focusNodeType
         AND (
@@ -188,10 +225,12 @@ const selectedGraphCte = `
       SELECT relations.to_entity_id
       FROM relations
       JOIN core_entities ON core_entities.id = relations.from_entity_id
+      JOIN visible_entities ON visible_entities.id = relations.to_entity_id
       UNION
       SELECT relations.from_entity_id
       FROM relations
       JOIN core_entities ON core_entities.id = relations.to_entity_id
+      JOIN visible_entities ON visible_entities.id = relations.from_entity_id
       UNION
       SELECT id
       FROM focus_entities
@@ -269,6 +308,9 @@ export function createGraphV2Catalog(
     FROM tab_tags
     JOIN graph_tab_ids ON graph_tab_ids.id = tab_tags.tab_id
     JOIN tag_paths ON tag_paths.id = tab_tags.tag_id
+    JOIN tags AS visible_tag
+      ON visible_tag.id = tab_tags.tag_id
+     AND visible_tag.system_kind IS NULL
     ORDER BY
       tab_tags.tab_id,
       tag_paths.path COLLATE NOCASE,

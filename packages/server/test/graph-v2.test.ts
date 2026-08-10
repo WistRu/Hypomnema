@@ -86,6 +86,13 @@ describe("mixed knowledge graph v2 REST behavior", () => {
         { type: "tab", id: ids.Beta! },
         "follows",
       );
+      const defaultTopicRecord = (
+        await app.inject({ method: "GET", url: "/api/tags" })
+      )
+        .json()
+        .items.find((topic: { path: string }) => topic.path === "Без темы") as {
+        id: number;
+      };
 
       const allResponse = await app.inject({
         method: "GET",
@@ -93,15 +100,19 @@ describe("mixed knowledge graph v2 REST behavior", () => {
       });
       expect(allResponse.statusCode).toBe(200);
       const all = graphV2ResponseSchema.parse(allResponse.json());
-      expect(all.nodes).toHaveLength(7);
+      expect(all.nodes).toHaveLength(6);
       const defaultTopic = all.nodes.find(
         (node) => node.type === "topic" && node.path === "Без темы",
       );
-      expect(defaultTopic).toMatchObject({
-        type: "topic",
-        directTabCount: 1,
-        tabCount: 1,
-      });
+      expect(defaultTopic).toBeUndefined();
+      expect(all.nodes).toContainEqual(
+        expect.objectContaining({
+          type: "tab",
+          id: ids.Untagged,
+          tagPaths: [],
+          rootTags: [],
+        }),
+      );
       expect(all.nodes).toContainEqual(
         expect.objectContaining({
           type: "topic",
@@ -127,16 +138,18 @@ describe("mixed knowledge graph v2 REST behavior", () => {
             id: `relation:${cryptoToResearch.id}`,
             edgeType: "relation",
           }),
-          expect.objectContaining({
-            id: `membership:${defaultTopic!.id}:${ids.Untagged}`,
-            edgeType: "membership",
-          }),
         ]),
       );
+      expect(
+        all.edges.some(
+          (edge) =>
+            edge.id === `membership:${defaultTopicRecord.id}:${ids.Untagged}`,
+        ),
+      ).toBe(false);
 
       const defaultFilteredResponse = await app.inject({
         method: "GET",
-        url: `/api/graph/v2?root_topic_id=${defaultTopic!.id}`,
+        url: `/api/graph/v2?root_topic_id=${defaultTopicRecord.id}`,
       });
       expect(defaultFilteredResponse.statusCode).toBe(200);
       const defaultFiltered = graphV2ResponseSchema.parse(
@@ -146,16 +159,12 @@ describe("mixed knowledge graph v2 REST behavior", () => {
         new Set(defaultFiltered.nodes.map((node) => `${node.type}:${node.id}`)),
       ).toEqual(
         new Set([
-          `topic:${defaultTopic!.id}`,
           `topic:${research.id}`,
           `tab:${ids.Untagged}`,
         ]),
       );
       expect(defaultFiltered.edges.map((edge) => edge.id)).toEqual(
-        expect.arrayContaining([
-          `membership:${defaultTopic!.id}:${ids.Untagged}`,
-          `relation:${researchToUntagged.id}`,
-        ]),
+        [`relation:${researchToUntagged.id}`],
       );
 
       const filteredResponse = await app.inject({

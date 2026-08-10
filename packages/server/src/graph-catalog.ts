@@ -100,6 +100,9 @@ export function createGraphCatalog(
     FROM tab_tags
     JOIN selected_tabs ON selected_tabs.id = tab_tags.tab_id
     JOIN tag_paths ON tag_paths.id = tab_tags.tag_id
+    JOIN tags AS visible_tag
+      ON visible_tag.id = tab_tags.tag_id
+     AND visible_tag.system_kind IS NULL
     ORDER BY tab_tags.tab_id, tag_paths.path COLLATE NOCASE, tag_paths.path,
       tag_paths.id
   `);

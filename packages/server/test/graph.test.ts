@@ -130,11 +130,27 @@ describe("tab graph REST behavior", () => {
             status: "inbox",
             importance: 0,
             isOpen: true,
-            tagPaths: ["Без темы"],
-            rootTags: ["Без темы"],
+            tagPaths: [],
+            rootTags: [],
           },
         ],
         edges: [betaToAlpha.json(), alphaToBeta.json()],
+      });
+
+      const defaultFiltered = await app.inject({
+        method: "GET",
+        url: `/api/graph?root_tag=${encodeURIComponent("Без темы")}`,
+      });
+      expect(defaultFiltered.statusCode).toBe(200);
+      expect(defaultFiltered.json()).toEqual({
+        nodes: [
+          expect.objectContaining({
+            id: ids.Gamma,
+            tagPaths: [],
+            rootTags: [],
+          }),
+        ],
+        edges: [],
       });
     } finally {
       await app.close();
