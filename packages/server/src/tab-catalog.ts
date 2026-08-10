@@ -19,6 +19,7 @@ import type {
 } from "@tabhub/shared";
 
 import { normalizeUrl } from "./normalize-url.js";
+import { stableBrowserOrderSql } from "./stable-tab-order.js";
 import type { TabInstanceCatalog } from "./tab-instance-catalog.js";
 
 export interface FilterTabsInput {
@@ -535,10 +536,10 @@ export function createTabCatalog(
         predicates.length > 0 ? `WHERE ${predicates.join(" AND ")}` : "";
       const rows = connection
         .prepare(
-          `SELECT tabs.id
+          `SELECT tabs.id, tabs.browser AS browser
            FROM tabs
            ${whereClause}
-           ORDER BY tabs.last_seen_at DESC, tabs.id DESC`,
+           ORDER BY ${stableBrowserOrderSql}, tabs.id`,
         )
         .all(...parameters) as TabIdRow[];
       return { ids: rows.map(({ id }) => id) };
@@ -547,14 +548,14 @@ export function createTabCatalog(
     listTabs(input) {
       const { parameters, predicates } = tabFilter(input);
 
-      let semanticOrderClause = "tabs.last_seen_at DESC, tabs.id DESC";
+      let orderClause = `${stableBrowserOrderSql}, tabs.id`;
       if (input.rankedPage !== undefined) {
         if (input.rankedPage.ids.length === 0) {
           predicates.push("0");
         } else {
           const rankedIds = input.rankedPage.ids.join(", ");
           predicates.push(`tabs.id IN (${rankedIds})`);
-          semanticOrderClause = `CASE tabs.id ${input.rankedPage.ids
+          orderClause = `CASE tabs.id ${input.rankedPage.ids
             .map((id, rank) => `WHEN ${id} THEN ${rank}`)
             .join(" ")} ELSE ${input.rankedPage.ids.length} END`;
         }
@@ -594,7 +595,7 @@ export function createTabCatalog(
            FROM tabs
            LEFT JOIN contents ON contents.tab_id = tabs.id
            ${whereClause}
-           ORDER BY ${semanticOrderClause}
+           ORDER BY ${orderClause}
            LIMIT ? OFFSET ?`,
         )
         .all(...parameters, input.pageSize, offset) as TabRow[];

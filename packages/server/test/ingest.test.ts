@@ -7,28 +7,42 @@ import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 
 describe("tab snapshot ingestion", () => {
-  it("keeps the same URL from different browsers as separate tabs", async () => {
+  it("keeps Library browser groups stable when snapshots arrive", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-ingest-"));
+    let now = new Date("2026-08-08T18:00:00.000Z");
     const app = createApp({
       databasePath: join(directory, "tabhub.sqlite"),
       logger: false,
+      clock: () => now,
     });
 
     try {
-      for (const browser of ["chrome", "edge", "yandex"]) {
+      for (const [index, browser] of ["chrome", "edge", "yandex"].entries()) {
+        now = new Date(`2026-08-08T18:0${index}:00.000Z`);
+        const tabs = [
+          {
+            url: "https://example.com/article",
+            title: `${browser} article`,
+            windowId: 1,
+            index: 0,
+          },
+          ...(browser === "chrome"
+            ? [
+                {
+                  url: "https://example.com/chrome-second",
+                  title: "chrome second",
+                  windowId: 1,
+                  index: 1,
+                },
+              ]
+            : []),
+        ];
         const response = await app.inject({
           method: "POST",
           url: "/api/ingest/snapshot",
           payload: {
             browser,
-            tabs: [
-              {
-                url: "https://example.com/article",
-                title: `${browser} article`,
-                windowId: 1,
-                index: 0,
-              },
-            ],
+            tabs,
           },
         });
 
@@ -42,15 +56,107 @@ describe("tab snapshot ingestion", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json()).toMatchObject({
-        total: 3,
+        total: 4,
         page: 1,
         pageSize: 50,
         items: [
+          { browser: "chrome", url: "https://example.com/article" },
+          { browser: "chrome", url: "https://example.com/chrome-second" },
           { browser: "yandex", url: "https://example.com/article" },
           { browser: "edge", url: "https://example.com/article" },
-          { browser: "chrome", url: "https://example.com/article" },
         ],
       });
+      const initialIds = response
+        .json()
+        .items.map(({ id }: { id: number }) => id) as number[];
+
+      now = new Date("2026-08-08T18:03:00.000Z");
+      await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          tabs: [
+            {
+              url: "https://example.com/chrome-second",
+              title: "refreshed chrome second",
+              windowId: 1,
+              index: 1,
+            },
+            {
+              url: "https://example.com/article",
+              title: "refreshed chrome article",
+              windowId: 1,
+              index: 0,
+            },
+          ],
+        },
+      });
+      const refreshed = await app.inject({
+        method: "GET",
+        url: "/api/tabs?pageSize=50",
+      });
+      expect(
+        refreshed.json().items.map(({ browser }: { browser: string }) => browser),
+      ).toEqual(["chrome", "chrome", "yandex", "edge"]);
+      expect(
+        refreshed.json().items.map(({ id }: { id: number }) => id),
+      ).toEqual(initialIds);
+
+      const bulkIds = await app.inject({
+        method: "GET",
+        url: "/api/tabs/bulk-ids",
+      });
+      expect(bulkIds.json().ids).toEqual(initialIds);
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("orders other and custom browser labels deterministically", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-browser-order-"));
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+    });
+
+    try {
+      for (const browser of ["zeta", "arc", "other", "Arc"]) {
+        const response = await app.inject({
+          method: "POST",
+          url: "/api/ingest/snapshot",
+          payload: {
+            browser,
+            tabs: [
+              {
+                url: `https://example.com/${browser}`,
+                title: browser,
+                windowId: 1,
+                index: 0,
+              },
+            ],
+          },
+        });
+        expect(response.statusCode).toBe(200);
+      }
+
+      const listed = await app.inject({
+        method: "GET",
+        url: "/api/tabs?pageSize=50",
+      });
+      const browsers = listed
+        .json()
+        .items.map(({ browser }: { browser: string }) => browser);
+      expect(browsers).toEqual(["other", "Arc", "arc", "zeta"]);
+
+      const bulkIds = await app.inject({
+        method: "GET",
+        url: "/api/tabs/bulk-ids",
+      });
+      expect(bulkIds.json().ids).toEqual(
+        listed.json().items.map(({ id }: { id: number }) => id),
+      );
     } finally {
       await app.close();
       await rm(directory, { recursive: true, force: true });

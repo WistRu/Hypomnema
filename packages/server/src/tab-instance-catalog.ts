@@ -11,6 +11,7 @@ import type {
 } from "@tabhub/shared";
 
 import { normalizeUrl } from "./normalize-url.js";
+import { stableBrowserOrderSql } from "./stable-tab-order.js";
 
 export interface FilterTabInstancesInput {
   browser: string | undefined;
@@ -696,7 +697,13 @@ export function createTabInstanceCatalog(
           SELECT *
           FROM instances
           ${whereClause}
-          ORDER BY last_seen_at DESC, instance_id DESC
+           ORDER BY
+             ${stableBrowserOrderSql},
+             installation_id COLLATE NOCASE,
+             installation_id,
+             window_id,
+             tab_index,
+             instance_id
           LIMIT ? OFFSET ?
         `)
         .all(...parameters, input.pageSize, offset) as TabInstanceRow[];
@@ -721,7 +728,13 @@ export function createTabInstanceCatalog(
             SELECT *
             FROM instances
             ${whereClause}
-            ORDER BY last_seen_at DESC, instance_id DESC
+             ORDER BY
+               ${stableBrowserOrderSql},
+               installation_id COLLATE NOCASE,
+               installation_id,
+               window_id,
+               tab_index,
+               instance_id
           `)
           .all(...parameters) as TabInstanceRow[];
         const tagPathsByTab = loadTagPaths(rows);

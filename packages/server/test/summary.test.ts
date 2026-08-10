@@ -614,7 +614,7 @@ describe("summary jobs", () => {
           maxActive = Math.max(maxActive, active);
           await new Promise((resolve) => setImmediate(resolve));
           active -= 1;
-          return summaryResult(`Bulk marker ${input.tabId}.`);
+          return summaryResult(`BulkMarkerTab${input.tabId}Unique.`);
         },
       };
       const app = createApp({
@@ -686,7 +686,9 @@ describe("summary jobs", () => {
 
         const search = await app.inject({
           method: "GET",
-          url: `/api/tabs?q=${encodeURIComponent(`Bulk marker ${ids[0]}`)}`,
+          url: `/api/tabs?q=${encodeURIComponent(
+            `BulkMarkerTab${ids[0]}Unique`,
+          )}`,
         });
         expect(search.json().total).toBe(1);
       } finally {

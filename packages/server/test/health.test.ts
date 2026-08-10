@@ -82,7 +82,7 @@ describe("GET /api/health", () => {
     const app = createApp({ databasePath, logger: false });
     try {
       const health = await app.inject({ method: "GET", url: "/api/health" });
-      expect(health.json().schemaVersion).toBe(12);
+      expect(health.json().schemaVersion).toBe(13);
 
       const physical = await app.inject({
         method: "GET",
@@ -201,8 +201,9 @@ describe("GET /api/health", () => {
 
   it("reports a migrated, ready local database", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-health-"));
+    const databasePath = join(directory, "tabhub.sqlite");
     const app = createApp({
-      databasePath: join(directory, "tabhub.sqlite"),
+      databasePath,
       logger: false,
     });
 
@@ -216,8 +217,39 @@ describe("GET /api/health", () => {
       expect(healthResponseSchema.parse(response.json())).toEqual({
         status: "ok",
         database: "ok",
-        schemaVersion: 12,
+        schemaVersion: 13,
       });
+
+      const database = new Database(databasePath, { readonly: true });
+      try {
+        const queryPlan = database
+          .prepare(`
+            EXPLAIN QUERY PLAN
+            SELECT tabs.id, tabs.browser AS browser
+            FROM tabs
+            ORDER BY
+              CASE browser
+                WHEN 'chrome' THEN 0
+                WHEN 'yandex' THEN 1
+                WHEN 'edge' THEN 2
+                WHEN 'other' THEN 3
+                ELSE 4
+              END,
+              browser COLLATE NOCASE,
+              browser,
+              tabs.id
+          `)
+          .all() as Array<{ detail: string }>;
+        expect(queryPlan.some(({ detail }) => detail.includes("USE TEMP B-TREE")))
+          .toBe(false);
+        expect(
+          queryPlan.some(({ detail }) =>
+            detail.includes("tabs_stable_browser_id_idx"),
+          ),
+        ).toBe(true);
+      } finally {
+        database.close();
+      }
     } finally {
       await app.close();
       await rm(directory, { recursive: true, force: true });
@@ -243,7 +275,7 @@ describe("GET /api/health", () => {
 
         expect(response.statusCode).toBe(200);
         expect(healthResponseSchema.parse(response.json()).schemaVersion).toBe(
-          12,
+          13,
         );
       } finally {
         await reopenedApp.close();
@@ -298,7 +330,7 @@ describe("GET /api/health", () => {
         method: "GET",
         url: "/api/health",
       });
-      expect(healthResponse.json().schemaVersion).toBe(12);
+      expect(healthResponse.json().schemaVersion).toBe(13);
 
       const physicalResponse = await app.inject({
         method: "GET",
@@ -395,7 +427,7 @@ describe("GET /api/health", () => {
     try {
       const response = await app.inject({ method: "GET", url: "/api/health" });
       expect(response.statusCode).toBe(200);
-      expect(response.json().schemaVersion).toBe(12);
+      expect(response.json().schemaVersion).toBe(13);
 
       const tags = await app.inject({ method: "GET", url: "/api/tags" });
       const paths = tags

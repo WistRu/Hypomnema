@@ -154,6 +154,119 @@ describe("physical tab instances", () => {
     }
   });
 
+  it("keeps Open Tabs browser and tab-strip order stable across snapshots", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-stable-open-order-"));
+    let now = new Date("2026-08-09T10:00:00.000Z");
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+      clock: () => now,
+    });
+    const chromeInstallation = "1d2a8998-781b-483e-b0ed-634886f02872";
+    const yandexInstallation = "fd7b3a6f-a744-43dc-bd77-457dac704172";
+    const chromeTabs = [
+      {
+        tabId: 102,
+        url: "https://example.com/chrome-second",
+        windowId: 2,
+        index: 1,
+      },
+      {
+        tabId: 101,
+        url: "https://example.com/chrome-first",
+        windowId: 1,
+        index: 0,
+      },
+    ];
+    const yandexTabs = [
+      {
+        tabId: 202,
+        url: "https://example.com/yandex-second",
+        windowId: 4,
+        index: 1,
+      },
+      {
+        tabId: 201,
+        url: "https://example.com/yandex-first",
+        windowId: 3,
+        index: 0,
+      },
+    ];
+
+    try {
+      await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          installationId: chromeInstallation,
+          tabs: chromeTabs,
+        },
+      });
+      now = new Date("2026-08-09T10:01:00.000Z");
+      await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "yandex",
+          installationId: yandexInstallation,
+          tabs: yandexTabs,
+        },
+      });
+
+      const before = await app.inject({
+        method: "GET",
+        url: "/api/tab-instances?pageSize=50",
+      });
+      const beforeItems = before.json().items as Array<{
+        instanceId: number;
+        browser: string;
+        url: string;
+      }>;
+      expect(beforeItems.map(({ browser }) => browser)).toEqual([
+        "chrome",
+        "chrome",
+        "yandex",
+        "yandex",
+      ]);
+      expect(beforeItems.map(({ url }) => url)).toEqual([
+        "https://example.com/chrome-first",
+        "https://example.com/chrome-second",
+        "https://example.com/yandex-first",
+        "https://example.com/yandex-second",
+      ]);
+
+      now = new Date("2026-08-09T10:02:00.000Z");
+      await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          installationId: chromeInstallation,
+          tabs: [...chromeTabs].reverse(),
+        },
+      });
+      const after = await app.inject({
+        method: "GET",
+        url: "/api/tab-instances?pageSize=50",
+      });
+      expect(
+        after.json().items.map(({ instanceId }: { instanceId: number }) => instanceId),
+      ).toEqual(beforeItems.map(({ instanceId }) => instanceId));
+
+      const bulk = await app.inject({
+        method: "GET",
+        url: "/api/tab-instances/bulk",
+      });
+      expect(
+        bulk.json().items.map(({ instanceId }: { instanceId: number }) => instanceId),
+      ).toEqual(beforeItems.map(({ instanceId }) => instanceId));
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("returns every filtered physical occurrence from the bulk endpoint without a page limit", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-instance-bulk-"));
     const app = createApp({
