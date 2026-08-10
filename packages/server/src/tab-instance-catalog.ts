@@ -189,6 +189,12 @@ function installationIdFor(snapshot: IngestSnapshot): string {
   return snapshot.installationId ?? `legacy:${snapshot.browser}`;
 }
 
+const staleInstallationSnapshotTtlMs = 30 * 60 * 1_000;
+
+function staleInstallationCutoff(now: string): string {
+  return new Date(Date.parse(now) - staleInstallationSnapshotTtlMs).toISOString();
+}
+
 function instanceKey(tab: IngestSnapshot["tabs"][number]): string {
   return tab.tabId === undefined
     ? `position:${tab.windowId}:${tab.index}`
@@ -259,6 +265,24 @@ export function createTabInstanceCatalog(
     DELETE FROM tab_instances
     WHERE installation_id = ?
       AND instance_key LIKE 'position:%'
+  `);
+  const deleteStaleBrowserInstallations = connection.prepare(`
+    DELETE FROM tab_instances
+    WHERE installation_id != @installationId
+      AND tab_id IN (
+        SELECT id
+        FROM tabs
+        WHERE browser = @browser
+      )
+      AND installation_id IN (
+        SELECT candidates.installation_id
+        FROM tab_instances AS candidates
+        JOIN tabs AS candidate_tabs ON candidate_tabs.id = candidates.tab_id
+        WHERE candidate_tabs.browser = @browser
+          AND candidates.installation_id != @installationId
+        GROUP BY candidates.installation_id
+        HAVING MAX(candidates.last_seen_at) < @cutoff
+      )
   `);
   const selectCanonicalTab = connection.prepare(`
     SELECT id
@@ -639,6 +663,14 @@ export function createTabInstanceCatalog(
           pinned: tab.pinned === true ? 1 : 0,
           lastAccessed: tab.lastAccessed ?? null,
           now,
+        });
+      }
+
+      if (snapshot.installationId !== undefined) {
+        deleteStaleBrowserInstallations.run({
+          installationId,
+          browser: snapshot.browser,
+          cutoff: staleInstallationCutoff(now),
         });
       }
 

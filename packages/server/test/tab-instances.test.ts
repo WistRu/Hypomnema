@@ -626,6 +626,202 @@ describe("physical tab instances", () => {
     }
   });
 
+  it("evicts stale installation snapshots when the same browser reports fresh state", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-stale-installation-"));
+    let now = new Date("2026-08-09T10:00:00.000Z");
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+      clock: () => now,
+    });
+    const staleInstallation = "4b710e63-c61e-475f-a3ea-017311cb9001";
+    const secondStaleInstallation = "895f2609-909f-4ed2-bda1-43c46b79d460";
+    const currentInstallation = "3038bd7e-08c1-4509-af09-5cf68eba2187";
+    const yandexInstallation = "fd7b3a6f-a744-43dc-bd77-457dac704172";
+
+    try {
+      await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "edge",
+          installationId: staleInstallation,
+          tabs: [
+            {
+              tabId: 101,
+              url: "http://127.0.0.1:7717/app/",
+              title: "TabHub",
+              windowId: 1,
+              index: 0,
+            },
+            {
+              tabId: 102,
+              url: "https://example.com/shared",
+              windowId: 1,
+              index: 1,
+            },
+          ],
+        },
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "edge",
+          installationId: secondStaleInstallation,
+          tabs: [
+            {
+              tabId: 303,
+              url: "http://127.0.0.1:7717/app/",
+              title: "TabHub",
+              windowId: 3,
+              index: 0,
+            },
+          ],
+        },
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "yandex",
+          installationId: yandexInstallation,
+          tabs: [
+            {
+              tabId: 404,
+              url: "https://example.com/yandex",
+              windowId: 4,
+              index: 0,
+            },
+          ],
+        },
+      });
+
+      const currentPayload = {
+        browser: "edge" as const,
+        installationId: currentInstallation,
+        tabs: [
+          {
+            tabId: 202,
+            url: "https://example.com/current",
+            windowId: 2,
+            index: 0,
+          },
+          {
+            tabId: 203,
+            url: "https://example.com/shared",
+            windowId: 2,
+            index: 1,
+          },
+        ],
+      };
+      now = new Date("2026-08-09T10:29:00.000Z");
+      const recent = await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: currentPayload,
+      });
+      expect(recent.json()).toEqual({ upserted: 2, closed: 0 });
+      const recentPhysical = await app.inject({
+        method: "GET",
+        url: "/api/tab-instances?browser=edge&pageSize=50",
+      });
+      expect(recentPhysical.json().total).toBe(5);
+
+      now = new Date("2026-08-09T10:30:00.000Z");
+      const exactBoundary = await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: currentPayload,
+      });
+      expect(exactBoundary.json()).toEqual({ upserted: 2, closed: 0 });
+      const boundaryPhysical = await app.inject({
+        method: "GET",
+        url: "/api/tab-instances?browser=edge&pageSize=50",
+      });
+      expect(boundaryPhysical.json().total).toBe(5);
+
+      now = new Date("2026-08-09T10:31:00.000Z");
+      const current = await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: currentPayload,
+      });
+      expect(current.json()).toEqual({ upserted: 2, closed: 1 });
+
+      const physical = await app.inject({
+        method: "GET",
+        url: "/api/tab-instances?browser=edge&pageSize=50",
+      });
+      expect(physical.json()).toMatchObject({
+        total: 2,
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            installationId: currentInstallation,
+            url: "https://example.com/current",
+          }),
+          expect.objectContaining({
+            installationId: currentInstallation,
+            url: "https://example.com/shared",
+          }),
+        ]),
+      });
+
+      const allPhysical = await app.inject({
+        method: "GET",
+        url: "/api/tab-instances?pageSize=50",
+      });
+      expect(allPhysical.json()).toMatchObject({
+        total: 3,
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            browser: "yandex",
+            installationId: yandexInstallation,
+            url: "https://example.com/yandex",
+          }),
+        ]),
+      });
+
+      const library = await app.inject({
+        method: "GET",
+        url: "/api/tabs?browser=edge&pageSize=50",
+      });
+      expect(library.json().items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            urlNormalized: "http://127.0.0.1:7717/app/",
+            isOpen: false,
+            closedAt: "2026-08-09T10:31:00.000Z",
+          }),
+          expect.objectContaining({
+            urlNormalized: "https://example.com/current",
+            isOpen: true,
+          }),
+          expect.objectContaining({
+            urlNormalized: "https://example.com/shared",
+            isOpen: true,
+          }),
+        ]),
+      );
+
+      const yandexLibrary = await app.inject({
+        method: "GET",
+        url: "/api/tabs?browser=yandex&is_open=true&pageSize=50",
+      });
+      expect(yandexLibrary.json()).toMatchObject({
+        total: 1,
+        items: [
+          expect.objectContaining({
+            urlNormalized: "https://example.com/yandex",
+          }),
+        ],
+      });
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("closes the previous browser identity when one installation switches browsers without an empty transition snapshot", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-identity-switch-"));
     let now = new Date("2026-08-09T10:00:00.000Z");
