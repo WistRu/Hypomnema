@@ -486,7 +486,7 @@ export function TabDrawer({
 
             <section className="drawer-section" aria-labelledby={`${headingId}-tags`}>
               <div className="section-heading">
-                <h3 id={`${headingId}-tags`}>{t("Tags")}</h3>
+                <h3 id={`${headingId}-tags`}>{t("Topics")}</h3>
                 <span>{formatNumber(tab.tags.length)}</span>
               </div>
               {tab.tags.length > 0 ? (
@@ -498,9 +498,9 @@ export function TabDrawer({
                         {tag.assignedBy === "agent" ? t("Agent") : t("User")}
                       </span>
                       <button
-                        aria-label={t("Remove {tag}, assigned by {source}", {
+                        aria-label={t("Remove {topic}, assigned by {source}", {
                           source: tag.assignedBy === "agent" ? t("Agent") : t("User"),
-                          tag: tag.path,
+                          topic: tag.path,
                         })}
                         disabled={unassignMutation.isPending}
                         title={t("Assigned by {source}", {
@@ -515,7 +515,7 @@ export function TabDrawer({
                   ))}
                 </ul>
               ) : (
-                <p className="muted-copy">{t("No tags assigned.")}</p>
+                <p className="muted-copy">{t("No topics assigned.")}</p>
               )}
               <form
                 className="inline-form"
@@ -525,7 +525,7 @@ export function TabDrawer({
                 }}
               >
                 <label>
-                  <span>{t("Tag path")}</span>
+                  <span>{t("Topic path")}</span>
                   <input
                     disabled={assignMutation.isPending}
                     maxLength={2_048}
@@ -536,7 +536,7 @@ export function TabDrawer({
                   />
                 </label>
                 <button disabled={assignMutation.isPending || !tagPath.trim()} type="submit">
-                  {t("Assign")}
+                  {t("Assign topic")}
                 </button>
               </form>
             </section>

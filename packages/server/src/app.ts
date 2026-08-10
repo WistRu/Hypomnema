@@ -31,6 +31,10 @@ import type { EmbeddingProvider } from "./embedding-provider.js";
 import { registerEmbeddingRoutes } from "./embedding-routes.js";
 import { createGraphCatalog } from "./graph-catalog.js";
 import { registerGraphRoutes } from "./graph-routes.js";
+import { createGraphV2Catalog } from "./graph-v2-catalog.js";
+import { registerGraphV2Routes } from "./graph-v2-routes.js";
+import { createRelationCatalog } from "./relation-catalog.js";
+import { registerRelationRoutes } from "./relation-routes.js";
 import { registerRequestSecurity } from "./request-security.js";
 import { createWorkspaceCatalog } from "./workspace-catalog.js";
 import { registerWorkspaceRoutes } from "./workspace-routes.js";
@@ -106,6 +110,8 @@ export function createApp(options: CreateAppOptions): TabHubApp {
     options.clock,
   );
   const graphCatalog = createGraphCatalog(database.connection);
+  const graphV2Catalog = createGraphV2Catalog(database.connection);
+  const relationCatalog = createRelationCatalog(database.connection);
   const workspaceCatalog = createWorkspaceCatalog(
     database.connection,
     options.clock,
@@ -207,6 +213,8 @@ export function createApp(options: CreateAppOptions): TabHubApp {
   registerLinkRoutes(app, linkCatalog);
   registerEmbeddingRoutes(app, embeddingCatalog);
   registerGraphRoutes(app, graphCatalog);
+  registerGraphV2Routes(app, graphV2Catalog);
+  registerRelationRoutes(app, relationCatalog);
   registerWorkspaceRoutes(app, workspaceCatalog);
   void app.register(async (relayApp) => {
     registerTabCommandRelayRoutes(relayApp, tabCommandRelay, {

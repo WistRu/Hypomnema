@@ -620,16 +620,28 @@ describe("tab management REST behavior", () => {
       .run(tabId, "foo", null);
     database
       .prepare(
-        `INSERT INTO links (from_tab, to_tab, kind, note, created_by)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO relations (
+           from_entity_id, to_entity_id, kind, note, created_by
+         )
+         SELECT from_entity.id, to_entity.id, ?, ?, ?
+         FROM knowledge_entities AS from_entity
+         CROSS JOIN knowledge_entities AS to_entity
+         WHERE from_entity.kind = 'tab' AND from_entity.tab_id = ?
+           AND to_entity.kind = 'tab' AND to_entity.tab_id = ?`,
       )
-      .run(tabId, relatedTabId, "follows", "outbound", "user");
+      .run("follows", "outbound", "user", tabId, relatedTabId);
     database
       .prepare(
-        `INSERT INTO links (from_tab, to_tab, kind, note, created_by)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO relations (
+           from_entity_id, to_entity_id, kind, note, created_by
+         )
+         SELECT from_entity.id, to_entity.id, ?, ?, ?
+         FROM knowledge_entities AS from_entity
+         CROSS JOIN knowledge_entities AS to_entity
+         WHERE from_entity.kind = 'tab' AND from_entity.tab_id = ?
+           AND to_entity.kind = 'tab' AND to_entity.tab_id = ?`,
       )
-      .run(relatedTabId, tabId, "related", null, "agent");
+      .run("related", null, "agent", relatedTabId, tabId);
     const insertTag = database.prepare(
       "INSERT INTO tags (name, parent_id) VALUES (?, NULL)",
     );

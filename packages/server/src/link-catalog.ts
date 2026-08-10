@@ -60,20 +60,56 @@ export function createLinkCatalog(
   connection: Database.Database,
 ): LinkCatalog {
   const selectAll = connection.prepare(`
-    SELECT id, from_tab, to_tab, kind, note, created_by
-      FROM links
-     ORDER BY id ASC
+    SELECT
+      relations.id,
+      from_entity.tab_id AS from_tab,
+      to_entity.tab_id AS to_tab,
+      relations.kind,
+      relations.note,
+      relations.created_by
+    FROM relations
+    JOIN knowledge_entities AS from_entity
+      ON from_entity.id = relations.from_entity_id
+     AND from_entity.kind = 'tab'
+    JOIN knowledge_entities AS to_entity
+      ON to_entity.id = relations.to_entity_id
+     AND to_entity.kind = 'tab'
+    ORDER BY relations.id ASC
   `);
   const selectForTab = connection.prepare(`
-    SELECT id, from_tab, to_tab, kind, note, created_by
-      FROM links
-     WHERE from_tab = ? OR to_tab = ?
-     ORDER BY id ASC
+    SELECT
+      relations.id,
+      from_entity.tab_id AS from_tab,
+      to_entity.tab_id AS to_tab,
+      relations.kind,
+      relations.note,
+      relations.created_by
+    FROM relations
+    JOIN knowledge_entities AS from_entity
+      ON from_entity.id = relations.from_entity_id
+     AND from_entity.kind = 'tab'
+    JOIN knowledge_entities AS to_entity
+      ON to_entity.id = relations.to_entity_id
+     AND to_entity.kind = 'tab'
+    WHERE from_entity.tab_id = ? OR to_entity.tab_id = ?
+    ORDER BY relations.id ASC
   `);
   const selectById = connection.prepare(`
-    SELECT id, from_tab, to_tab, kind, note, created_by
-      FROM links
-     WHERE id = ?
+    SELECT
+      relations.id,
+      from_entity.tab_id AS from_tab,
+      to_entity.tab_id AS to_tab,
+      relations.kind,
+      relations.note,
+      relations.created_by
+    FROM relations
+    JOIN knowledge_entities AS from_entity
+      ON from_entity.id = relations.from_entity_id
+     AND from_entity.kind = 'tab'
+    JOIN knowledge_entities AS to_entity
+      ON to_entity.id = relations.to_entity_id
+     AND to_entity.kind = 'tab'
+    WHERE relations.id = ?
   `);
   const selectEndpointTabs = connection.prepare(`
     SELECT id
@@ -82,16 +118,54 @@ export function createLinkCatalog(
      ORDER BY id ASC
   `);
   const insertLink = connection.prepare(`
-    INSERT INTO links (from_tab, to_tab, kind, note, created_by)
-    VALUES (@from, @to, @kind, @note, @createdBy)
+    INSERT INTO relations (
+      from_entity_id,
+      to_entity_id,
+      kind,
+      note,
+      created_by
+    )
+    SELECT
+      from_entity.id,
+      to_entity.id,
+      @kind,
+      @note,
+      @createdBy
+    FROM knowledge_entities AS from_entity
+    CROSS JOIN knowledge_entities AS to_entity
+    WHERE from_entity.kind = 'tab'
+      AND from_entity.tab_id = @from
+      AND to_entity.kind = 'tab'
+      AND to_entity.tab_id = @to
   `);
   const updateLink = connection.prepare(`
-    UPDATE links
+    UPDATE relations
        SET kind = CASE WHEN @hasKind = 1 THEN @kind ELSE kind END,
            note = CASE WHEN @hasNote = 1 THEN @note ELSE note END
      WHERE id = @id
+       AND EXISTS (
+         SELECT 1
+         FROM knowledge_entities AS from_entity
+         JOIN knowledge_entities AS to_entity
+           ON to_entity.id = relations.to_entity_id
+         WHERE from_entity.id = relations.from_entity_id
+           AND from_entity.kind = 'tab'
+           AND to_entity.kind = 'tab'
+       )
   `);
-  const deleteLink = connection.prepare("DELETE FROM links WHERE id = ?");
+  const deleteLink = connection.prepare(`
+    DELETE FROM relations
+    WHERE id = ?
+      AND EXISTS (
+        SELECT 1
+        FROM knowledge_entities AS from_entity
+        JOIN knowledge_entities AS to_entity
+          ON to_entity.id = relations.to_entity_id
+        WHERE from_entity.id = relations.from_entity_id
+          AND from_entity.kind = 'tab'
+          AND to_entity.kind = 'tab'
+      )
+  `);
 
   const createTransaction = connection.transaction(
     (input: CreateLink): TabLink => {

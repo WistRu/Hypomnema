@@ -72,6 +72,43 @@ describe("translations", () => {
     expect(tabs(21)).toBe("21 вкладка");
   });
 
+  it("uses topic terminology for hierarchical grouping and graph counts", () => {
+    const topics = (count: number) =>
+      translate("ru", "{count} topics", {
+        count: String(count),
+        rawCount: count,
+      });
+
+    expect(topics(1)).toBe("1 тема");
+    expect(topics(2)).toBe("2 темы");
+    expect(topics(5)).toBe("5 тем");
+    expect(translate("ru", "No topics assigned.")).toBe("Темы не назначены.");
+    expect(
+      translate("ru", "Remove {topic}, assigned by {source}", {
+        source: "Пользователь",
+        topic: "Работа/Крипта",
+      }),
+    ).toBe("Удалить тему Работа/Крипта, назначенную: Пользователь");
+  });
+
+  it("localizes structured topic and relation API errors without exposing server English", () => {
+    const conflict = Object.assign(
+      new Error("A tag named Crypto already exists under parent 7"),
+      { code: "TAG_CONFLICT" },
+    );
+    const selfRelation = Object.assign(
+      new Error("topic:7 cannot relate to itself"),
+      { code: "SELF_RELATION_NOT_ALLOWED" },
+    );
+
+    expect(localizedErrorMessage("ru", conflict)).toBe(
+      "Тема с таким названием уже существует на этом уровне.",
+    );
+    expect(localizedErrorMessage("ru", selfRelation)).toBe(
+      "Нельзя создать связь узла с самим собой.",
+    );
+  });
+
   it("labels kept and duplicate copies in Russian", () => {
     expect(translate("ru", "Keep this copy")).toBe("Оставить");
     expect(

@@ -1,157 +1,203 @@
-import type { GraphNode, TabLink } from "@tabhub/shared";
+import type { GraphV2Response } from "@tabhub/shared";
 import { describe, expect, it } from "vitest";
 
 import {
-  graphNodeSize,
-  layoutGraphNodes,
-  reachableFollowsBranch,
+  buildGraphScene,
+  graphNodeKey,
+  graphNodeRefFromKey,
+  middleClickTabId,
+  searchGraphNodes,
+  selectGraphProjection,
+  selectGraphNeighborhood,
 } from "../src/graph-model";
 
-function graphNode(
-  id: number,
-  title: string,
-  rootTags: string[],
-  importance: GraphNode["importance"] = 0,
-): GraphNode {
-  return {
-    id,
-    title,
-    url: `https://example.com/${id}`,
-    browser: "chrome",
-    status: "inbox",
-    importance,
-    isOpen: true,
-    tagPaths: rootTags,
-    rootTags,
-  };
-}
+const mixedGraph: GraphV2Response = {
+  nodes: [
+    {
+      type: "topic",
+      id: 10,
+      name: "Work",
+      path: "Work",
+      parentId: null,
+      color: "#6f82ff",
+      directTabCount: 0,
+      tabCount: 1,
+    },
+    {
+      type: "topic",
+      id: 11,
+      name: "Crypto",
+      path: "Work/Crypto",
+      parentId: 10,
+      color: null,
+      directTabCount: 1,
+      tabCount: 1,
+    },
+    {
+      type: "tab",
+      id: 42,
+      title: "Bitcoin research",
+      url: "https://example.com/bitcoin",
+      browser: "chrome",
+      status: "in_progress",
+      importance: 2,
+      isOpen: true,
+      tagPaths: ["Work/Crypto"],
+      rootTags: ["Work"],
+    },
+  ],
+  edges: [
+    {
+      id: "containment:10:11",
+      edgeType: "containment",
+      source: { type: "topic", id: 10 },
+      target: { type: "topic", id: 11 },
+      relationId: null,
+      relationKind: null,
+      note: null,
+      createdBy: null,
+    },
+    {
+      id: "membership:11:42",
+      edgeType: "membership",
+      source: { type: "topic", id: 11 },
+      target: { type: "tab", id: 42 },
+      relationId: null,
+      relationKind: null,
+      note: null,
+      createdBy: null,
+    },
+  ],
+};
 
-function edge(
-  id: number,
-  fromTab: number,
-  toTab: number,
-  kind = "follows",
-): TabLink {
-  return {
-    id,
-    fromTab,
-    toTab,
-    kind,
-    note: null,
-    createdBy: "user",
-  };
-}
+describe("knowledge graph scene", () => {
+  it("keeps tab and topic identities distinct while indexing every mixed edge", () => {
+    const scene = buildGraphScene(mixedGraph);
 
-describe("graph layout", () => {
-  it("is deterministic, groups by first root tag, and sizes importance monotonically", () => {
-    const nodes = [
-      graphNode(3, "Gamma", [], 3),
-      graphNode(2, "Beta", ["Work"], 1),
-      graphNode(1, "Alpha", ["Research", "Work"], 0),
-    ];
-
-    const first = layoutGraphNodes(nodes);
-    const shuffled = layoutGraphNodes([nodes[1]!, nodes[2]!, nodes[0]!]);
-
-    expect(first).toEqual(shuffled);
-    expect(first.groups.map((group) => group.label)).toEqual([
-      "Research",
-      "Untagged",
-      "Work",
+    expect(graphNodeKey({ type: "topic", id: 42 })).toBe("topic:42");
+    expect(graphNodeKey({ type: "tab", id: 42 })).toBe("tab:42");
+    expect(graphNodeRefFromKey("topic:42")).toEqual({
+      type: "topic",
+      id: 42,
+    });
+    expect(scene.nodes.map((node) => node.key)).toEqual([
+      "topic:10",
+      "topic:11",
+      "tab:42",
     ]);
-    expect(graphNodeSize(0).width).toBeLessThan(graphNodeSize(1).width);
-    expect(graphNodeSize(1).height).toBeLessThan(graphNodeSize(3).height);
-  });
-
-  it("uses the selected topic as the deterministic grouping root", () => {
-    const layout = layoutGraphNodes(
-      [graphNode(1, "Alpha", ["Research"]), graphNode(2, "Beta", ["Work"])],
-      "Research/AI",
-    );
-
-    expect(layout.groups).toHaveLength(1);
-    expect(layout.groups[0]).toMatchObject({ label: "Research/AI", count: 2 });
-  });
-
-  it("does not merge an actual Untagged topic with tabs that have no topic", () => {
-    const layout = layoutGraphNodes([
-      graphNode(1, "Actually tagged", ["Untagged"]),
-      graphNode(2, "No topic", []),
+    expect(scene.links.map((link) => [link.sourceKey, link.targetKey])).toEqual([
+      ["topic:10", "topic:11"],
+      ["topic:11", "tab:42"],
     ]);
-
-    expect(layout.groups).toHaveLength(2);
-    expect(new Set(layout.groups.map((group) => group.id)).size).toBe(2);
+    expect(scene.adjacency.get("topic:11")?.map(({ neighborKey }) => neighborKey))
+      .toEqual(["topic:10", "tab:42"]);
   });
 
-  it("localizes the untagged label without changing deterministic en-US ordering", () => {
-    const nodes = [
-      graphNode(1, "Tagged", ["Beta"]),
-      graphNode(2, "No topic", []),
-    ];
-    const english = layoutGraphNodes(nodes);
-    const localized = layoutGraphNodes(
-      [...nodes].reverse(),
-      "",
-      (key) => key === "Untagged" ? "A-localized" : key,
-    );
+  it("selects an undirected neighborhood at the requested depth", () => {
+    const scene = buildGraphScene(mixedGraph);
 
-    expect(localized.groups.map(({ id }) => id)).toEqual(
-      english.groups.map(({ id }) => id),
-    );
-    expect(localized.groups.find(({ id }) => id === "untagged")?.label).toBe(
-      "A-localized",
-    );
+    const oneStep = selectGraphNeighborhood(scene, "topic:10", 1);
+    expect([...oneStep.nodeKeys]).toEqual(["topic:10", "topic:11"]);
+    expect([...oneStep.edgeIds]).toEqual(["containment:10:11"]);
+    expect(oneStep.distances.get("topic:10")).toBe(0);
+    expect(oneStep.distances.get("topic:11")).toBe(1);
+
+    const twoSteps = selectGraphNeighborhood(scene, "topic:10", 2);
+    expect([...twoSteps.nodeKeys]).toEqual([
+      "topic:10",
+      "topic:11",
+      "tab:42",
+    ]);
+    expect([...twoSteps.edgeIds]).toEqual([
+      "containment:10:11",
+      "membership:11:42",
+    ]);
+    expect(twoSteps.distances.get("tab:42")).toBe(2);
+  });
+
+  it("searches relation targets across topic paths and tab metadata", () => {
+    const scene = buildGraphScene(mixedGraph);
+
+    expect(searchGraphNodes(scene, "crypto").map(({ key }) => key)).toEqual([
+      "topic:11",
+      "tab:42",
+    ]);
     expect(
-      localized.nodes.map(({ node, position }) => ({ id: node.id, position })),
-    ).toEqual(
-      english.nodes.map(({ node, position }) => ({ id: node.id, position })),
-    );
+      searchGraphNodes(scene, "bitcoin", { excludeKey: "tab:42" }),
+    ).toEqual([]);
   });
 
-  it("lays out 350 nodes once each with finite stable coordinates", () => {
-    const nodes = Array.from({ length: 350 }, (_, index) =>
-      graphNode(
-        index + 1,
-        `Tab ${String(index + 1).padStart(3, "0")}`,
-        [`Topic ${index % 7}`],
-        (index % 4) as GraphNode["importance"],
+  it("routes only a middle click on a tab node to canonical close", () => {
+    expect(middleClickTabId(mixedGraph.nodes[2], 1)).toBe(42);
+    expect(middleClickTabId(mixedGraph.nodes[2], 0)).toBeNull();
+    expect(middleClickTabId(mixedGraph.nodes[0], 1)).toBeNull();
+    expect(
+      middleClickTabId(
+        { ...mixedGraph.nodes[2]!, type: "tab", isOpen: false },
+        1,
       ),
-    );
-    const startedAt = performance.now();
-    const layout = layoutGraphNodes(nodes);
-    const elapsed = performance.now() - startedAt;
-    const positions = new Set(
-      layout.nodes.map(({ position }) => `${position.x},${position.y}`),
-    );
-
-    expect(layout.nodes).toHaveLength(350);
-    expect(new Set(layout.nodes.map(({ node }) => node.id)).size).toBe(350);
-    expect(positions.size).toBe(350);
-    expect(Number.isFinite(layout.width)).toBe(true);
-    expect(Number.isFinite(layout.height)).toBe(true);
-    expect(layoutGraphNodes([...nodes].reverse())).toEqual(layout);
-    expect(elapsed).toBeLessThan(2_000);
-  });
-});
-
-describe("directed follows branch", () => {
-  it("includes the root and outgoing follows descendants while ignoring incoming and other kinds", () => {
-    const edges = [
-      edge(1, 1, 2),
-      edge(2, 2, 3),
-      edge(3, 4, 1),
-      edge(4, 2, 5, "related"),
-    ];
-
-    expect([...reachableFollowsBranch(1, edges, [1, 2, 3, 4, 5])]).toEqual([
-      1, 2, 3,
-    ]);
+    ).toBeNull();
+    expect(middleClickTabId(null, 1)).toBeNull();
   });
 
-  it("terminates cycles and returns empty when filtering removes the root", () => {
-    const cycle = [edge(1, 1, 2), edge(2, 2, 3), edge(3, 3, 1)];
+  it("handles cycles, dangling edges, and clamps focus depth without looping", () => {
+    const scene = buildGraphScene({
+      ...mixedGraph,
+      edges: [
+        ...mixedGraph.edges,
+        {
+          id: "relation:7",
+          edgeType: "relation",
+          source: { type: "tab", id: 42 },
+          target: { type: "topic", id: 10 },
+          relationId: 7,
+          relationKind: "references",
+          note: null,
+          createdBy: "user",
+        },
+        {
+          id: "relation:8",
+          edgeType: "relation",
+          source: { type: "tab", id: 42 },
+          target: { type: "tab", id: 999 },
+          relationId: 8,
+          relationKind: "missing target",
+          note: null,
+          createdBy: "agent",
+        },
+      ],
+    });
 
-    expect([...reachableFollowsBranch(1, cycle, [1, 2, 3])]).toEqual([1, 2, 3]);
-    expect(reachableFollowsBranch(1, cycle, [2, 3])).toEqual(new Set());
+    expect(scene.links.map(({ id }) => id)).not.toContain("relation:8");
+
+    const minimumDepth = selectGraphNeighborhood(scene, "topic:10", 0);
+    expect(minimumDepth.distances.get("topic:11")).toBe(1);
+    expect(minimumDepth.distances.get("tab:42")).toBe(1);
+    expect([...minimumDepth.nodeKeys]).toHaveLength(3);
+
+    const maximumDepth = selectGraphNeighborhood(scene, "topic:10", 99);
+    expect([...maximumDepth.nodeKeys]).toHaveLength(3);
+    expect([...maximumDepth.edgeIds]).toHaveLength(3);
+
+    const missing = selectGraphNeighborhood(scene, "topic:999", 3);
+    expect([...missing.nodeKeys]).toEqual([]);
+    expect([...missing.edgeIds]).toEqual([]);
+  });
+
+  it("ignores a cached focus projection after focus is cleared", () => {
+    const staleFocus: GraphV2Response = {
+      nodes: [mixedGraph.nodes[0]!],
+      edges: [],
+    };
+
+    expect(selectGraphProjection(mixedGraph, staleFocus, false)).toBe(
+      mixedGraph,
+    );
+    expect(selectGraphProjection(mixedGraph, staleFocus, true)).toBe(
+      staleFocus,
+    );
+    expect(selectGraphProjection(mixedGraph, undefined, true)).toBe(
+      mixedGraph,
+    );
   });
 });

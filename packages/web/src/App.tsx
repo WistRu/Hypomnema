@@ -3,7 +3,6 @@ import {
   type TabImportance,
   type TabListItem,
   type TabStatus,
-  type TagTreeNode,
 } from "@tabhub/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -32,7 +31,6 @@ import {
   fetchAllLibraryTabIds,
   fetchSummaryJob,
   fetchTabs,
-  fetchTagTree,
   updateTabStatuses,
   type LibraryTabFilters,
   type OpenFilter,
@@ -49,6 +47,7 @@ import {
   type WorkspaceView,
 } from "./workspace-view";
 import { TabDrawer } from "./TabDrawer";
+import { TopicSidebar, type SelectedTopic } from "./TopicSidebar";
 import { useCanonicalTabActivation } from "./use-canonical-tab-activation";
 import { useSingleTabClose } from "./use-single-tab-close";
 
@@ -310,43 +309,6 @@ function SummaryAction({ tab }: { tab: TabListItem }) {
   );
 }
 
-function TagBranch({
-  nodes,
-  selectedPath,
-  onSelect,
-}: {
-  nodes: TagTreeNode[];
-  selectedPath: string;
-  onSelect: (path: string) => void;
-}) {
-  const { formatNumber } = useI18n();
-  return (
-    <ul>
-      {nodes.map((node) => (
-        <li key={node.id}>
-          <button
-            aria-current={selectedPath === node.path ? "page" : undefined}
-            className={selectedPath === node.path ? "is-active" : undefined}
-            title={node.path}
-            type="button"
-            onClick={() => onSelect(node.path)}
-          >
-            <span>{node.name}</span>
-            <strong>{formatNumber(node.tabCount)}</strong>
-          </button>
-          {node.children.length > 0 ? (
-            <TagBranch
-              nodes={node.children}
-              selectedPath={selectedPath}
-              onSelect={onSelect}
-            />
-          ) : null}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function Mark() {
   return (
     <div className="mark" aria-hidden="true">
@@ -387,7 +349,7 @@ export function App() {
   const [importance, setImportance] = useState<"all" | TabImportance>("all");
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const [tag, setTag] = useState("");
+  const [selectedTopic, setSelectedTopic] = useState<SelectedTopic | null>(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
   const [bulkStatus, setBulkStatus] = useState<TabStatus>("in_progress");
@@ -399,6 +361,7 @@ export function App() {
   ] as const);
   const debouncedSearch = useDebouncedValue(search, 300);
   const q = debouncedSearch.trim();
+  const tag = selectedTopic?.path ?? "";
   const libraryFilters: LibraryTabFilters = {
     browser,
     importance,
@@ -424,10 +387,6 @@ export function App() {
     queryKey: ["tabs", { browser, importance, openState, page, q, status, tag }],
     queryFn: ({ signal }) =>
       fetchTabs({ browser, importance, openState, page, q, status, tag }, signal),
-  });
-  const tagsQuery = useQuery({
-    queryKey: ["tags"],
-    queryFn: ({ signal }) => fetchTagTree(signal),
   });
   const selectAllLibraryMutation = useMutation({
     mutationFn: ({ filters }: { filters: LibraryTabFilters; filterKey: string }) =>
@@ -561,7 +520,7 @@ export function App() {
       },
     }),
     columnHelper.accessor("tagPaths", {
-      header: t("Tags"),
+      header: t("Topics"),
       cell: ({ getValue }) => {
         const paths = getValue();
         if (paths.length === 0) return <span className="no-row-tags">-</span>;
@@ -651,7 +610,7 @@ export function App() {
     setPage(1);
     setSearch("");
     setStatus("all");
-    setTag("");
+    setSelectedTopic(null);
   };
   const totalPages = tabsQuery.data
     ? Math.max(1, Math.ceil(tabsQuery.data.total / tabsQuery.data.pageSize))
@@ -785,54 +744,13 @@ export function App() {
 
           <div className={view === "open" ? "workspace-layout is-open-tabs" : "workspace-layout"}>
             {view !== "open" ? (
-              <aside className="tag-sidebar" aria-labelledby="tag-tree-title">
-              <div className="sidebar-heading">
-                <div>
-                  <p>{t("Organize")}</p>
-                  <h2 id="tag-tree-title">{t("Topics")}</h2>
-                </div>
-                {tagsQuery.isFetching ? <span className="mini-spinner" aria-hidden="true" /> : null}
-              </div>
-              <nav aria-label={t("Filter tabs by topic")}>
-                <button
-                  aria-current={!tag ? "page" : undefined}
-                  className={!tag ? "all-tags-button is-active" : "all-tags-button"}
-                  type="button"
-                  onClick={() => {
-                    setTag("");
-                    setPage(1);
-                  }}
-                >
-                  <span>{t("All tabs")}</span>
-                </button>
-                {tagsQuery.data?.items.length ? (
-                  <TagBranch
-                    nodes={tagsQuery.data.items}
-                    selectedPath={tag}
-                    onSelect={(path) => {
-                      setTag(path);
-                      setPage(1);
-                    }}
-                  />
-                ) : null}
-                {tagsQuery.isPending ? (
-                  <p className="sidebar-state">{t("Loading topics...")}</p>
-                ) : null}
-                {tagsQuery.isError ? (
-                  <div className="sidebar-state is-error" role="alert">
-                    <span>{localizeError(tagsQuery.error)}</span>
-                    <button type="button" onClick={() => void tagsQuery.refetch()}>
-                      {t("Retry")}
-                    </button>
-                  </div>
-                ) : null}
-                {tagsQuery.isSuccess && tagsQuery.data.items.length === 0 ? (
-                  <p className="sidebar-state">
-                    {t("Assign a tag to start your topic tree.")}
-                  </p>
-                ) : null}
-              </nav>
-              </aside>
+              <TopicSidebar
+                selectedTopic={selectedTopic}
+                onSelectTopic={(topic) => {
+                  setSelectedTopic(topic);
+                  setPage(1);
+                }}
+              />
             ) : null}
 
             {view === "open" ? (
@@ -1001,7 +919,7 @@ export function App() {
                     }}
                   >
                     <label>
-                      <span>{t("Tag path")}</span>
+                      <span>{t("Topic path")}</span>
                       <input
                         disabled={bulkBusy}
                         maxLength={2_048}
@@ -1012,7 +930,7 @@ export function App() {
                       />
                     </label>
                     <button disabled={bulkBusy || !bulkTag.trim()} type="submit">
-                      {t("Assign tag")}
+                      {t("Assign topic")}
                     </button>
                   </form>
                   <button
@@ -1186,14 +1104,27 @@ export function App() {
                 }
               >
                 <GraphView
+                  activationErrorForTab={(tabId: number) => {
+                    const error = canonicalTabActivation.errorFor(tabId);
+                    return error === undefined ? undefined : localizeError(error);
+                  }}
+                  activationInProgress={canonicalTabActivation.busy}
                   closeErrorForTab={(tabId) => {
                     const error = singleTabClose.errorForCanonical(tabId);
                     return error === undefined ? undefined : localizeError(error);
                   }}
+                  isActivatingTab={canonicalTabActivation.isActivating}
                   isClosingTab={singleTabClose.isClosingCanonical}
+                  rootTopicId={selectedTopic?.id ?? null}
                   rootTag={tag}
+                  onBrowserAction={canonicalTabActivation.run}
                   onCloseTab={singleTabClose.closeCanonical}
                   onSelectTab={setActiveTabId}
+                  onSelectTopic={(topic: SelectedTopic | null) => {
+                    setSelectedTopic(topic);
+                    setPage(1);
+                    selectView("library");
+                  }}
                 />
               </Suspense>
             )}

@@ -287,6 +287,109 @@ const russianMessages: Record<string, Message> = {
     "Закрыть незакреплённые дубликаты группы «{group}»: {count}…",
   "Close {count}…": "Закрыть: {count}…",
   "Close tabs": "Закрыть вкладки",
+  "Add topic": "Добавить тему",
+  "Add subtopic": "Добавить подтему",
+  "Add subtopic to {topic}": "Добавить подтему в «{topic}»",
+  "Create top-level topic": "Создать тему верхнего уровня",
+  "Create subtopic under {topic}": "Создать подтему в «{topic}»",
+  "Create topic": "Создать тему",
+  "Edit topic {topic}": "Изменить тему «{topic}»",
+  "Topic name": "Название темы",
+  "Parent topic": "Родительская тема",
+  "Top level": "Верхний уровень",
+  "Use custom color": "Использовать свой цвет",
+  "Topic color": "Цвет темы",
+  "Save topic": "Сохранить тему",
+  "Rename or move topic": "Переименовать или переместить тему",
+  "Delete topic": "Удалить тему",
+  "Delete topic {topic}": "Удалить тему «{topic}»",
+  "Delete topic “{name}”?": "Удалить тему «{name}»?",
+  "Topics with subtopics cannot be deleted.":
+    "Нельзя удалить тему, пока у неё есть подтемы.",
+  "Create a top-level topic or assign one to a tab.":
+    "Создайте тему верхнего уровня или назначьте тему вкладке.",
+  "Assign topic": "Назначить тему",
+  "No topics assigned.": "Темы не назначены.",
+  "A topic with this name already exists at that level.":
+    "Тема с таким названием уже существует на этом уровне.",
+  "A topic cannot be moved inside itself or one of its subtopics.":
+    "Тему нельзя переместить внутрь неё самой или одной из её подтем.",
+  "Move or delete the subtopics before deleting this topic.":
+    "Перед удалением темы переместите или удалите её подтемы.",
+  "This topic no longer exists.": "Эта тема больше не существует.",
+  "This topic is no longer assigned to the tab.":
+    "Эта тема больше не назначена вкладке.",
+  "This tab no longer exists.": "Эта вкладка больше не существует.",
+  "One of the relation endpoints no longer exists.":
+    "Один из связываемых узлов больше не существует.",
+  "A node cannot be related to itself.":
+    "Нельзя создать связь узла с самим собой.",
+  "This relation no longer exists.": "Эта связь больше не существует.",
+  "Remove {topic}, assigned by {source}":
+    "Удалить тему {topic}, назначенную: {source}",
+  "3D knowledge graph": "Трёхмерный граф знаний",
+  "3D view is unavailable": "Трёхмерный вид недоступен",
+  "Drag to rotate, right-drag to pan, and scroll to zoom.":
+    "Перетаскивайте, чтобы вращать; правой кнопкой — перемещать; колесом — масштабировать.",
+  "Capture tabs or create topics to start building the knowledge graph.":
+    "Сохраните вкладки или создайте темы, чтобы начать строить граф знаний.",
+  "Choose a relation target.": "Выберите целевой узел для связи.",
+  "Choose any tab or topic in the 3D space to inspect its details and connections.":
+    "Выберите вкладку или тему в трёхмерном пространстве, чтобы увидеть сведения и связи.",
+  "Clear relation target": "Сбросить целевой узел связи",
+  Connections: "Связи",
+  "Creating relation...": "Создание связи...",
+  "Delete relation to {node}": "Удалить связь с узлом «{node}»",
+  "Find a tab or topic": "Найти вкладку или тему",
+  "Graph legend": "Легенда графа",
+  "Open topic in Library": "Открыть тему в библиотеке",
+  Relations: "Связи",
+  "Search by title, URL, or topic": "Поиск по названию, URL или теме",
+  "Select a node": "Выберите узел",
+  "Selected node → target": "Выбранный узел → целевой узел",
+  Tabs: "Вкладки",
+  "Tabs in subtree": "Вкладки во всей ветке",
+  "Target → selected node": "Целевой узел → выбранный узел",
+  "WebGL could not start. You can still manage topics and tabs in the Library.":
+    "Не удалось запустить WebGL. Темами и вкладками по-прежнему можно управлять в библиотеке.",
+  containment: "Иерархия",
+  membership: "Принадлежность",
+  relation: "Связь",
+  "Tab node": "Узел-вкладка",
+  "Topic node": "Узел-тема",
+  "Node details": "Сведения об узле",
+  "Focus depth": "Глубина связей",
+  "Loading neighborhood...": "Загрузка окружения...",
+  "Couldn't load the full neighborhood.":
+    "Не удалось загрузить полное окружение узла.",
+  "1 step": "1 шаг",
+  "{count} steps": (params) => {
+    const count = numericParam(params, "rawCount");
+    return `${params.count} ${russianPlural(count, "шаг", "шага", "шагов")}`;
+  },
+  "All connected": "Все связанные",
+  "Clear selection": "Снять выделение",
+  "Center selected node": "Центрировать выбранный узел",
+  Topic: "Тема",
+  "Topic path": "Путь темы",
+  "Direct tabs": "Вкладки непосредственно в теме",
+  Subtopics: "Подтемы",
+  "Selected: {title}": "Выбрано: {title}",
+  "Create relation": "Создать связь",
+  "Delete relation": "Удалить связь",
+  "Relation kind": "Тип связи",
+  "From node": "Исходный узел",
+  "To node": "Целевой узел",
+  "Why are these nodes connected?": "Почему эти узлы связаны?",
+  "No relations yet.": "Связей пока нет.",
+  "{count} nodes in focus": (params) => {
+    const count = numericParam(params, "rawCount");
+    return `В фокусе: ${params.count} ${russianPlural(count, "узел", "узла", "узлов")}`;
+  },
+  "{count} topics": (params) => {
+    const count = numericParam(params, "rawCount");
+    return `${params.count} ${russianPlural(count, "тема", "темы", "тем")}`;
+  },
   "Color by": "Цвет по",
   "Copy JSON": "Копировать JSON",
   "Copy Markdown": "Копировать Markdown",
@@ -588,7 +691,7 @@ const russianMessages: Record<string, Message> = {
     "Откройте TabHub в {browser}, чтобы закрыть эти дубликаты.",
   "TabHub extension is not connected to this page.":
     "Расширение TabHub не подключено к этой странице.",
-  "Untagged": "Без тегов",
+  "Untagged": "Без тем",
   "this browser": "этом браузере",
   "TabHub could not load tabs": "TabHub не удалось загрузить вкладки",
   "TabHub returned an unreadable tab list.":
@@ -639,11 +742,44 @@ const russianMessages: Record<string, Message> = {
     "TabHub не удалось удалить это пространство",
   "TabHub returned an unreadable deletion result.":
     "TabHub вернул нечитаемый результат удаления.",
-  "TabHub could not load tags": "TabHub не удалось загрузить теги",
+  "TabHub could not load tags": "TabHub не удалось загрузить темы",
   "TabHub returned an unreadable tag tree.":
-    "TabHub вернул нечитаемое дерево тегов.",
+    "TabHub вернул нечитаемое дерево тем.",
+  "TabHub could not create this topic": "TabHub не удалось создать эту тему",
+  "TabHub returned an unreadable topic.":
+    "TabHub вернул нечитаемые данные темы.",
+  "TabHub returned an unexpected topic.":
+    "TabHub вернул неожиданные данные темы.",
+  "TabHub could not update this topic": "TabHub не удалось обновить эту тему",
+  "TabHub returned an unreadable topic update.":
+    "TabHub вернул нечитаемый результат обновления темы.",
+  "TabHub returned an unexpected topic update.":
+    "TabHub вернул неожиданный результат обновления темы.",
+  "TabHub could not delete this topic": "TabHub не удалось удалить эту тему",
+  "TabHub returned an unreadable topic deletion.":
+    "TabHub вернул нечитаемый результат удаления темы.",
+  "TabHub returned an unexpected topic deletion.":
+    "TabHub вернул неожиданный результат удаления темы.",
   "TabHub could not load the graph": "TabHub не удалось загрузить граф",
   "TabHub returned an unreadable graph.": "TabHub вернул нечитаемый граф.",
+  "TabHub could not load the knowledge graph":
+    "TabHub не удалось загрузить граф знаний",
+  "TabHub returned an unreadable knowledge graph.":
+    "TabHub вернул нечитаемый граф знаний.",
+  "TabHub returned an unexpected knowledge graph.":
+    "TabHub вернул неожиданный граф знаний.",
+  "TabHub could not create this relation":
+    "TabHub не удалось создать эту связь",
+  "TabHub returned an unreadable relation.":
+    "TabHub вернул нечитаемые данные связи.",
+  "TabHub returned an unexpected relation.":
+    "TabHub вернул неожиданные данные связи.",
+  "TabHub could not delete this relation":
+    "TabHub не удалось удалить эту связь",
+  "TabHub returned an unreadable relation deletion.":
+    "TabHub вернул нечитаемый результат удаления связи.",
+  "TabHub returned an unexpected relation deletion.":
+    "TabHub вернул неожиданный результат удаления связи.",
   "TabHub could not load this tab": "TabHub не удалось загрузить эту вкладку",
   "TabHub returned unreadable tab details.":
     "TabHub вернул нечитаемые сведения о вкладке.",
@@ -658,14 +794,14 @@ const russianMessages: Record<string, Message> = {
     "TabHub вернул нечитаемый результат массового обновления.",
   "TabHub returned an unexpected bulk update.":
     "TabHub вернул неожиданный результат массового обновления.",
-  "TabHub could not assign this tag": "TabHub не удалось назначить этот тег",
+  "TabHub could not assign this tag": "TabHub не удалось назначить эту тему",
   "TabHub returned an unreadable tag update.":
-    "TabHub вернул нечитаемый результат обновления тега.",
+    "TabHub вернул нечитаемый результат назначения темы.",
   "TabHub returned an unexpected tag update.":
-    "TabHub вернул неожиданный результат обновления тега.",
-  "TabHub could not remove this tag": "TabHub не удалось удалить этот тег",
+    "TabHub вернул неожиданный результат назначения темы.",
+  "TabHub could not remove this tag": "TabHub не удалось снять эту тему",
   "TabHub returned an unreadable tag removal.":
-    "TabHub вернул нечитаемый результат удаления тега.",
+    "TabHub вернул нечитаемый результат снятия темы.",
   "TabHub could not load links": "TabHub не удалось загрузить связи",
   "TabHub returned unreadable links.": "TabHub вернул нечитаемые связи.",
   "TabHub could not create this link": "TabHub не удалось создать эту связь",
@@ -721,12 +857,12 @@ const russianMessages: Record<string, Message> = {
   "TabHub returned an unexpected workspace.":
     "TabHub вернул неожиданные данные пространства.",
   "TabHub returned an unexpected tag tree.":
-    "TabHub вернул неожиданное дерево тегов.",
+    "TabHub вернул неожиданное дерево тем.",
   "TabHub returned an unexpected graph.": "TabHub вернул неожиданный граф.",
   "TabHub returned unexpected tab details.":
     "TabHub вернул неожиданные сведения о вкладке.",
   "TabHub returned an unexpected tag removal.":
-    "TabHub вернул неожиданный результат удаления тега.",
+    "TabHub вернул неожиданный результат снятия темы.",
   "TabHub returned unexpected links.": "TabHub вернул неожиданные связи.",
   "TabHub returned an unexpected link.": "TabHub вернул неожиданную связь.",
   "TabHub returned an unexpected link deletion.":
@@ -821,6 +957,19 @@ export function hasRussianTranslation(key: string): boolean {
   return Object.hasOwn(russianMessages, key);
 }
 
+const apiErrorTranslationKeys: Record<string, string> = {
+  KNOWLEDGE_NODE_NOT_FOUND: "One of the relation endpoints no longer exists.",
+  RELATION_NOT_FOUND: "This relation no longer exists.",
+  SELF_RELATION_NOT_ALLOWED: "A node cannot be related to itself.",
+  TAB_NOT_FOUND: "This tab no longer exists.",
+  TAG_ASSIGNMENT_NOT_FOUND: "This topic is no longer assigned to the tab.",
+  TAG_CONFLICT: "A topic with this name already exists at that level.",
+  TAG_HAS_CHILDREN: "Move or delete the subtopics before deleting this topic.",
+  TAG_HIERARCHY_CONFLICT:
+    "A topic cannot be moved inside itself or one of its subtopics.",
+  TAG_NOT_FOUND: "This topic no longer exists.",
+};
+
 export function localizedErrorMessage(locale: Locale, cause: unknown): string {
   const message =
     cause instanceof Error
@@ -829,6 +978,17 @@ export function localizedErrorMessage(locale: Locale, cause: unknown): string {
         ? cause
         : translate(locale, "Something went wrong.");
   if (locale !== "ru") return message;
+  const errorCode =
+    cause instanceof Error &&
+    "code" in cause &&
+    typeof cause.code === "string"
+      ? cause.code
+      : undefined;
+  const apiTranslationKey =
+    errorCode === undefined ? undefined : apiErrorTranslationKeys[errorCode];
+  if (apiTranslationKey !== undefined) {
+    return translate(locale, apiTranslationKey);
+  }
   if (hasRussianTranslation(message)) return translate(locale, message);
 
   const statusMatch = /^(.*) \((\d{3})\)\.$/.exec(message);

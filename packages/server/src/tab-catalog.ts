@@ -321,10 +321,22 @@ export function createTabCatalog(
     ORDER BY tag_paths.path, tags.id
   `);
   const selectTabLinks = connection.prepare(`
-    SELECT id, from_tab, to_tab, kind, note, created_by
-    FROM links
-    WHERE from_tab = ? OR to_tab = ?
-    ORDER BY id
+    SELECT
+      relations.id,
+      from_entity.tab_id AS from_tab,
+      to_entity.tab_id AS to_tab,
+      relations.kind,
+      relations.note,
+      relations.created_by
+    FROM relations
+    JOIN knowledge_entities AS from_entity
+      ON from_entity.id = relations.from_entity_id
+     AND from_entity.kind = 'tab'
+    JOIN knowledge_entities AS to_entity
+      ON to_entity.id = relations.to_entity_id
+     AND to_entity.kind = 'tab'
+    WHERE from_entity.tab_id = ? OR to_entity.tab_id = ?
+    ORDER BY relations.id
   `);
   const selectCustomFields = connection.prepare(`
     SELECT key, value

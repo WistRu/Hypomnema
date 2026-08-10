@@ -600,6 +600,153 @@ export const patchLinkSchema = z
 
 export type PatchLink = z.infer<typeof patchLinkSchema>;
 
+export const knowledgeNodeTypeSchema = z.enum(["tab", "topic"]);
+
+export type KnowledgeNodeType = z.infer<typeof knowledgeNodeTypeSchema>;
+
+export const knowledgeNodeRefSchema = z.object({
+  type: knowledgeNodeTypeSchema,
+  id: z.number().int().positive(),
+});
+
+export type KnowledgeNodeRef = z.infer<typeof knowledgeNodeRefSchema>;
+
+export const relationIdSchema = z.number().int().positive();
+
+export const relationIdParamSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+export type RelationIdParam = z.infer<typeof relationIdParamSchema>;
+
+export const knowledgeRelationSchema = z.object({
+  id: relationIdSchema,
+  from: knowledgeNodeRefSchema,
+  to: knowledgeNodeRefSchema,
+  kind: z.string(),
+  note: z.string().nullable(),
+  createdBy: assignedBySchema,
+});
+
+export type KnowledgeRelation = z.infer<typeof knowledgeRelationSchema>;
+
+export const createKnowledgeRelationSchema = z.object({
+  from: knowledgeNodeRefSchema,
+  to: knowledgeNodeRefSchema,
+  kind: linkKindInputSchema.default("related"),
+  note: linkNoteInputSchema.optional(),
+  createdBy: assignedBySchema,
+});
+
+export type CreateKnowledgeRelation = z.infer<
+  typeof createKnowledgeRelationSchema
+>;
+
+export const patchKnowledgeRelationSchema = patchLinkSchema;
+
+export type PatchKnowledgeRelation = z.infer<
+  typeof patchKnowledgeRelationSchema
+>;
+
+export const relationListQuerySchema = z
+  .object({
+    node_type: knowledgeNodeTypeSchema.optional(),
+    node_id: z.coerce.number().int().positive().optional(),
+  })
+  .refine(
+    (query) =>
+      (query.node_type === undefined) === (query.node_id === undefined),
+    "node_type and node_id must be provided together",
+  );
+
+export type RelationListQuery = z.infer<typeof relationListQuerySchema>;
+
+export const knowledgeRelationListResponseSchema = z.object({
+  items: z.array(knowledgeRelationSchema),
+});
+
+export type KnowledgeRelationListResponse = z.infer<
+  typeof knowledgeRelationListResponseSchema
+>;
+
+export const graphV2QuerySchema = z
+  .object({
+    root_topic_id: z.coerce.number().int().positive().optional(),
+    focus_node_type: knowledgeNodeTypeSchema.optional(),
+    focus_node_id: z.coerce.number().int().positive().optional(),
+    focus_depth: z.coerce.number().int().min(1).max(5).optional(),
+  })
+  .refine(
+    (query) => {
+      const focusFields = [
+        query.focus_node_type,
+        query.focus_node_id,
+        query.focus_depth,
+      ];
+      const providedCount = focusFields.filter(
+        (value) => value !== undefined,
+      ).length;
+      return providedCount === 0 || providedCount === focusFields.length;
+    },
+    "focus_node_type, focus_node_id, and focus_depth must be provided together",
+  );
+
+export type GraphV2Query = z.infer<typeof graphV2QuerySchema>;
+
+export const graphV2TabNodeSchema = graphNodeSchema.extend({
+  type: z.literal("tab"),
+});
+
+export type GraphV2TabNode = z.infer<typeof graphV2TabNodeSchema>;
+
+export const graphV2TopicNodeSchema = z.object({
+  type: z.literal("topic"),
+  id: tagIdSchema,
+  name: persistedTagNameSchema,
+  path: persistedTagPathSchema,
+  parentId: tagIdSchema.nullable(),
+  color: tagColorSchema,
+  directTabCount: z.number().int().nonnegative(),
+  tabCount: z.number().int().nonnegative(),
+});
+
+export type GraphV2TopicNode = z.infer<typeof graphV2TopicNodeSchema>;
+
+export const graphV2NodeSchema = z.discriminatedUnion("type", [
+  graphV2TabNodeSchema,
+  graphV2TopicNodeSchema,
+]);
+
+export type GraphV2Node = z.infer<typeof graphV2NodeSchema>;
+
+export const graphV2EdgeTypeSchema = z.enum([
+  "containment",
+  "membership",
+  "relation",
+]);
+
+export type GraphV2EdgeType = z.infer<typeof graphV2EdgeTypeSchema>;
+
+export const graphV2EdgeSchema = z.object({
+  id: z.string().min(1),
+  edgeType: graphV2EdgeTypeSchema,
+  source: knowledgeNodeRefSchema,
+  target: knowledgeNodeRefSchema,
+  relationId: relationIdSchema.nullable(),
+  relationKind: z.string().nullable(),
+  note: z.string().nullable(),
+  createdBy: assignedBySchema.nullable(),
+});
+
+export type GraphV2Edge = z.infer<typeof graphV2EdgeSchema>;
+
+export const graphV2ResponseSchema = z.object({
+  nodes: z.array(graphV2NodeSchema),
+  edges: z.array(graphV2EdgeSchema),
+});
+
+export type GraphV2Response = z.infer<typeof graphV2ResponseSchema>;
+
 export const deleteResponseSchema = z.object({
   deleted: z.literal(true),
 });

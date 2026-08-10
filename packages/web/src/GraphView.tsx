@@ -1,89 +1,96 @@
-import type { GraphNode } from "@tabhub/shared";
-import { useQuery } from "@tanstack/react-query";
+import type {
+  GraphV2Node,
+} from "@tabhub/shared";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import ForceGraph3D, {
+  type ForceGraphMethods,
+  type NodeObject,
+} from "react-force-graph-3d";
 import {
-  Background,
-  BackgroundVariant,
-  Controls,
-  MarkerType,
-  Position,
-  ReactFlow,
-  type Edge as FlowEdge,
-  type Node as FlowNode,
-} from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
-import { type CSSProperties, type ReactNode, useEffect, useMemo, useState } from "react";
+  Component,
+  type ErrorInfo,
+  type FormEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import * as THREE from "three";
 
-import { fetchGraph } from "./api";
-import { layoutGraphNodes, reachableFollowsBranch } from "./graph-model";
-import { useI18n } from "./i18n";
 import {
-  handleMiddleClickClose,
-  preventMiddleClickAutoscroll,
-} from "./middle-click-close";
-
-type GraphColorMode = "status" | "browser";
-type FlowData = Record<string, unknown> & {
-  label: ReactNode;
-  tabId?: number;
-};
+  createRelation,
+  deleteRelation,
+  fetchKnowledgeGraph,
+} from "./api";
+import {
+  buildGraphScene,
+  graphNodeRef,
+  graphNodeRefFromKey,
+  middleClickTabId,
+  selectGraphProjection,
+  selectGraphNeighborhood,
+  type GraphNodeKey,
+  type GraphSceneLink,
+  type GraphSceneNode,
+} from "./graph-model";
+import { useI18n, type TranslationParams } from "./i18n";
+import type { CanonicalTabBrowserActionRequest } from "./open-tab-activation";
+import { TabBrowserAction } from "./TabBrowserAction";
+import type { SelectedTopic } from "./TopicSidebar";
+import "./graph-view.css";
 
 interface GraphViewProps {
+  activationErrorForTab: (tabId: number) => string | undefined;
+  activationInProgress: boolean;
   closeErrorForTab: (tabId: number) => string | undefined;
+  isActivatingTab: (tabId: number) => boolean;
   isClosingTab: (tabId: number) => boolean;
-  onCloseTab: (tabId: number) => void;
   rootTag: string;
+  rootTopicId: number | null;
+  onBrowserAction: (request: CanonicalTabBrowserActionRequest) => void;
+  onCloseTab: (tabId: number) => void;
   onSelectTab: (tabId: number) => void;
+  onSelectTopic: (topic: SelectedTopic | null) => void;
 }
 
-const STATUS_COLORS: Record<GraphNode["status"], string> = {
-  inbox: "#718cff",
-  in_progress: "#d6ad62",
-  done: "#58c98c",
-  archived: "#78818e",
-};
-
-const BROWSER_LABELS: Record<string, string> = {
-  chrome: "Chrome",
-  edge: "Edge",
-  yandex: "Yandex",
-};
-
-function browserLabel(browser: string, t: (key: string) => string): string {
-  const normalized = browser.toLowerCase();
-  return BROWSER_LABELS[normalized] ??
-    (normalized === "other" ? t("Other") : browser);
+interface CanvasSize {
+  height: number;
+  width: number;
 }
 
-const STATUS_LABELS: Record<GraphNode["status"], string> = {
-  inbox: "inbox",
-  in_progress: "in progress",
-  done: "done",
-  archived: "archived",
+type GraphRef = ForceGraphMethods<GraphSceneNode, GraphSceneLink>;
+type GraphNodeMesh = THREE.Mesh<
+  THREE.BufferGeometry,
+  THREE.MeshLambertMaterial
+>;
+
+const STATUS_COLORS: Record<
+  Extract<GraphV2Node, { type: "tab" }>["status"],
+  string
+> = {
+  inbox: "#6f86ff",
+  in_progress: "#e7b85f",
+  done: "#54d69a",
+  archived: "#727d8d",
 };
 
-const BROWSER_COLORS: Record<string, string> = {
-  chrome: "#58b47f",
-  edge: "#4ba6d8",
-  other: "#9b83d8",
-  yandex: "#dc5a67",
-};
+const EDGE_COLORS = {
+  containment: "#987dff",
+  membership: "#4b9bd5",
+  relation: "#f2c46f",
+} as const;
 
-function browserColor(browser: string) {
-  const known = BROWSER_COLORS[browser.toLocaleLowerCase("en-US")];
-  if (known) return known;
+const TAB_GEOMETRY = new THREE.IcosahedronGeometry(4.2, 1);
+const TAB_GEOMETRY_DENSE = new THREE.IcosahedronGeometry(4.2, 0);
+const TOPIC_GEOMETRY = new THREE.OctahedronGeometry(6.1, 0);
+const KNOWLEDGE_GRAPH_QUERY_KEY = ["graph", "knowledge"] as const;
 
-  let hash = 0;
-  for (const character of browser) {
-    hash = (hash * 31 + character.codePointAt(0)!) >>> 0;
-  }
-  return `hsl(${hash % 360} 48% 58%)`;
-}
-
-function nodeAccent(node: GraphNode, mode: GraphColorMode) {
-  return mode === "status" ? STATUS_COLORS[node.status] : browserColor(node.browser);
-}
-
-function displayTitle(node: GraphNode) {
+function displayTitle(node: GraphSceneNode): string {
+  if (node.type === "topic") return node.name;
   if (node.title?.trim()) return node.title.trim();
   try {
     return new URL(node.url).hostname;
@@ -92,67 +99,49 @@ function displayTitle(node: GraphNode) {
   }
 }
 
-export function GraphNodeCard({
-  browser,
-  closeError,
-  closeInProgress = false,
-  closingLabel,
-  groupKey,
-  node,
-  onMiddleClose,
-  openLabel,
-  statusLabel,
-}: {
-  browser: string;
-  closeError?: string | undefined;
-  closeInProgress?: boolean | undefined;
-  closingLabel: string;
-  groupKey: string;
-  node: GraphNode;
-  onMiddleClose: (tabId: number) => void;
-  openLabel: string;
-  statusLabel: string;
-}) {
-  return (
-    <div
-      className="graph-node-card"
-      onAuxClick={(event) => {
-        if (!node.isOpen) return;
-        handleMiddleClickClose(event, () => onMiddleClose(node.id));
-      }}
-      onMouseDown={preventMiddleClickAutoscroll}
-    >
-      <div className="graph-node-title" title={displayTitle(node)}>
-        {displayTitle(node)}
-      </div>
-      <div className="graph-node-meta">
-        <span>{statusLabel}</span>
-        <span>{browser}</span>
-        <span>{closeInProgress ? closingLabel : openLabel}</span>
-      </div>
-      <div
-        className="graph-node-topic"
-        role={closeError ? "alert" : undefined}
-        title={closeError ?? groupKey}
-      >
-        {closeError ?? groupKey}
-      </div>
-    </div>
-  );
+function nodeColor(node: GraphSceneNode): string {
+  if (node.type === "tab") return STATUS_COLORS[node.status];
+  return /^#[\da-f]{3,8}$/i.test(node.color ?? "")
+    ? node.color!
+    : "#a388ff";
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    switch (character) {
+      case "&":
+        return "&amp;";
+      case "<":
+        return "&lt;";
+      case ">":
+        return "&gt;";
+      case '"':
+        return "&quot;";
+      default:
+        return "&#039;";
+    }
+  });
+}
+
+function nodeTypeLabel(
+  node: GraphSceneNode,
+  t: (key: string, params?: TranslationParams) => string,
+): string {
+  return node.type === "topic" ? t("Topic node") : t("Tab node");
 }
 
 function GraphState({
-  title,
-  detail,
   action,
+  detail,
+  title,
 }: {
-  title: string;
-  detail: string;
   action?: ReactNode;
+  detail: string;
+  title: string;
 }) {
   return (
-    <div className="graph-state">
-      <div className="graph-state-mark" aria-hidden="true" />
+    <div className="graph-3d-state">
+      <div className="graph-3d-state-mark" aria-hidden="true" />
       <strong>{title}</strong>
       <span>{detail}</span>
       {action}
@@ -160,284 +149,869 @@ function GraphState({
   );
 }
 
-export default function GraphView({
-  closeErrorForTab,
-  isClosingTab,
-  onCloseTab,
-  rootTag,
-  onSelectTab,
-}: GraphViewProps) {
-  const { errorMessage, formatNumber, t } = useI18n();
-  const [colorMode, setColorMode] = useState<GraphColorMode>("status");
-  const [branchRootId, setBranchRootId] = useState<number | null>(null);
-  const graphQuery = useQuery({
-    queryKey: ["graph", rootTag],
-    queryFn: ({ signal }) => fetchGraph(rootTag, signal),
-  });
-  const graph = graphQuery.data;
-  const layout = useMemo(
-    () => layoutGraphNodes(graph?.nodes ?? [], rootTag, t),
-    [graph?.nodes, rootTag, t],
+class GraphRendererBoundary extends Component<
+  { children: ReactNode; fallback: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(_error: unknown, _info: ErrorInfo) {
+    // The accessible fallback below remains usable when WebGL is unavailable.
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
+function useCanvasSize() {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState<CanvasSize>({ height: 680, width: 900 });
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+
+    const update = () => {
+      const bounds = host.getBoundingClientRect();
+      setSize({
+        height: Math.max(420, Math.round(bounds.height)),
+        width: Math.max(320, Math.round(bounds.width)),
+      });
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, []);
+
+  return { hostRef, size };
+}
+
+function RelationComposer({
+  sceneNodes,
+  selectedNode,
+  onCreated,
+}: {
+  sceneNodes: GraphSceneNode[];
+  selectedNode: GraphSceneNode;
+  onCreated: () => void;
+}) {
+  const { errorMessage, t } = useI18n();
+  const [query, setQuery] = useState("");
+  const [targetKey, setTargetKey] = useState<GraphNodeKey | null>(null);
+  const [direction, setDirection] = useState<"outgoing" | "incoming">(
+    "outgoing",
   );
-  const visibleIds = useMemo(
-    () => new Set((graph?.nodes ?? []).map((node) => node.id)),
-    [graph?.nodes],
-  );
-  const activeBranchRoot =
-    branchRootId !== null && visibleIds.has(branchRootId) ? branchRootId : null;
-  const reachable = useMemo(
+  const [kind, setKind] = useState("related");
+  const [note, setNote] = useState("");
+  const kindListId = useId();
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const candidates = useMemo(
     () =>
-      activeBranchRoot === null
-        ? new Set<number>()
-        : reachableFollowsBranch(
-            activeBranchRoot,
-            graph?.edges ?? [],
-            visibleIds,
-          ),
-    [activeBranchRoot, graph?.edges, visibleIds],
+      sceneNodes
+        .filter((node) => node.key !== selectedNode.key)
+        .filter((node) => {
+          if (!normalizedQuery) return false;
+          const haystack = [
+            displayTitle(node),
+            node.key,
+            node.type === "topic" ? node.path : node.url,
+          ]
+            .join(" ")
+            .toLocaleLowerCase();
+          return haystack.includes(normalizedQuery);
+        })
+        .slice(0, 12),
+    [normalizedQuery, sceneNodes, selectedNode.key],
+  );
+  const target = targetKey
+    ? sceneNodes.find((node) => node.key === targetKey) ?? null
+    : null;
+  const mutation = useMutation({
+    mutationFn: () => {
+      if (!target) throw new Error(t("Choose a relation target."));
+      const selectedRef = graphNodeRef(selectedNode);
+      const targetRef = graphNodeRef(target);
+      return createRelation({
+        from: direction === "outgoing" ? selectedRef : targetRef,
+        to: direction === "outgoing" ? targetRef : selectedRef,
+        kind: kind.trim(),
+        note: note.trim() || undefined,
+        createdBy: "user",
+      });
+    },
+    onSuccess: () => {
+      setQuery("");
+      setTargetKey(null);
+      setKind("related");
+      setNote("");
+      onCreated();
+    },
+  });
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (target && kind.trim()) mutation.mutate();
+  };
+
+  return (
+    <form className="graph-relation-composer" onSubmit={submit}>
+      <div className="graph-inspector-section-heading">
+        <strong>{t("Create relation")}</strong>
+      </div>
+      <label>
+        <span>{t("Find a tab or topic")}</span>
+        <input
+          autoComplete="off"
+          disabled={mutation.isPending}
+          placeholder={t("Search by title, URL, or topic")}
+          type="search"
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setTargetKey(null);
+          }}
+        />
+      </label>
+      {candidates.length > 0 && target === null ? (
+        <ul className="graph-relation-results">
+          {candidates.map((candidate) => (
+            <li key={candidate.key}>
+              <button
+                type="button"
+                onClick={() => {
+                  setTargetKey(candidate.key);
+                  setQuery(displayTitle(candidate));
+                }}
+              >
+                <span className={`graph-node-kind is-${candidate.type}`}>
+                  {candidate.type === "topic" ? t("Topic") : t("Tab")}
+                </span>
+                <strong>{displayTitle(candidate)}</strong>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {target ? (
+        <div className="graph-relation-target">
+          <span>{nodeTypeLabel(target, t)}</span>
+          <strong>{displayTitle(target)}</strong>
+          <button
+            aria-label={t("Clear relation target")}
+            type="button"
+            onClick={() => {
+              setQuery("");
+              setTargetKey(null);
+            }}
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
+      <label>
+        <span>{t("Direction")}</span>
+        <select
+          disabled={mutation.isPending}
+          value={direction}
+          onChange={(event) =>
+            setDirection(event.target.value as "outgoing" | "incoming")
+          }
+        >
+          <option value="outgoing">{t("Selected node → target")}</option>
+          <option value="incoming">{t("Target → selected node")}</option>
+        </select>
+      </label>
+      <label>
+        <span>{t("Relation kind")}</span>
+        <input
+          disabled={mutation.isPending}
+          list={kindListId}
+          maxLength={128}
+          required
+          value={kind}
+          onChange={(event) => setKind(event.target.value)}
+        />
+        <datalist id={kindListId}>
+          <option value="related" />
+          <option value="supports" />
+          <option value="contradicts" />
+          <option value="follows" />
+          <option value="references" />
+        </datalist>
+      </label>
+      <label>
+        <span>{t("Note")}</span>
+        <textarea
+          disabled={mutation.isPending}
+          maxLength={10_000}
+          placeholder={t("Why are these nodes connected?")}
+          rows={2}
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+        />
+      </label>
+      <button
+        className="graph-primary-button"
+        disabled={mutation.isPending || !target || !kind.trim()}
+        type="submit"
+      >
+        {mutation.isPending ? t("Creating relation...") : t("Create relation")}
+      </button>
+      {mutation.isError ? (
+        <p className="graph-inline-error" role="alert">
+          {errorMessage(mutation.error)}
+        </p>
+      ) : null}
+    </form>
+  );
+}
+
+function NodeInspector({
+  activationErrorForTab,
+  activationInProgress,
+  connectedLinks,
+  deleteError,
+  deletingRelationId,
+  isActivatingTab,
+  isClosingTab,
+  node,
+  sceneNodes,
+  onBrowserAction,
+  onCloseTab,
+  onDeleteRelation,
+  onOpenNode,
+  onRelationCreated,
+  onSelectNode,
+}: {
+  activationErrorForTab: (tabId: number) => string | undefined;
+  activationInProgress: boolean;
+  connectedLinks: GraphSceneLink[];
+  deleteError: unknown;
+  deletingRelationId: number | null;
+  isActivatingTab: (tabId: number) => boolean;
+  isClosingTab: (tabId: number) => boolean;
+  node: GraphSceneNode | null;
+  sceneNodes: GraphSceneNode[];
+  onBrowserAction: (request: CanonicalTabBrowserActionRequest) => void;
+  onCloseTab: (tabId: number) => void;
+  onDeleteRelation: (id: number) => void;
+  onOpenNode: (node: GraphSceneNode) => void;
+  onRelationCreated: () => void;
+  onSelectNode: (key: GraphNodeKey) => void;
+}) {
+  const { errorMessage, formatNumber, t } = useI18n();
+
+  if (!node) {
+    return (
+      <aside className="graph-inspector is-empty" aria-label={t("Node details")}>
+        <div className="graph-inspector-empty-mark" aria-hidden="true" />
+        <strong>{t("Select a node")}</strong>
+        <p>{t("Choose any tab or topic in the 3D space to inspect its details and connections.")}</p>
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="graph-inspector" aria-label={t("Node details")}>
+      <div className="graph-inspector-header">
+        <span className={`graph-node-kind is-${node.type}`}>
+          {nodeTypeLabel(node, t)}
+        </span>
+        <h3>{displayTitle(node)}</h3>
+        <code>{node.key}</code>
+      </div>
+
+      {node.type === "tab" ? (
+        <div className="graph-inspector-summary">
+          <p className="graph-tab-url" title={node.url}>
+            {node.url}
+          </p>
+          <dl>
+            <div>
+              <dt>{t("Browser")}</dt>
+              <dd>{node.browser}</dd>
+            </div>
+            <div>
+              <dt>{t("Status")}</dt>
+              <dd>{t(node.status === "in_progress" ? "in progress" : node.status)}</dd>
+            </div>
+            <div>
+              <dt>{t("Topics")}</dt>
+              <dd>
+                {node.tagPaths.length
+                  ? node.tagPaths.join(", ")
+                  : t("No topics assigned.")}
+              </dd>
+            </div>
+          </dl>
+          <div className="graph-inspector-actions">
+            <TabBrowserAction
+              activationError={activationErrorForTab(node.id)}
+              activationInProgress={activationInProgress}
+              closeInProgress={isClosingTab(node.id)}
+              isActivating={isActivatingTab(node.id)}
+              tab={node}
+              onBrowserAction={onBrowserAction}
+              onMiddleClose={onCloseTab}
+            />
+            <button type="button" onClick={() => onOpenNode(node)}>
+              {t("Open tab details")}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="graph-inspector-summary">
+          <p>{node.path}</p>
+          <dl>
+            <div>
+              <dt>{t("Direct tabs")}</dt>
+              <dd>{formatNumber(node.directTabCount)}</dd>
+            </div>
+            <div>
+              <dt>{t("Tabs in subtree")}</dt>
+              <dd>{formatNumber(node.tabCount)}</dd>
+            </div>
+          </dl>
+          <div className="graph-inspector-actions">
+            <button
+              className="graph-primary-button"
+              type="button"
+              onClick={() => onOpenNode(node)}
+            >
+              {t("Open topic in Library")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <section className="graph-connected-list">
+        <div className="graph-inspector-section-heading">
+          <strong>{t("Connections")}</strong>
+          <span>{formatNumber(connectedLinks.length)}</span>
+        </div>
+        {connectedLinks.length > 0 ? (
+          <ul>
+            {connectedLinks.map((link) => {
+              const outgoing = link.sourceKey === node.key;
+              const neighborKey = outgoing ? link.targetKey : link.sourceKey;
+              const neighbor = sceneNodes.find(
+                (candidate) => candidate.key === neighborKey,
+              );
+              if (!neighbor) return null;
+              return (
+                <li key={link.id}>
+                  <button
+                    className="graph-connected-node"
+                    type="button"
+                    onClick={() => onSelectNode(neighbor.key)}
+                  >
+                    <span>{outgoing ? "→" : "←"}</span>
+                    <strong>{displayTitle(neighbor)}</strong>
+                    <small>
+                      {link.edge.edgeType === "relation"
+                        ? link.edge.relationKind
+                        : t(link.edge.edgeType)}
+                    </small>
+                  </button>
+                  {link.edge.relationId !== null ? (
+                    <button
+                      aria-label={t("Delete relation to {node}", {
+                        node: displayTitle(neighbor),
+                      })}
+                      className="graph-delete-relation"
+                      disabled={deletingRelationId === link.edge.relationId}
+                      title={t("Delete relation")}
+                      type="button"
+                      onClick={() => onDeleteRelation(link.edge.relationId!)}
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p>{t("No relations yet.")}</p>
+        )}
+        {deleteError ? (
+          <p className="graph-inline-error" role="alert">
+            {errorMessage(deleteError)}
+          </p>
+        ) : null}
+      </section>
+
+      <RelationComposer
+        key={node.key}
+        sceneNodes={sceneNodes}
+        selectedNode={node}
+        onCreated={onRelationCreated}
+      />
+    </aside>
+  );
+}
+
+export default function GraphView({
+  activationErrorForTab,
+  activationInProgress,
+  closeErrorForTab,
+  isActivatingTab,
+  isClosingTab,
+  rootTag,
+  rootTopicId,
+  onBrowserAction,
+  onCloseTab,
+  onSelectTab,
+  onSelectTopic,
+}: GraphViewProps) {
+  const queryClient = useQueryClient();
+  const { errorMessage, formatNumber, t } = useI18n();
+  const graphRef = useRef<GraphRef | undefined>(undefined);
+  const hoveredNodeRef = useRef<GraphSceneNode | null>(null);
+  const nodeObjectCacheRef = useRef<Map<GraphNodeKey, GraphNodeMesh>>(
+    new Map(),
+  );
+  const { hostRef, size } = useCanvasSize();
+  const [selectedKey, setSelectedKey] = useState<GraphNodeKey | null>(null);
+  const [focusDepth, setFocusDepth] = useState(1);
+  const graphQuery = useQuery({
+    queryKey: [...KNOWLEDGE_GRAPH_QUERY_KEY, rootTopicId],
+    queryFn: ({ signal }) => fetchKnowledgeGraph(rootTopicId, signal),
+  });
+  const focusRequest = useMemo(
+    () =>
+      rootTopicId !== null && selectedKey !== null
+        ? {
+            depth: focusDepth,
+            node: graphNodeRefFromKey(selectedKey),
+          }
+        : null,
+    [focusDepth, rootTopicId, selectedKey],
+  );
+  const focusQuery = useQuery({
+    queryKey: [
+      ...KNOWLEDGE_GRAPH_QUERY_KEY,
+      rootTopicId,
+      "focus",
+      selectedKey,
+      focusDepth,
+    ],
+    queryFn: ({ signal }) => {
+      if (focusRequest === null) {
+        throw new Error("A graph focus request requires a selected node.");
+      }
+      return fetchKnowledgeGraph(rootTopicId, signal, focusRequest);
+    },
+    enabled: focusRequest !== null,
+    gcTime: 30_000,
+  });
+  const scene = useMemo(
+    () =>
+      buildGraphScene(
+        selectGraphProjection(
+          graphQuery.data,
+          focusQuery.data,
+          focusRequest !== null,
+        ),
+      ),
+    [focusQuery.data, focusRequest, graphQuery.data],
+  );
+  const selectedNode = selectedKey ? scene.nodeByKey.get(selectedKey) ?? null : null;
+  const neighborhood = useMemo(
+    () =>
+      selectedKey
+        ? selectGraphNeighborhood(scene, selectedKey, focusDepth)
+        : null,
+    [focusDepth, scene, selectedKey],
+  );
+  const connectedLinks = useMemo(
+    () =>
+      selectedNode
+        ? scene.links.filter(
+            (link) =>
+              link.sourceKey === selectedNode.key ||
+              link.targetKey === selectedNode.key,
+          )
+        : [],
+    [scene.links, selectedNode],
+  );
+  const invalidateRelationViews = useCallback(
+    () =>
+      Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: KNOWLEDGE_GRAPH_QUERY_KEY,
+        }),
+        queryClient.invalidateQueries({ queryKey: ["links"] }),
+        queryClient.invalidateQueries({ queryKey: ["tab"] }),
+      ]),
+    [queryClient],
+  );
+  const deleteMutation = useMutation({
+    mutationFn: deleteRelation,
+    onSuccess: invalidateRelationViews,
+  });
+  const topicCount = scene.nodes.filter((node) => node.type === "topic").length;
+  const highDensity = scene.nodes.length > 1_000;
+
+  useEffect(() => {
+    setSelectedKey(null);
+    hoveredNodeRef.current = null;
+  }, [rootTopicId]);
+
+  useEffect(() => {
+    if (selectedKey !== null && !scene.nodeByKey.has(selectedKey)) {
+      setSelectedKey(null);
+    }
+  }, [scene.nodeByKey, selectedKey]);
+
+  useEffect(() => {
+    const cache = nodeObjectCacheRef.current;
+    for (const [key, mesh] of cache) {
+      if (scene.nodeByKey.has(key)) continue;
+      mesh.material.dispose();
+      cache.delete(key);
+    }
+  }, [scene.nodeByKey]);
+
+  useEffect(
+    () => () => {
+      for (const mesh of nodeObjectCacheRef.current.values()) {
+        mesh.material.dispose();
+      }
+      nodeObjectCacheRef.current.clear();
+    },
+    [],
   );
 
   useEffect(() => {
-    if (branchRootId !== null && !visibleIds.has(branchRootId)) {
-      setBranchRootId(null);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSelectedKey(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const renderer = graphRef.current?.renderer();
+    if (!renderer) return;
+    renderer.setPixelRatio(
+      highDensity ? 1 : Math.min(2, window.devicePixelRatio || 1),
+    );
+  }, [graphQuery.isSuccess, highDensity]);
+
+  const focusCamera = useCallback((node: GraphSceneNode) => {
+    const positioned = node as NodeObject<GraphSceneNode>;
+    if (
+      positioned.x === undefined ||
+      positioned.y === undefined ||
+      positioned.z === undefined
+    ) {
+      return;
     }
-  }, [branchRootId, visibleIds]);
-
-  const flowNodes = useMemo(() => {
-    const groupNodes: FlowNode<FlowData>[] = layout.groups.map((group) => ({
-      id: `group:${group.id}`,
-      data: {
-        label: (
-          <div className="graph-group-label">
-            <strong>{group.label}</strong>
-            <span>{t("{count} tabs", {
-              count: formatNumber(group.count),
-              rawCount: group.count,
-            })}</span>
-          </div>
-        ),
+    const distance = Math.hypot(positioned.x, positioned.y, positioned.z);
+    const ratio = distance === 0 ? 1 : 1 + 95 / distance;
+    graphRef.current?.cameraPosition(
+      {
+        x: positioned.x * ratio,
+        y: positioned.y * ratio,
+        z: positioned.z * ratio,
       },
-      position: { x: group.x, y: 0 },
-      draggable: false,
-      selectable: false,
-      connectable: false,
-      focusable: false,
-      className: "graph-group-node",
-      style: { height: 34, width: group.width },
-    }));
-    const tabNodes: FlowNode<FlowData>[] = layout.nodes.map((positioned) => {
-      const node = positioned.node;
-      const accent = nodeAccent(node, colorMode);
-      const statusLabel = t(STATUS_LABELS[node.status]);
-      const branchActive = activeBranchRoot !== null;
-      const inBranch = reachable.has(node.id);
-      const classNames = [
-        "graph-tab-node",
-        branchActive && !inBranch ? "is-dimmed" : "",
-        inBranch ? "is-branch" : "",
-        activeBranchRoot === node.id ? "is-branch-root" : "",
-      ]
-        .filter(Boolean)
-        .join(" ");
-      const style = {
-        "--graph-accent": accent,
-        height: positioned.size.height,
-        width: positioned.size.width,
-      } as CSSProperties;
+      { x: positioned.x, y: positioned.y, z: positioned.z },
+      650,
+    );
+  }, []);
 
-      return {
-        id: String(node.id),
-        data: {
-          tabId: node.id,
-          label: (
-            <GraphNodeCard
-              browser={browserLabel(node.browser, t)}
-              closeError={closeErrorForTab(node.id)}
-              closeInProgress={isClosingTab(node.id)}
-              closingLabel={t("Closing...")}
-              groupKey={positioned.groupKey}
-              node={node}
-              onMiddleClose={onCloseTab}
-              openLabel={node.isOpen ? t("open") : t("closed")}
-              statusLabel={statusLabel}
-            />
-          ),
-        },
-        position: positioned.position,
-        width: positioned.size.width,
-        height: positioned.size.height,
-        draggable: false,
-        connectable: false,
-        sourcePosition: Position.Right,
-        targetPosition: Position.Left,
-        className: classNames,
-        style,
-        ariaLabel: t("{title}, {status}, importance {importance}", {
-          importance: formatNumber(node.importance),
-          status: statusLabel,
-          title: displayTitle(node),
-        }),
-      };
-    });
+  const selectNode = useCallback(
+    (key: GraphNodeKey) => {
+      const node = scene.nodeByKey.get(key);
+      if (!node) return;
+      setSelectedKey(key);
+      focusCamera(node);
+    },
+    [focusCamera, scene.nodeByKey],
+  );
 
-    return [...groupNodes, ...tabNodes];
-  }, [
-    activeBranchRoot,
-    closeErrorForTab,
-    colorMode,
-    formatNumber,
-    isClosingTab,
-    layout.groups,
-    layout.nodes,
-    onCloseTab,
-    reachable,
-    t,
-  ]);
+  useEffect(() => {
+    if (!neighborhood || !selectedNode) return;
+    const timer = window.setTimeout(() => {
+      if (neighborhood.nodeKeys.size <= 1) {
+        focusCamera(selectedNode);
+      } else {
+        graphRef.current?.zoomToFit(
+          550,
+          90,
+          (node) => neighborhood.nodeKeys.has(node.key),
+        );
+      }
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [focusCamera, neighborhood, selectedNode]);
 
-  const flowEdges = useMemo<FlowEdge[]>(() => {
-    const branchActive = activeBranchRoot !== null;
-    return (graph?.edges ?? []).map((edge) => {
-      const relevant =
-        branchActive &&
-        edge.kind === "follows" &&
-        reachable.has(edge.fromTab) &&
-        reachable.has(edge.toTab);
-      const color = relevant ? "#8fa3ff" : "#4b5668";
-      return {
-        id: String(edge.id),
-        source: String(edge.fromTab),
-        target: String(edge.toTab),
-        label: relevant || (graph?.edges.length ?? 0) <= 80 ? edge.kind : undefined,
-        className: [
-          "graph-edge",
-          relevant ? "is-branch" : "",
-          branchActive && !relevant ? "is-dimmed" : "",
-        ]
-          .filter(Boolean)
-          .join(" "),
-        markerEnd: { type: MarkerType.ArrowClosed, color, width: 13, height: 13 },
-        style: {
-          stroke: color,
-          strokeWidth: relevant ? 2.2 : 1.1,
-          opacity: branchActive && !relevant ? 0.12 : 0.72,
-        },
-        labelStyle: {
-          fill: relevant ? "#bec9ff" : "#788494",
-          fontSize: 8,
-          fontWeight: 650,
-        },
-        labelBgStyle: { fill: "#0e1219", fillOpacity: 0.9 },
-        labelBgPadding: [4, 2] as [number, number],
-        labelBgBorderRadius: 3,
-      };
-    });
-  }, [activeBranchRoot, graph?.edges, reachable]);
+  const makeNodeObject = useCallback(
+    (node: GraphSceneNode) => {
+      const active = neighborhood === null || neighborhood.nodeKeys.has(node.key);
+      const selected = selectedKey === node.key;
+      const color = nodeColor(node);
+      const geometry =
+        node.type === "topic"
+          ? TOPIC_GEOMETRY
+          : highDensity
+            ? TAB_GEOMETRY_DENSE
+            : TAB_GEOMETRY;
+      let mesh = nodeObjectCacheRef.current.get(node.key);
+      if (!mesh) {
+        mesh = new THREE.Mesh(
+          geometry,
+          new THREE.MeshLambertMaterial({ transparent: true }),
+        );
+        nodeObjectCacheRef.current.set(node.key, mesh);
+      }
+      mesh.geometry = geometry;
+      mesh.material.color.set(color);
+      mesh.material.emissive.set(selected ? color : "#05070b");
+      mesh.material.emissiveIntensity = selected ? 0.58 : 0.08;
+      mesh.material.opacity = selected ? 1 : active ? 0.88 : 0.075;
+      mesh.material.depthWrite = active;
+      const scale =
+        node.type === "topic"
+          ? 1 + Math.min(0.7, Math.log2(node.tabCount + 1) * 0.08)
+          : 0.9 + node.importance * 0.14;
+      mesh.scale.setScalar(selected ? scale * 1.24 : scale);
+      mesh.renderOrder = selected ? 3 : active ? 2 : 0;
+      return mesh;
+    },
+    [highDensity, neighborhood, selectedKey],
+  );
 
-  const selectedRoot = graph?.nodes.find((node) => node.id === activeBranchRoot);
+  const openNode = (node: GraphSceneNode) => {
+    if (node.type === "tab") {
+      onSelectTab(node.id);
+    } else {
+      onSelectTopic({ id: node.id, path: node.path });
+    }
+  };
+  const refreshGraph = () => void invalidateRelationViews();
+  const preventHoveredTabMiddleMouse = (
+    event: ReactMouseEvent<HTMLDivElement>,
+  ) => {
+    if (middleClickTabId(hoveredNodeRef.current, event.button) !== null) {
+      event.preventDefault();
+    }
+  };
+  const closeHoveredTabOnMiddleMouse = (
+    event: ReactMouseEvent<HTMLDivElement>,
+  ) => {
+    const tabId = middleClickTabId(hoveredNodeRef.current, event.button);
+    if (tabId === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!isClosingTab(tabId)) onCloseTab(tabId);
+  };
 
   return (
-    <section className="graph-panel" aria-label={t("Tab knowledge graph")}>
-      <header className="graph-toolbar">
-        <div className="graph-metrics">
-          <strong>{t("{count} nodes", {
-            count: graph ? formatNumber(graph.nodes.length) : "-",
-            rawCount: graph?.nodes.length ?? 0,
-          })}</strong>
-          <span>{t("{count} links", {
-            count: graph ? formatNumber(graph.edges.length) : "-",
-            rawCount: graph?.edges.length ?? 0,
-          })}</span>
-          <span>{t("{count} topic groups", {
-            count: formatNumber(layout.groups.length),
-            rawCount: layout.groups.length,
-          })}</span>
+    <section className="graph-panel graph-3d-panel" aria-label={t("3D knowledge graph")}>
+      <header className="graph-3d-toolbar">
+        <div className="graph-3d-metrics">
+          <strong>
+            {t("{count} nodes", {
+              count: formatNumber(scene.nodes.length),
+              rawCount: scene.nodes.length,
+            })}
+          </strong>
+          <span>
+            {t("{count} links", {
+              count: formatNumber(scene.links.length),
+              rawCount: scene.links.length,
+            })}
+          </span>
+          <span>
+            {t("{count} topics", {
+              count: formatNumber(topicCount),
+              rawCount: topicCount,
+            })}
+          </span>
         </div>
-        <div className="graph-color-switch" aria-label={t("Graph color mode")} role="group">
-          <span>{t("Color by")}</span>
-          <button
-            aria-pressed={colorMode === "status"}
-            type="button"
-            onClick={() => setColorMode("status")}
-          >
-            {t("Status")}
-          </button>
-          <button
-            aria-pressed={colorMode === "browser"}
-            type="button"
-            onClick={() => setColorMode("browser")}
-          >
-            {t("Browser")}
-          </button>
+        <p className="graph-3d-navigation-hint">
+          {t("Drag to rotate, right-drag to pan, and scroll to zoom.")}
+        </p>
+        <div className="graph-depth-control" role="group" aria-label={t("Focus depth")}>
+          <span>{t("Focus depth")}</span>
+          {[1, 2, 3, 4, 5].map((depth) => (
+            <button
+              aria-pressed={focusDepth === depth}
+              disabled={!selectedNode}
+              key={depth}
+              type="button"
+              onClick={() => setFocusDepth(depth)}
+            >
+              {depth}
+            </button>
+          ))}
         </div>
-        {activeBranchRoot !== null ? (
-          <div className="branch-selection" role="status">
+        {selectedNode ? (
+          <div className="graph-focus-status" role="status">
             <span>
-              {t("Branch from {title} | {count} nodes", {
-                count: formatNumber(reachable.size),
-                rawCount: reachable.size,
-                title: selectedRoot
-                  ? displayTitle(selectedRoot)
-                  : `#${formatNumber(activeBranchRoot)}`,
+              {t("{count} nodes in focus", {
+                count: formatNumber(neighborhood?.nodeKeys.size ?? 1),
+                rawCount: neighborhood?.nodeKeys.size ?? 1,
               })}
             </span>
-            <button type="button" onClick={() => setBranchRootId(null)}>
-              {t("Clear branch")}
+            <button type="button" onClick={() => setSelectedKey(null)}>
+              {t("Clear selection")}
             </button>
           </div>
-        ) : (
-          <p className="graph-hint">{t("Select a node to trace its outgoing follows branch.")}</p>
-        )}
+        ) : null}
+        {focusQuery.isFetching ? (
+          <span className="graph-focus-query-state" role="status">
+            {t("Loading neighborhood...")}
+          </span>
+        ) : null}
+        {focusQuery.isError ? (
+          <span
+            className="graph-focus-query-state is-error"
+            role="alert"
+            title={errorMessage(focusQuery.error)}
+          >
+            {t("Couldn't load the full neighborhood.")}
+          </span>
+        ) : null}
       </header>
 
-      <div className="graph-canvas">
-        {graphQuery.isPending ? (
-          <GraphState title={t("Loading graph")} detail={t("Reading tabs, topics, and links...")} />
-        ) : null}
-        {graphQuery.isError ? (
-          <GraphState
-            title={t("Couldn't load graph")}
-            detail={errorMessage(graphQuery.error)}
-            action={
-              <button type="button" onClick={() => void graphQuery.refetch()}>
-                {t("Try again")}
-              </button>
-            }
-          />
-        ) : null}
-        {graphQuery.isSuccess && graph?.nodes.length === 0 ? (
-          <GraphState
-            title={rootTag ? t("No tabs in this topic") : t("No graph nodes yet")}
-            detail={
-              rootTag
-                ? t("Choose another topic or assign tabs to this branch.")
-                : t("Capture tabs to start building the knowledge graph.")
-            }
-          />
-        ) : null}
-        {graphQuery.isSuccess && graph && graph.nodes.length > 0 ? (
-          <ReactFlow
-            key={rootTag || "all-topics"}
-            colorMode="dark"
-            edges={flowEdges}
-            fitView
-            fitViewOptions={{ maxZoom: 1, padding: 0.16 }}
-            maxZoom={1.8}
-            minZoom={0.06}
-            nodes={flowNodes}
-            nodesConnectable={false}
-            nodesDraggable={false}
-            onlyRenderVisibleElements
-            onNodeClick={(_event, node) => {
-              const tabId = node.data.tabId;
-              if (typeof tabId !== "number") return;
-              setBranchRootId(tabId);
-              onSelectTab(tabId);
-            }}
-          >
-            <Background color="#27303d" gap={22} size={1} variant={BackgroundVariant.Dots} />
-            <Controls position="bottom-right" showInteractive={false} />
-          </ReactFlow>
-        ) : null}
+      <div className="graph-3d-workspace">
+        <div
+          className="graph-3d-canvas"
+          ref={hostRef}
+          onAuxClick={closeHoveredTabOnMiddleMouse}
+          onMouseDown={preventHoveredTabMiddleMouse}
+        >
+          {graphQuery.isPending ? (
+            <GraphState
+              title={t("Loading graph")}
+              detail={t("Reading tabs, topics, and links...")}
+            />
+          ) : null}
+          {graphQuery.isError ? (
+            <GraphState
+              title={t("Couldn't load graph")}
+              detail={errorMessage(graphQuery.error)}
+              action={
+                <button type="button" onClick={() => void graphQuery.refetch()}>
+                  {t("Try again")}
+                </button>
+              }
+            />
+          ) : null}
+          {graphQuery.isSuccess && scene.nodes.length === 0 ? (
+            <GraphState
+              title={rootTag ? t("No tabs in this topic") : t("No graph nodes yet")}
+              detail={
+                rootTag
+                  ? t("Choose another topic or assign tabs to this branch.")
+                  : t("Capture tabs or create topics to start building the knowledge graph.")
+              }
+            />
+          ) : null}
+          {graphQuery.isSuccess && scene.nodes.length > 0 ? (
+            <GraphRendererBoundary
+              key={rootTopicId ?? "all"}
+              fallback={
+                <GraphState
+                  title={t("3D view is unavailable")}
+                  detail={t("WebGL could not start. You can still manage topics and tabs in the Library.")}
+                />
+              }
+            >
+              <ForceGraph3D<GraphSceneNode, GraphSceneLink>
+                ref={graphRef}
+                backgroundColor="#090c12"
+                cooldownTicks={highDensity ? 90 : 140}
+                cooldownTime={highDensity ? 4_500 : 7_000}
+                enableNodeDrag={!highDensity}
+                graphData={scene}
+                height={size.height}
+                linkColor={(link) =>
+                  neighborhood && !neighborhood.edgeIds.has(link.id)
+                    ? "rgba(18, 23, 34, 0.08)"
+                    : EDGE_COLORS[link.edge.edgeType]
+                }
+                linkDirectionalArrowColor={(link) => EDGE_COLORS[link.edge.edgeType]}
+                linkDirectionalArrowLength={(link) =>
+                  link.edge.edgeType === "relation" &&
+                  (!neighborhood || neighborhood.edgeIds.has(link.id))
+                    ? 2.8
+                    : 0
+                }
+                linkDirectionalArrowResolution={highDensity ? 3 : 6}
+                linkLabel={(link) =>
+                  escapeHtml(link.edge.relationKind ?? t(link.edge.edgeType))
+                }
+                linkOpacity={0.48}
+                linkResolution={highDensity ? 3 : 6}
+                linkWidth={(link) =>
+                  neighborhood && !neighborhood.edgeIds.has(link.id)
+                    ? 0
+                    : link.edge.edgeType === "relation"
+                      ? 0.72
+                      : 0
+                }
+                nodeId="key"
+                nodeLabel={(node) =>
+                  `<strong>${escapeHtml(displayTitle(node))}</strong><br>${escapeHtml(
+                    nodeTypeLabel(node, t),
+                  )}`
+                }
+                nodeResolution={highDensity ? 6 : 10}
+                nodeThreeObject={makeNodeObject}
+                numDimensions={3}
+                showNavInfo={false}
+                warmupTicks={highDensity ? 24 : 45}
+                width={size.width}
+                onBackgroundClick={() => setSelectedKey(null)}
+                onEngineStop={() => {
+                  if (selectedNode) return;
+                  graphRef.current?.zoomToFit(500, 70);
+                }}
+                onNodeClick={(node) => selectNode(node.key)}
+                onNodeHover={(node) => {
+                  hoveredNodeRef.current = node ?? null;
+                }}
+              />
+            </GraphRendererBoundary>
+          ) : null}
+          <div className="graph-3d-legend" aria-label={t("Graph legend")}>
+            <span><i className="is-topic" />{t("Topics")}</span>
+            <span><i className="is-tab" />{t("Tabs")}</span>
+            <span><b className="is-relation" />{t("Relations")}</span>
+          </div>
+        </div>
+
+        <NodeInspector
+          activationErrorForTab={(tabId) =>
+            activationErrorForTab(tabId) ?? closeErrorForTab(tabId)
+          }
+          activationInProgress={activationInProgress}
+          connectedLinks={connectedLinks}
+          deleteError={deleteMutation.error}
+          deletingRelationId={
+            deleteMutation.isPending ? deleteMutation.variables : null
+          }
+          isActivatingTab={isActivatingTab}
+          isClosingTab={isClosingTab}
+          node={selectedNode}
+          sceneNodes={scene.nodes}
+          onBrowserAction={onBrowserAction}
+          onCloseTab={onCloseTab}
+          onDeleteRelation={(id) => deleteMutation.mutate(id)}
+          onOpenNode={openNode}
+          onRelationCreated={refreshGraph}
+          onSelectNode={selectNode}
+        />
       </div>
     </section>
   );

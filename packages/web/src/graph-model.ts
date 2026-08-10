@@ -1,186 +1,198 @@
-import type { GraphNode, TabLink } from "@tabhub/shared";
+import type {
+  GraphV2Edge,
+  GraphV2Node,
+  GraphV2Response,
+  KnowledgeNodeRef,
+} from "@tabhub/shared";
 
-export interface GraphNodeSize {
-  height: number;
-  width: number;
-}
+export type GraphNodeKey = `${KnowledgeNodeRef["type"]}:${number}`;
 
-export interface PositionedGraphNode {
-  groupKey: string;
-  node: GraphNode;
-  position: { x: number; y: number };
-  size: GraphNodeSize;
-}
+export type GraphSceneNode = GraphV2Node & {
+  key: GraphNodeKey;
+};
 
-export interface GraphLayoutGroup {
-  count: number;
-  height: number;
+export interface GraphSceneLink {
+  edge: GraphV2Edge;
   id: string;
-  label: string;
-  width: number;
-  x: number;
+  source: GraphNodeKey | GraphSceneNode;
+  sourceKey: GraphNodeKey;
+  target: GraphNodeKey | GraphSceneNode;
+  targetKey: GraphNodeKey;
 }
 
-export interface GraphLayout {
-  groups: GraphLayoutGroup[];
-  height: number;
-  nodes: PositionedGraphNode[];
-  width: number;
+export interface GraphAdjacencyEntry {
+  edgeId: string;
+  neighborKey: GraphNodeKey;
 }
 
-export type GraphModelTranslator = (key: string) => string;
-
-const horizontalCell = 214;
-const verticalCell = 108;
-const groupGap = 96;
-const groupHeaderHeight = 46;
-
-function compareText(left: string, right: string) {
-  const normalizedLeft = left.toLocaleLowerCase("en-US");
-  const normalizedRight = right.toLocaleLowerCase("en-US");
-  if (normalizedLeft < normalizedRight) return -1;
-  if (normalizedLeft > normalizedRight) return 1;
-  if (left < right) return -1;
-  if (left > right) return 1;
-  return 0;
+export interface GraphScene {
+  adjacency: Map<GraphNodeKey, GraphAdjacencyEntry[]>;
+  linkById: Map<string, GraphSceneLink>;
+  links: GraphSceneLink[];
+  nodeByKey: Map<GraphNodeKey, GraphSceneNode>;
+  nodes: GraphSceneNode[];
 }
 
-function nodeGroup(
-  node: GraphNode,
-  selectedRoot: string,
-  t: GraphModelTranslator | undefined,
-) {
-  if (selectedRoot) {
-    return {
-      id: `selected:${selectedRoot}`,
-      label: selectedRoot,
-      sortLabel: selectedRoot,
-    };
-  }
-  const rootTag = node.rootTags[0];
-  return rootTag
-    ? { id: `tag:${rootTag}`, label: rootTag, sortLabel: rootTag }
-    : {
-        id: "untagged",
-        label: t?.("Untagged") ?? "Untagged",
-        sortLabel: "Untagged",
-      };
+export interface GraphNeighborhood {
+  distances: Map<GraphNodeKey, number>;
+  edgeIds: Set<string>;
+  nodeKeys: Set<GraphNodeKey>;
 }
 
-export function graphNodeSize(importance: GraphNode["importance"]): GraphNodeSize {
+const EMPTY_GRAPH: GraphV2Response = { nodes: [], edges: [] };
+
+export function selectGraphProjection(
+  baseGraph: GraphV2Response | undefined,
+  focusGraph: GraphV2Response | undefined,
+  focusActive: boolean,
+): GraphV2Response {
+  return (focusActive ? focusGraph : undefined) ?? baseGraph ?? EMPTY_GRAPH;
+}
+
+export function graphNodeKey(ref: KnowledgeNodeRef): GraphNodeKey {
+  return `${ref.type}:${ref.id}`;
+}
+
+export function graphNodeRefFromKey(key: GraphNodeKey): KnowledgeNodeRef {
+  const separator = key.indexOf(":");
   return {
-    width: 150 + importance * 12,
-    height: 56 + importance * 4,
+    type: key.slice(0, separator) as KnowledgeNodeRef["type"],
+    id: Number(key.slice(separator + 1)),
   };
 }
 
-export function layoutGraphNodes(
-  nodes: GraphNode[],
-  selectedRoot = "",
-  t?: GraphModelTranslator,
-): GraphLayout {
-  const grouped = new Map<
-    string,
-    { label: string; nodes: GraphNode[]; sortLabel: string }
-  >();
+export function graphNodeRef(node: GraphV2Node): KnowledgeNodeRef {
+  return { type: node.type, id: node.id };
+}
+
+export function graphNodeTitle(node: GraphV2Node): string {
+  if (node.type === "topic") return node.name;
+  if (node.title?.trim()) return node.title.trim();
+  try {
+    return new URL(node.url).hostname;
+  } catch {
+    return node.url;
+  }
+}
+
+export function middleClickTabId(
+  node: GraphV2Node | null | undefined,
+  button: number,
+): number | null {
+  return button === 1 && node?.type === "tab" && node.isOpen ? node.id : null;
+}
+
+function graphNodeSearchText(node: GraphV2Node): string {
+  return node.type === "topic"
+    ? `${node.name}\n${node.path}`.toLocaleLowerCase()
+    : [
+        graphNodeTitle(node),
+        node.url,
+        node.browser,
+        ...node.tagPaths,
+        ...node.rootTags,
+      ]
+        .join("\n")
+        .toLocaleLowerCase();
+}
+
+export function buildGraphScene(graph: GraphV2Response): GraphScene {
+  const nodes = graph.nodes.map(
+    (node): GraphSceneNode => ({ ...node, key: graphNodeKey(node) }),
+  );
+  const nodeByKey = new Map(nodes.map((node) => [node.key, node]));
+  const adjacency = new Map<GraphNodeKey, GraphAdjacencyEntry[]>();
+
   for (const node of nodes) {
-    const identity = nodeGroup(node, selectedRoot, t);
-    const group = grouped.get(identity.id) ?? {
-      label: identity.label,
-      nodes: [],
-      sortLabel: identity.sortLabel,
-    };
-    group.nodes.push(node);
-    grouped.set(identity.id, group);
+    adjacency.set(node.key, []);
   }
 
-  const groupEntries = [...grouped.entries()].sort((left, right) => {
-    const labelOrder = compareText(left[1].sortLabel, right[1].sortLabel);
-    return labelOrder || compareText(left[0], right[0]);
-  });
-  const positioned: PositionedGraphNode[] = [];
-  const groups: GraphLayoutGroup[] = [];
-  let nextGroupX = 0;
-  let maximumHeight = 0;
+  const links: GraphSceneLink[] = [];
+  for (const edge of graph.edges) {
+    const sourceKey = graphNodeKey(edge.source);
+    const targetKey = graphNodeKey(edge.target);
+    if (!nodeByKey.has(sourceKey) || !nodeByKey.has(targetKey)) continue;
 
-  for (const [id, group] of groupEntries) {
-    const groupNodes = group.nodes;
-    groupNodes.sort((left, right) => {
-      const titleOrder = compareText(left.title ?? left.url, right.title ?? right.url);
-      return titleOrder || left.id - right.id;
-    });
-    const columns = Math.min(
-      12,
-      Math.max(1, Math.ceil(Math.sqrt(groupNodes.length * 1.8))),
-    );
-    const rows = Math.ceil(groupNodes.length / columns);
-    const width = columns * horizontalCell - 24;
-    const height = groupHeaderHeight + rows * verticalCell;
-
-    groups.push({
-      count: groupNodes.length,
-      height,
-      id,
-      label: group.label,
-      width,
-      x: nextGroupX,
-    });
-    maximumHeight = Math.max(maximumHeight, height);
-
-    groupNodes.forEach((node, index) => {
-      positioned.push({
-        groupKey: group.label,
-        node,
-        position: {
-          x: nextGroupX + (index % columns) * horizontalCell,
-          y: groupHeaderHeight + Math.floor(index / columns) * verticalCell,
-        },
-        size: graphNodeSize(node.importance),
-      });
-    });
-    nextGroupX += width + groupGap;
+    const link: GraphSceneLink = {
+      edge,
+      id: edge.id,
+      source: sourceKey,
+      sourceKey,
+      target: targetKey,
+      targetKey,
+    };
+    links.push(link);
+    adjacency.get(sourceKey)!.push({ edgeId: edge.id, neighborKey: targetKey });
+    adjacency.get(targetKey)!.push({ edgeId: edge.id, neighborKey: sourceKey });
   }
 
   return {
-    groups,
-    height: maximumHeight,
-    nodes: positioned,
-    width: Math.max(0, nextGroupX - groupGap),
+    adjacency,
+    linkById: new Map(links.map((link) => [link.id, link])),
+    links,
+    nodeByKey,
+    nodes,
   };
 }
 
-export function reachableFollowsBranch(
-  rootId: number,
-  edges: TabLink[],
-  visibleNodeIds: Iterable<number>,
-) {
-  const visible = new Set(visibleNodeIds);
-  if (!visible.has(rootId)) return new Set<number>();
-
-  const outgoing = new Map<number, number[]>();
-  for (const edge of edges) {
-    if (
-      edge.kind !== "follows" ||
-      !visible.has(edge.fromTab) ||
-      !visible.has(edge.toTab)
-    ) {
-      continue;
-    }
-    const targets = outgoing.get(edge.fromTab) ?? [];
-    targets.push(edge.toTab);
-    outgoing.set(edge.fromTab, targets);
+export function selectGraphNeighborhood(
+  scene: GraphScene,
+  rootKey: GraphNodeKey,
+  requestedDepth: number,
+): GraphNeighborhood {
+  if (!scene.nodeByKey.has(rootKey)) {
+    return { distances: new Map(), edgeIds: new Set(), nodeKeys: new Set() };
   }
 
-  const reachable = new Set<number>([rootId]);
-  const queue = [rootId];
+  const depth = Math.max(1, Math.min(5, Math.trunc(requestedDepth)));
+  const distances = new Map<GraphNodeKey, number>([[rootKey, 0]]);
+  const queue: GraphNodeKey[] = [rootKey];
+
   for (let index = 0; index < queue.length; index += 1) {
-    const current = queue[index]!;
-    for (const target of outgoing.get(current) ?? []) {
-      if (reachable.has(target)) continue;
-      reachable.add(target);
-      queue.push(target);
+    const currentKey = queue[index]!;
+    const currentDistance = distances.get(currentKey)!;
+    if (currentDistance >= depth) continue;
+
+    for (const entry of scene.adjacency.get(currentKey) ?? []) {
+      if (distances.has(entry.neighborKey)) continue;
+      distances.set(entry.neighborKey, currentDistance + 1);
+      queue.push(entry.neighborKey);
     }
   }
 
-  return reachable;
+  const nodeKeys = new Set(distances.keys());
+  const edgeIds = new Set(
+    scene.links
+      .filter(
+        (link) =>
+          nodeKeys.has(link.sourceKey) && nodeKeys.has(link.targetKey),
+      )
+      .map((link) => link.id),
+  );
+
+  return { distances, edgeIds, nodeKeys };
+}
+
+export function searchGraphNodes(
+  scene: GraphScene,
+  query: string,
+  options: { excludeKey?: GraphNodeKey; limit?: number } = {},
+): GraphSceneNode[] {
+  const terms = query
+    .trim()
+    .toLocaleLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  const limit = Math.max(1, options.limit ?? 12);
+  const results: GraphSceneNode[] = [];
+
+  for (const node of scene.nodes) {
+    if (node.key === options.excludeKey) continue;
+    const searchable = graphNodeSearchText(node);
+    if (terms.some((term) => !searchable.includes(term))) continue;
+    results.push(node);
+    if (results.length >= limit) break;
+  }
+
+  return results;
 }

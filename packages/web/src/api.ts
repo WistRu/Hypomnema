@@ -3,7 +3,9 @@ import {
   deleteResponseSchema,
   duplicateGroupBulkResponseSchema,
   duplicateGroupListResponseSchema,
+  graphV2ResponseSchema,
   graphResponseSchema,
+  knowledgeRelationSchema,
   linkListResponseSchema,
   setStatusResponseSchema,
   summaryEnqueueResponseSchema,
@@ -18,12 +20,17 @@ import {
   tabLinkSchema,
   tabListResponseSchema,
   tagTreeResponseSchema,
+  tagRecordSchema,
   workspaceDetailSchema,
   workspaceListResponseSchema,
+  type CreateKnowledgeRelation,
+  type CreateTag,
+  type KnowledgeNodeRef,
   type CreateWorkspace,
   type CreateLink,
   type PatchLink,
   type PatchTab,
+  type PatchTag,
   type TabCommandRelayErrorCode,
   type TabCommandRelayHttpRequest,
   type TabCommandRelayResult,
@@ -62,6 +69,26 @@ export interface DuplicateGroupListFilters {
 export type PatchTabDetails = PatchTab;
 export type CreateTabLink = CreateLink;
 export type PatchTabLink = PatchLink;
+export type CreateTopicInput = CreateTag;
+export type UpdateTopicInput = PatchTag;
+export type CreateRelationInput = CreateKnowledgeRelation;
+
+export interface KnowledgeGraphFocus {
+  depth: number;
+  node: KnowledgeNodeRef;
+}
+
+export class ApiRequestError extends Error {
+  readonly name = "ApiRequestError";
+
+  constructor(
+    message: string,
+    readonly code: string | undefined,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
 
 export class TabCommandRelayClientError extends Error {
   readonly code: TabCommandRelayErrorCode;
@@ -232,19 +259,25 @@ async function responseError(response: Response, fallbackMessage: string) {
   try {
     payload = await response.json();
   } catch {
-    return new Error(fallbackMessage);
+    return new ApiRequestError(fallbackMessage, undefined, response.status);
   }
 
-  if (
+  const responseCode =
+    typeof payload === "object" &&
+    payload !== null &&
+    "error" in payload &&
+    typeof payload.error === "string"
+      ? payload.error
+      : undefined;
+  const responseMessage =
     typeof payload === "object" &&
     payload !== null &&
     "message" in payload &&
     typeof payload.message === "string"
-  ) {
-    return new Error(payload.message);
-  }
+      ? payload.message
+      : fallbackMessage;
 
-  return new Error(fallbackMessage);
+  return new ApiRequestError(responseMessage, responseCode, response.status);
 }
 
 async function requestJson(
@@ -635,6 +668,56 @@ export async function fetchTagTree(signal?: AbortSignal) {
   return parsed.data;
 }
 
+export async function createTopic(input: CreateTopicInput) {
+  const payload = await requestJson(
+    "/api/tags",
+    {
+      body: JSON.stringify(input),
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      method: "POST",
+    },
+    "TabHub could not create this topic",
+    "TabHub returned an unreadable topic.",
+  );
+  const parsed = tagRecordSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected topic.");
+  }
+  return parsed.data;
+}
+
+export async function updateTopic(id: number, input: UpdateTopicInput) {
+  const payload = await requestJson(
+    `/api/tags/${id}`,
+    {
+      body: JSON.stringify(input),
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      method: "PATCH",
+    },
+    "TabHub could not update this topic",
+    "TabHub returned an unreadable topic update.",
+  );
+  const parsed = tagRecordSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected topic update.");
+  }
+  return parsed.data;
+}
+
+export async function deleteTopic(id: number) {
+  const payload = await requestJson(
+    `/api/tags/${id}`,
+    { headers: { Accept: "application/json" }, method: "DELETE" },
+    "TabHub could not delete this topic",
+    "TabHub returned an unreadable topic deletion.",
+  );
+  const parsed = deleteResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected topic deletion.");
+  }
+  return parsed.data;
+}
+
 export async function fetchGraph(rootTag: string, signal?: AbortSignal) {
   const searchParams = new URLSearchParams();
   if (rootTag) searchParams.set("root_tag", rootTag);
@@ -650,6 +733,66 @@ export async function fetchGraph(rootTag: string, signal?: AbortSignal) {
     throw new Error("TabHub returned an unexpected graph.");
   }
 
+  return parsed.data;
+}
+
+export async function fetchKnowledgeGraph(
+  rootTopicId: number | null,
+  signal?: AbortSignal,
+  focus?: KnowledgeGraphFocus,
+) {
+  const searchParams = new URLSearchParams();
+  if (rootTopicId !== null) {
+    searchParams.set("root_topic_id", String(rootTopicId));
+  }
+  if (focus !== undefined) {
+    searchParams.set("focus_node_type", focus.node.type);
+    searchParams.set("focus_node_id", String(focus.node.id));
+    searchParams.set("focus_depth", String(focus.depth));
+  }
+  const query = searchParams.size > 0 ? `?${searchParams.toString()}` : "";
+  const payload = await requestJson(
+    `/api/graph/v2${query}`,
+    { headers: { Accept: "application/json" }, signal: signal ?? null },
+    "TabHub could not load the knowledge graph",
+    "TabHub returned an unreadable knowledge graph.",
+  );
+  const parsed = graphV2ResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected knowledge graph.");
+  }
+  return parsed.data;
+}
+
+export async function createRelation(input: CreateRelationInput) {
+  const payload = await requestJson(
+    "/api/relations",
+    {
+      body: JSON.stringify(input),
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      method: "POST",
+    },
+    "TabHub could not create this relation",
+    "TabHub returned an unreadable relation.",
+  );
+  const parsed = knowledgeRelationSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected relation.");
+  }
+  return parsed.data;
+}
+
+export async function deleteRelation(id: number) {
+  const payload = await requestJson(
+    `/api/relations/${id}`,
+    { headers: { Accept: "application/json" }, method: "DELETE" },
+    "TabHub could not delete this relation",
+    "TabHub returned an unreadable relation deletion.",
+  );
+  const parsed = deleteResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected relation deletion.");
+  }
   return parsed.data;
 }
 
