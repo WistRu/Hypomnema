@@ -263,11 +263,29 @@ describe("Library as the primary workspace", () => {
     );
     expect(mocks.closePhysical).toHaveBeenCalledWith(physicalTabs[2]);
 
-    const selectionMode = screen.getByRole("group", { name: "Library selection mode" });
-    expect(within(selectionMode).getByRole("button", { name: "Pages" })).toBeTruthy();
-    fireEvent.click(
-      within(selectionMode).getByRole("button", { name: "Browser tabs" }),
-    );
+    expect(
+      screen.queryByRole("group", { name: "Library selection mode" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pages" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Browser tabs" })).toBeNull();
+    const manageTabs = screen.getByRole("button", {
+      name: "Manage browser tabs",
+    });
+    expect(screen.getByRole("region", { name: "Library pages" })).toBeTruthy();
+    expect(manageTabs.getAttribute("aria-pressed")).toBe("false");
+    expect(
+      screen.queryByText("Select saved pages to organize status and topics."),
+    ).toBeNull();
+    fireEvent.click(manageTabs);
+    expect(manageTabs.getAttribute("aria-pressed")).toBe("true");
+    expect(
+      screen.getByText("Select and manage exact tabs in their owning browsers."),
+    ).toBeTruthy();
+    const filterBar = rendered.container.querySelector<HTMLElement>(".filter-bar");
+    if (!filterBar) throw new Error("Missing Library filters");
+    expect(
+      within(filterBar).queryByRole("button", { name: "All filtered results" }),
+    ).toBeNull();
     expect(
       within(duplicatedRow).getByRole("checkbox", {
         name: /^Select Duplicate copy A \|/,
@@ -283,6 +301,46 @@ describe("Library as the primary workspace", () => {
     );
     if (!physicalToolbar) throw new Error("Missing physical browser toolbar");
     expect(within(physicalToolbar).getByText("2 selected")).toBeTruthy();
+
+    fireEvent.click(manageTabs);
+    expect(manageTabs.getAttribute("aria-pressed")).toBe("false");
+    expect(
+      within(duplicatedRow).getByRole("checkbox", {
+        name: "Select Duplicated page",
+      }),
+    ).toBeTruthy();
+    expect(
+      within(duplicatedRow).queryByRole("checkbox", {
+        name: /^Select Duplicate copy A \|/,
+      }),
+    ).toBeNull();
+    expect(
+      rendered.container.querySelector(".open-tab-bulk-toolbar"),
+    ).toBeNull();
+
+    fireEvent.click(manageTabs);
+    expect(manageTabs.getAttribute("aria-pressed")).toBe("true");
+    const refreshedDuplicatedRow = screen.getByText("Duplicated page").closest("tr");
+    if (!refreshedDuplicatedRow) throw new Error("Missing refreshed Library row");
+    expect(
+      (
+        within(refreshedDuplicatedRow).getByRole("checkbox", {
+          name: "Select browser tabs for Duplicated page",
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(false);
+    expect(
+      rendered.container.querySelector(".open-tab-bulk-toolbar"),
+    ).toBeNull();
+
+    const viewSwitch = screen.getByRole("group", { name: "Workspace view" });
+    fireEvent.click(within(viewSwitch).getByRole("button", { name: "Graph" }));
+    fireEvent.click(within(viewSwitch).getByRole("button", { name: "Library" }));
+    expect(
+      screen.getByRole("button", { name: "Manage browser tabs" }).getAttribute(
+        "aria-pressed",
+      ),
+    ).toBe("false");
 
     queryClient.clear();
   });

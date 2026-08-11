@@ -332,8 +332,34 @@ main {
   line-height: 1.4;
 }
 
-.library-selection-mode {
+.manage-browser-tabs-button {
+  min-height: 30px;
   flex: 0 0 auto;
+  border: 1px solid #34405a;
+  border-radius: 6px;
+  padding: 0 11px;
+  color: #a5b2ca;
+  background: #151c28;
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.manage-browser-tabs-button:hover {
+  border-color: #53658e;
+  color: #d4ddf2;
+}
+
+.manage-browser-tabs-button[aria-pressed="true"] {
+  border-color: #6378b5;
+  color: #e5eaff;
+  background: #28344f;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 25%);
+}
+
+.manage-browser-tabs-button:focus-visible {
+  outline: 2px solid #718cff;
+  outline-offset: 2px;
 }
 
 .filter-bar {

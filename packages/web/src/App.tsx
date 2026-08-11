@@ -488,6 +488,9 @@ export function App() {
     if (shouldRefreshLibrary(view, nextView)) {
       void tabsQuery.refetch();
     }
+    if (nextView !== "library") {
+      setSelectionMode("canonical");
+    }
     setView(nextView);
   };
   const bulkStatusMutation = useMutation({
@@ -1047,33 +1050,26 @@ export function App() {
             />
 
             {view === "library" ? (
-              <section className="table-panel" aria-label={t("Browser tabs")}>
+              <section className="table-panel" aria-label={t("Library pages")}>
               <div className="library-mode-bar">
-                <div
-                  className="view-switch library-selection-mode"
-                  aria-label={t("Library selection mode")}
-                  role="group"
+                <button
+                  aria-pressed={selectionMode === "physical"}
+                  className="manage-browser-tabs-button"
+                  type="button"
+                  onClick={() => {
+                    if (selectionMode === "physical") {
+                      setPhysicalSelection(new Map());
+                      setSelectionMode("canonical");
+                      return;
+                    }
+                    setSelectionMode("physical");
+                  }}
                 >
-                  <button
-                    aria-pressed={selectionMode === "canonical"}
-                    type="button"
-                    onClick={() => setSelectionMode("canonical")}
-                  >
-                    {t("Pages")}
-                  </button>
-                  <button
-                    aria-pressed={selectionMode === "physical"}
-                    type="button"
-                    onClick={() => setSelectionMode("physical")}
-                  >
-                    {t("Browser tabs")}
-                  </button>
-                </div>
-                <p>
-                  {selectionMode === "physical"
-                    ? t("Select and manage exact tabs in their owning browsers.")
-                    : t("Select saved pages to organize status and topics.")}
-                </p>
+                  {t("Manage browser tabs")}
+                </button>
+                {selectionMode === "physical" ? (
+                  <p>{t("Select and manage exact tabs in their owning browsers.")}</p>
+                ) : null}
               </div>
               <div className="filter-bar">
                 <div className="filter-label">
@@ -1194,36 +1190,23 @@ export function App() {
                         : t("0 tabs")
                       : t("Loading collection")}
                 </p>
-                <button
-                  className="clear-button"
-                  disabled={
-                    (selectionMode === "canonical"
-                      ? bulkBusy
-                      : !libraryPhysicalResolutionAvailable) ||
-                    !tabsQuery.data ||
-                    tabsQuery.data.total === 0
-                  }
-                  type="button"
-                  onClick={() => {
-                    if (selectionMode === "physical") {
-                      setPhysicalSelection(
-                        new Map(
-                          libraryOpenTabs.map((instance) => [
-                            instance.instanceId,
-                            instance,
-                          ]),
-                        ),
-                      );
-                      return;
+                {selectionMode === "canonical" ? (
+                  <button
+                    className="clear-button"
+                    disabled={
+                      bulkBusy || !tabsQuery.data || tabsQuery.data.total === 0
                     }
-                    selectAllLibraryMutation.mutate({
-                      filterKey: libraryFilterKey,
-                      filters: libraryFilters,
-                    });
-                  }}
-                >
-                  {t("All filtered results")}
-                </button>
+                    type="button"
+                    onClick={() =>
+                      selectAllLibraryMutation.mutate({
+                        filterKey: libraryFilterKey,
+                        filters: libraryFilters,
+                      })
+                    }
+                  >
+                    {t("All filtered results")}
+                  </button>
+                ) : null}
                 {selectionMode === "canonical" && selectAllLibraryMutation.isError ? (
                   <span className="bulk-error" role="alert">
                     {localizeError(selectAllLibraryMutation.error)}
