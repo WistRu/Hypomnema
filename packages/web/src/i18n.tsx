@@ -1114,6 +1114,8 @@ export function resolveLocale(
 }
 
 export function formatDuration(locale: Locale, milliseconds: number): string {
+  const isPositiveSubsecond =
+    Number.isFinite(milliseconds) && milliseconds > 0 && milliseconds < 1_000;
   const totalSeconds = Number.isFinite(milliseconds)
     ? Math.max(0, Math.floor(milliseconds / 1_000))
     : 0;
@@ -1124,6 +1126,10 @@ export function formatDuration(locale: Locale, milliseconds: number): string {
     locale === "ru"
       ? { hour: "ч", minute: "мин", second: "с" }
       : { hour: "h", minute: "m", second: "s" };
+
+  if (isPositiveSubsecond) {
+    return `<1${locale === "ru" ? " " : ""}${units.second}`;
+  }
 
   if (hours > 0) {
     return [

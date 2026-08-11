@@ -52,6 +52,17 @@ describe("duration formatting", () => {
     expect(formatDuration("ru", 125_000)).toBe("2 мин 5 с");
     expect(formatDuration("ru", 0)).toBe("0 с");
   });
+
+  it("keeps positive sub-second activity visibly distinct from zero", () => {
+    expect(formatDuration("en", 0)).toBe("0s");
+    expect(formatDuration("en", 1)).toBe("<1s");
+    expect(formatDuration("en", 999)).toBe("<1s");
+    expect(formatDuration("en", 1_000)).toBe("1s");
+    expect(formatDuration("ru", 0)).toBe("0 с");
+    expect(formatDuration("ru", 1)).toBe("<1 с");
+    expect(formatDuration("ru", 999)).toBe("<1 с");
+    expect(formatDuration("ru", 1_000)).toBe("1 с");
+  });
 });
 
 describe("translations", () => {

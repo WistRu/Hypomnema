@@ -394,7 +394,7 @@ describe("tab activity ingestion", () => {
     }
   });
 
-  it("retains totals when activity reaches the server before its first snapshot", async () => {
+  it("creates a closed Library page when activity precedes its first snapshot", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-activity-first-"));
     const app = createApp({
       databasePath: join(directory, "tabhub.sqlite"),
@@ -420,6 +420,35 @@ describe("tab activity ingestion", () => {
         },
       });
       expect(activity.statusCode).toBe(200);
+
+      const libraryBeforeSnapshot = await app.inject({
+        method: "GET",
+        url: "/api/tabs?browser=chrome&is_open=false&pageSize=50",
+      });
+      expect(libraryBeforeSnapshot.statusCode).toBe(200);
+      expect(libraryBeforeSnapshot.json()).toMatchObject({
+        total: 1,
+        items: [
+          {
+            url: "https://example.com/activity-first",
+            urlNormalized: "https://example.com/activity-first",
+            browser: "chrome",
+            tagPaths: ["Без темы"],
+            isOpen: false,
+            windowId: null,
+            index: null,
+            firstSeenAt: "2026-08-10T12:00:00.000Z",
+            lastSeenAt: "2026-08-10T12:00:03.000Z",
+            closedAt: "2026-08-10T12:00:03.000Z",
+            foregroundTimeMs: 3_000,
+            engagedTimeMs: 2_000,
+            openInstanceCount: 0,
+            openForegroundTimeMs: 0,
+            openEngagedTimeMs: 0,
+          },
+        ],
+      });
+      const canonicalIdBeforeSnapshot = libraryBeforeSnapshot.json().items[0].id;
 
       const snapshot = await app.inject({
         method: "POST",
@@ -457,13 +486,22 @@ describe("tab activity ingestion", () => {
         method: "GET",
         url: "/api/tabs?browser=chrome&pageSize=50",
       });
-      expect(library.json().items).toEqual([
-        expect.objectContaining({
-          url: "https://example.com/activity-first",
-          foregroundTimeMs: 3_000,
-          engagedTimeMs: 2_000,
-        }),
-      ]);
+      expect(library.json()).toMatchObject({
+        total: 1,
+        items: [
+          {
+            id: canonicalIdBeforeSnapshot,
+            url: "https://example.com/activity-first",
+            isOpen: true,
+            windowId: 7,
+            index: 0,
+            firstSeenAt: "2026-08-10T12:00:00.000Z",
+            foregroundTimeMs: 3_000,
+            engagedTimeMs: 2_000,
+            openInstanceCount: 1,
+          },
+        ],
+      });
     } finally {
       await app.close();
       await rm(directory, { recursive: true, force: true });

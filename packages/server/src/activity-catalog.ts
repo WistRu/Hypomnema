@@ -82,6 +82,45 @@ export function createActivityCatalog(
       engaged_ms = tab_activity_totals.engaged_ms + excluded.engaged_ms,
       updated_at = excluded.updated_at
   `);
+  const ensurePageRecord = connection.prepare(`
+    INSERT INTO tabs (
+      url,
+      url_normalized,
+      title,
+      browser,
+      window_id,
+      tab_index,
+      favicon_url,
+      is_open,
+      first_seen_at,
+      last_seen_at,
+      closed_at
+    ) VALUES (
+      @url,
+      @urlNormalized,
+      NULL,
+      @browser,
+      NULL,
+      NULL,
+      NULL,
+      0,
+      @firstSeenAt,
+      @lastSeenAt,
+      @closedAt
+    )
+    ON CONFLICT (url_normalized, browser) DO UPDATE SET
+      url = CASE
+        WHEN excluded.last_seen_at >= tabs.last_seen_at THEN excluded.url
+        ELSE tabs.url
+      END,
+      first_seen_at = MIN(tabs.first_seen_at, excluded.first_seen_at),
+      last_seen_at = MAX(tabs.last_seen_at, excluded.last_seen_at),
+      closed_at = CASE
+        WHEN tabs.is_open = 1 THEN NULL
+        WHEN tabs.closed_at IS NULL THEN excluded.closed_at
+        ELSE MAX(tabs.closed_at, excluded.closed_at)
+      END
+  `);
   const incrementPageTotals = connection.prepare(`
     INSERT INTO tab_page_activity_totals (
       browser,
@@ -170,6 +209,15 @@ export function createActivityCatalog(
       }
 
       const updatedAt = clock().toISOString();
+      const urlNormalized = normalizeUrl(activity.url);
+      ensurePageRecord.run({
+        browser: activity.browser,
+        closedAt: activity.endedAt,
+        firstSeenAt: activity.startedAt,
+        lastSeenAt: activity.endedAt,
+        url: activity.url,
+        urlNormalized,
+      });
       incrementTotals.run({
         browserSessionId: activity.browserSessionId,
         browserTabId: activity.browserTabId,
@@ -186,7 +234,7 @@ export function createActivityCatalog(
         lastActivityAt: activity.endedAt,
         updatedAt,
         url: activity.url,
-        urlNormalized: normalizeUrl(activity.url),
+        urlNormalized,
       });
       advanceCursor.run({
         browserSessionId: activity.browserSessionId,
