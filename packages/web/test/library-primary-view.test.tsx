@@ -251,6 +251,9 @@ describe("Library as the primary workspace", () => {
       'td[data-column="activity"]',
     );
     if (!tabCell || !activityCell) throw new Error("Missing Library cells");
+    const canonicalUrl = within(tabCell).getByText("https://example.com/18");
+    expect(canonicalUrl.getAttribute("title")).toBe("https://example.com/18");
+    expect(within(tabCell).queryByText("example.com | #18")).toBeNull();
     fireEvent.click(within(duplicatedRow).getByRole("button", { name: "Duplicated page" }));
     expect(within(tabCell).getByText("Duplicate copy A")).toBeTruthy();
     expect(within(tabCell).getByText("Duplicate copy B")).toBeTruthy();

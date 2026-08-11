@@ -185,8 +185,9 @@ const russianMessages: Record<string, Message> = {
   Russian: "Русский",
   Save: "Сохранить",
   "Save link": "Сохранить связь",
-  "Search tab titles and content": "Поиск по заголовкам и содержимому",
-  "Search titles and content": "Найти заголовки и содержимое",
+  "Search tab titles, URLs, and content":
+    "Поиск по заголовкам, URL и содержимому",
+  "Search titles, URLs, and content": "Найти заголовки, URL и содержимое",
   "Select {tab}": "Выбрать «{tab}»",
   "Select all browser tabs on this page":
     "Выбрать все вкладки браузеров на этой странице",

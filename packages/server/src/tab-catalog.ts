@@ -148,7 +148,7 @@ function toFtsQuery(query: string): string {
     return '"__tabhub_no_search_tokens__"';
   }
 
-  return tokens.map((token) => `"${token}"`).join(" AND ");
+  return tokens.map((token) => `"${token}"*`).join(" AND ");
 }
 
 function tabFilter(input: FilterTabsInput): {
@@ -178,10 +178,29 @@ function tabFilter(input: FilterTabsInput): {
   }
 
   if (input.q !== undefined) {
-    predicates.push(
-      "tabs.id IN (SELECT rowid FROM contents_fts WHERE contents_fts MATCH ?)",
+    predicates.push(`(
+      tabs.id IN (
+        SELECT rowid FROM contents_fts WHERE contents_fts MATCH ?
+      )
+      OR tabhub_contains_normalized(tabs.title, ?) = 1
+      OR tabhub_contains_normalized(tabs.url, ?) = 1
+      OR EXISTS (
+        SELECT 1
+        FROM tab_instances AS search_instances
+        WHERE search_instances.tab_id = tabs.id
+          AND (
+            tabhub_contains_normalized(search_instances.title, ?) = 1
+            OR tabhub_contains_normalized(search_instances.url, ?) = 1
+          )
+      )
+    )`);
+    parameters.push(
+      toFtsQuery(input.q),
+      input.q,
+      input.q,
+      input.q,
+      input.q,
     );
-    parameters.push(toFtsQuery(input.q));
   }
 
   if (input.status !== undefined) {

@@ -666,7 +666,7 @@ tbody tr:hover {
   opacity: 0.75;
 }
 
-.tab-title-cell > span {
+.tab-title-cell > .library-tab-url {
   display: block;
   margin-top: 3px;
   overflow: hidden;

@@ -48,6 +48,20 @@ function normalizeUrlV2(input: string): string {
   return url.toString();
 }
 
+function normalizeForCaselessSearch(value: string): string {
+  return value.normalize("NFKC").toUpperCase().normalize("NFKC");
+}
+
+function containsNormalizedCaseless(value: unknown, query: unknown): number {
+  if (typeof value !== "string" || typeof query !== "string") {
+    return 0;
+  }
+
+  const normalizedValue = normalizeForCaselessSearch(value);
+  const normalizedQuery = normalizeForCaselessSearch(query);
+  return normalizedValue.includes(normalizedQuery) ? 1 : 0;
+}
+
 function loadMigrations(): Migration[] {
   return readdirSync(migrationsDirectory)
     .filter((fileName) => /^\d{3}_.+\.sql$/.test(fileName))
@@ -87,6 +101,11 @@ export function openDatabase(databasePath: string): TabHubDatabase {
       "tabhub_normalize_url_v2",
       { deterministic: true },
       normalizeUrlV2,
+    );
+    connection.function(
+      "tabhub_contains_normalized",
+      { deterministic: true },
+      containsNormalizedCaseless,
     );
     const migrations = loadMigrations();
     const supportedVersion = migrations.at(-1)?.version ?? 0;

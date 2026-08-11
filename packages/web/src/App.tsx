@@ -733,7 +733,9 @@ export function App() {
                 />
               ) : null}
             </div>
-            <span>{hostname(tabItem.url)} | #{tabItem.id}</span>
+            <span className="library-tab-url" dir="ltr" title={tabItem.url}>
+              {tabItem.url}
+            </span>
             <SummaryAction tab={tabItem} />
             {tabItem.summary?.trim() ? (
               <SummaryDisclosure summary={tabItem.summary.trim()} />
@@ -1077,12 +1079,12 @@ export function App() {
                   <span>{t("Filters")}</span>
                 </div>
                 <label className="search-field">
-                  <span>{t("Search tab titles and content")}</span>
+                  <span>{t("Search tab titles, URLs, and content")}</span>
                   <SearchIcon />
                   <input
                     autoComplete="off"
                     maxLength={500}
-                    placeholder={t("Search titles and content")}
+                    placeholder={t("Search titles, URLs, and content")}
                     type="search"
                     value={search}
                     onChange={(event) => {
