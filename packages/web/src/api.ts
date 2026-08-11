@@ -31,10 +31,12 @@ import {
   type PatchLink,
   type PatchTab,
   type PatchTag,
+  type SortDirection,
   type TabCommandRelayErrorCode,
   type TabCommandRelayHttpRequest,
   type TabCommandRelayResult,
   type TabImportance,
+  type TabSortField,
   type TabStatus,
 } from "@tabhub/shared";
 
@@ -47,11 +49,16 @@ export interface TabListFilters {
   openState: OpenFilter;
   page: number;
   q: string;
+  sortBy?: TabSortField;
+  sortDirection?: SortDirection;
   status: "all" | TabStatus;
   tag: string;
 }
 
-export type LibraryTabFilters = Omit<TabListFilters, "page">;
+export type LibraryTabFilters = Omit<
+  TabListFilters,
+  "page" | "sortBy" | "sortDirection"
+>;
 
 export interface OpenTabListFilters {
   browser: string;
@@ -307,6 +314,12 @@ export async function fetchTabs(
     page: String(filters.page),
     pageSize: "50",
   });
+  if (filters.sortBy !== undefined) {
+    searchParams.set("sort_by", filters.sortBy);
+    if (filters.sortDirection !== undefined) {
+      searchParams.set("sort_direction", filters.sortDirection);
+    }
+  }
   appendLibraryTabFilters(searchParams, filters);
 
   const payload = await requestJson(

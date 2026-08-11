@@ -88,6 +88,29 @@ describe("Library bulk selection API", () => {
 });
 
 describe("Library activity API", () => {
+  it("serializes an active server-side Library sort", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({ items: [], page: 1, pageSize: 50, total: 0 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchTabs({
+      browser: "all",
+      importance: "all",
+      openState: "all",
+      page: 1,
+      q: "",
+      sortBy: "title",
+      sortDirection: "desc",
+      status: "all",
+      tag: "",
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/tabs?page=1&pageSize=50&sort_by=title&sort_direction=desc",
+    );
+  });
+
   it("serializes the canonical duplicate filter for paginated Library rows", async () => {
     const fetchMock = vi.fn(async () =>
       Response.json({ items: [], page: 2, pageSize: 50, total: 0 }),

@@ -581,6 +581,56 @@ th {
   text-transform: uppercase;
 }
 
+.sortable-header {
+  display: flex;
+  width: calc(100% + 28px);
+  height: 37px;
+  margin: 0 -14px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  border: 0;
+  padding: 0 14px;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.sortable-header:hover,
+.sortable-header.is-active {
+  color: #c9d2e2;
+  background: rgb(114 141 255 / 7%);
+}
+
+.sortable-header:focus-visible {
+  border-radius: 3px;
+  outline-offset: -3px;
+}
+
+.sortable-header > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sort-indicator {
+  flex: 0 0 10px;
+  color: #596273;
+  font-size: 12px;
+  letter-spacing: 0;
+  line-height: 1;
+  text-align: center;
+}
+
+.sortable-header.is-active .sort-indicator {
+  color: #8298ff;
+}
+
 th[data-column="title"] {
   width: 43%;
 }

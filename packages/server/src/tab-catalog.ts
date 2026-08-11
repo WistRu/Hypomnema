@@ -10,17 +10,20 @@ import type {
   SetImportanceResponse,
   SetStatus,
   SetStatusResponse,
+  SortDirection,
   TabBulkIdsResponse,
   TabDetailResponse,
   TabImportance,
   TabListItem,
   TabListResponse,
+  TabSortField,
   TabStatus,
 } from "@tabhub/shared";
 
 import { normalizeUrl } from "./normalize-url.js";
 import { stableBrowserOrderSql } from "./stable-tab-order.js";
 import type { TabInstanceCatalog } from "./tab-instance-catalog.js";
+import { tabListSortSql } from "./tab-list-sort.js";
 
 export interface FilterTabsInput {
   browser: string | undefined;
@@ -36,6 +39,8 @@ export interface ListTabsInput extends FilterTabsInput {
   page: number;
   pageSize: number;
   rankedPage?: { ids: number[]; total: number };
+  sortBy: TabSortField | undefined;
+  sortDirection: SortDirection;
 }
 
 export interface TabCatalog {
@@ -372,7 +377,7 @@ export function createTabCatalog(
     JOIN tags ON tags.id = tab_tags.tag_id
     JOIN tag_paths ON tag_paths.id = tags.id
     WHERE tab_tags.tab_id = ?
-    ORDER BY tag_paths.path, tags.id
+    ORDER BY tabhub_sort_key(tag_paths.path), tag_paths.path, tags.id
   `);
   const selectTabLinks = connection.prepare(`
     SELECT
@@ -640,16 +645,20 @@ export function createTabCatalog(
     listTabs(input) {
       const { parameters, predicates } = tabFilter(input);
 
-      let orderClause = `${stableBrowserOrderSql}, tabs.id`;
+      let sortSql = tabListSortSql(input.sortBy, input.sortDirection);
       if (input.rankedPage !== undefined) {
         if (input.rankedPage.ids.length === 0) {
           predicates.push("0");
         } else {
           const rankedIds = input.rankedPage.ids.join(", ");
           predicates.push(`tabs.id IN (${rankedIds})`);
-          orderClause = `CASE tabs.id ${input.rankedPage.ids
-            .map((id, rank) => `WHEN ${id} THEN ${rank}`)
-            .join(" ")} ELSE ${input.rankedPage.ids.length} END`;
+          sortSql = {
+            joinClause: "",
+            orderClause: `CASE tabs.id ${input.rankedPage.ids
+              .map((id, rank) => `WHEN ${id} THEN ${rank}`)
+              .join(" ")} ELSE ${input.rankedPage.ids.length} END`,
+            withClause: "",
+          };
         }
       }
 
@@ -668,7 +677,8 @@ export function createTabCatalog(
           : 0;
       const rows = connection
         .prepare(
-          `SELECT
+          `${sortSql.withClause}
+           SELECT
              tabs.id,
              tabs.url,
              tabs.url_normalized,
@@ -686,8 +696,9 @@ export function createTabCatalog(
              contents.summary
            FROM tabs
            LEFT JOIN contents ON contents.tab_id = tabs.id
+           ${sortSql.joinClause}
            ${whereClause}
-           ORDER BY ${orderClause}
+           ORDER BY ${sortSql.orderClause}
            LIMIT ? OFFSET ?`,
         )
         .all(...parameters, input.pageSize, offset) as TabRow[];
@@ -712,7 +723,7 @@ export function createTabCatalog(
              WHERE tab_tags.tab_id IN (${placeholders})
              ORDER BY
                tab_tags.tab_id,
-               tag_paths.path COLLATE NOCASE,
+               tabhub_sort_key(tag_paths.path),
                tag_paths.path,
                tag_paths.id`,
           )

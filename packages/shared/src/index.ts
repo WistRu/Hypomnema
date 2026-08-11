@@ -1050,6 +1050,23 @@ export const tabBulkIdsResponseSchema = z.object({
 
 export type TabBulkIdsResponse = z.infer<typeof tabBulkIdsResponseSchema>;
 
+export const tabSortFieldSchema = z.enum([
+  "title",
+  "topics",
+  "browser",
+  "activity",
+  "status",
+  "importance",
+  "state",
+  "age",
+]);
+
+export type TabSortField = z.infer<typeof tabSortFieldSchema>;
+
+export const sortDirectionSchema = z.enum(["asc", "desc"]);
+
+export type SortDirection = z.infer<typeof sortDirectionSchema>;
+
 export const tabListQuerySchema = z
   .object({
     ...tabFilterQueryShape,
@@ -1057,6 +1074,8 @@ export const tabListQuerySchema = z
     similar_to: z.coerce.number().int().positive().optional(),
     page: z.coerce.number().int().positive().default(1),
     pageSize: z.coerce.number().int().positive().max(200).default(50),
+    sort_by: tabSortFieldSchema.optional(),
+    sort_direction: sortDirectionSchema.optional(),
   })
   .superRefine((query, context) => {
     if (query.q !== undefined && query.similar_to !== undefined) {
@@ -1074,6 +1093,25 @@ export const tabListQuerySchema = z
       context.addIssue({
         code: "custom",
         message: "Semantic search requires q or similar_to",
+      });
+    }
+
+    if (query.sort_by === undefined && query.sort_direction !== undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "sort_direction requires sort_by",
+        path: ["sort_direction"],
+      });
+    }
+
+    if (
+      query.sort_by !== undefined &&
+      (query.search_mode === "semantic" || query.similar_to !== undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Column sorting cannot be combined with relevance ranking",
+        path: ["sort_by"],
       });
     }
 

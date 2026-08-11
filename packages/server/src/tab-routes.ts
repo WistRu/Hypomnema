@@ -127,6 +127,8 @@ export function registerTabRoutes(
           isOpen: parsed.data.is_open,
           page: parsed.data.page,
           pageSize: parsed.data.pageSize,
+          sortBy: parsed.data.sort_by,
+          sortDirection: parsed.data.sort_direction ?? "asc",
           q:
             parsed.data.search_mode === "fulltext"
               ? parsed.data.q

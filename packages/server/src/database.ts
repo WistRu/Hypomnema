@@ -52,6 +52,37 @@ function normalizeForCaselessSearch(value: string): string {
   return value.normalize("NFKC").toUpperCase().normalize("NFKC");
 }
 
+const russianAlphabet = "абвгдеёжзийклмнопрстуфхцчшщъыьэюя";
+
+// SQLite NOCASE folds ASCII only. This deterministic key keeps Latin and
+// Cyrillic titles case-insensitive and puts Ё in its Russian alphabet position.
+function tabSortKey(value: unknown): string {
+  if (typeof value !== "string") return "";
+
+  return [...value.normalize("NFKC").toLowerCase()]
+    .map((character) => {
+      const russianIndex = russianAlphabet.indexOf(character);
+      return russianIndex === -1
+        ? character
+        : String.fromCodePoint(0x1000 + russianIndex);
+    })
+    .join("");
+}
+
+// Keep untitled-row ordering aligned with the hostname fallback shown by web.
+function tabDisplayTitle(title: unknown, url: unknown): string {
+  if (typeof title === "string" && title.trim().length > 0) {
+    return title.trim();
+  }
+  if (typeof url !== "string") return "";
+
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
 function containsNormalizedCaseless(value: unknown, query: unknown): number {
   if (typeof value !== "string" || typeof query !== "string") {
     return 0;
@@ -106,6 +137,16 @@ export function openDatabase(databasePath: string): TabHubDatabase {
       "tabhub_contains_normalized",
       { deterministic: true },
       containsNormalizedCaseless,
+    );
+    connection.function(
+      "tabhub_sort_key",
+      { deterministic: true },
+      tabSortKey,
+    );
+    connection.function(
+      "tabhub_display_title",
+      { deterministic: true },
+      tabDisplayTitle,
     );
     const migrations = loadMigrations();
     const supportedVersion = migrations.at(-1)?.version ?? 0;

@@ -45,6 +45,10 @@ function russianPlural(
 // translation here makes missing copy easy to audit and avoids component-local
 // locale branches.
 const russianMessages: Record<string, Message> = {
+  "Clear sorting for {column}": "Сбросить сортировку по столбцу «{column}»",
+  "Sort by {column}": "Сортировать по столбцу «{column}»",
+  "Sort {column} ascending": "Сортировать «{column}» по возрастанию",
+  "Sort {column} descending": "Сортировать «{column}» по убыванию",
   "{action} for {tab}": "{action} для «{tab}»",
   "{count} selected": "Выбрано: {count}",
   "{count}d ago": "{count} дн назад",

@@ -1,8 +1,10 @@
 import {
   knownBrowserOptions,
+  type SortDirection,
   type TabImportance,
   type TabInstance,
   type TabListItem,
+  type TabSortField,
   type TabStatus,
 } from "@tabhub/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -53,6 +55,12 @@ import {
   type LibraryPhysicalSelection,
   type LibraryPhysicalSelectionContext,
 } from "./library-physical-selection";
+import {
+  defaultLibrarySortDirection,
+  libraryColumnAriaSort,
+  nextLibrarySort,
+  type LibrarySort,
+} from "./library-sorting";
 import { TabBrowserAction } from "./TabBrowserAction";
 import { useI18n, type TranslationParams } from "./i18n";
 import {
@@ -361,6 +369,54 @@ function SearchIcon() {
   );
 }
 
+function SortableColumnHeader({
+  label,
+  sort,
+  sortBy,
+  t,
+  onSort,
+}: {
+  label: string;
+  sort: LibrarySort | null;
+  sortBy: TabSortField;
+  t: (key: string, params?: TranslationParams) => string;
+  onSort: (sortBy: TabSortField) => void;
+}) {
+  const activeDirection = sort?.sortBy === sortBy ? sort.sortDirection : null;
+  const preferredDirection = defaultLibrarySortDirection(sortBy);
+  const nextDirection: SortDirection | null =
+    activeDirection === null
+      ? preferredDirection
+      : activeDirection === preferredDirection
+        ? preferredDirection === "asc"
+          ? "desc"
+          : "asc"
+        : null;
+  const actionLabel =
+    nextDirection === null
+      ? t("Clear sorting for {column}", { column: label })
+      : activeDirection === null
+        ? t("Sort by {column}", { column: label })
+        : nextDirection === "asc"
+          ? t("Sort {column} ascending", { column: label })
+          : t("Sort {column} descending", { column: label });
+
+  return (
+    <button
+      aria-label={actionLabel}
+      className={activeDirection === null ? "sortable-header" : "sortable-header is-active"}
+      title={actionLabel}
+      type="button"
+      onClick={() => onSort(sortBy)}
+    >
+      <span>{label}</span>
+      <span aria-hidden="true" className="sort-indicator">
+        {activeDirection === "asc" ? "↑" : activeDirection === "desc" ? "↓" : "↕"}
+      </span>
+    </button>
+  );
+}
+
 export function App() {
   const queryClient = useQueryClient();
   const { errorMessage: localizeError, formatNumber, locale, setLocale, t } =
@@ -375,6 +431,7 @@ export function App() {
   const [importance, setImportance] = useState<"all" | TabImportance>("all");
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<LibrarySort | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<SelectedTopic | null>(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
@@ -447,11 +504,31 @@ export function App() {
   const tabsQuery = useQuery({
     queryKey: [
       "tabs",
-      { browser, duplicatesOnly, importance, openState, page, q, status, tag },
+      {
+        browser,
+        duplicatesOnly,
+        importance,
+        openState,
+        page,
+        q,
+        ...(sort ?? {}),
+        status,
+        tag,
+      },
     ],
     queryFn: ({ signal }) =>
       fetchTabs(
-        { browser, duplicatesOnly, importance, openState, page, q, status, tag },
+        {
+          browser,
+          duplicatesOnly,
+          importance,
+          openState,
+          page,
+          q,
+          ...(sort ?? {}),
+          status,
+          tag,
+        },
         signal,
       ),
     refetchInterval: view === "library" ? 15_000 : false,
@@ -577,6 +654,10 @@ export function App() {
       return next;
     });
   };
+  const changeSort = (sortBy: TabSortField) => {
+    setSort((current) => nextLibrarySort(current, sortBy));
+    setPage(1);
+  };
 
   const columns = columnHelper.columns([
     columnHelper.display({
@@ -643,7 +724,15 @@ export function App() {
       },
     }),
     columnHelper.accessor("title", {
-      header: t("Tab"),
+      header: () => (
+        <SortableColumnHeader
+          label={t("Tab")}
+          sort={sort}
+          sortBy="title"
+          t={t}
+          onSort={changeSort}
+        />
+      ),
       cell: ({ row }) => {
         const tabItem = row.original;
         const instances =
@@ -794,7 +883,15 @@ export function App() {
       },
     }),
     columnHelper.accessor("tagPaths", {
-      header: t("Topics"),
+      header: () => (
+        <SortableColumnHeader
+          label={t("Topics")}
+          sort={sort}
+          sortBy="topics"
+          t={t}
+          onSort={changeSort}
+        />
+      ),
       cell: ({ getValue }) => {
         const paths = getValue();
         if (paths.length === 0) return <span className="no-row-tags">-</span>;
@@ -810,12 +907,28 @@ export function App() {
       },
     }),
     columnHelper.accessor("browser", {
-      header: t("Browser"),
+      header: () => (
+        <SortableColumnHeader
+          label={t("Browser")}
+          sort={sort}
+          sortBy="browser"
+          t={t}
+          onSort={changeSort}
+        />
+      ),
       cell: ({ getValue }) => <BrowserBadge browser={getValue()} />,
     }),
     columnHelper.accessor("openInstanceCount", {
       id: "activity",
-      header: t("Activity"),
+      header: () => (
+        <SortableColumnHeader
+          label={t("Activity")}
+          sort={sort}
+          sortBy="activity"
+          t={t}
+          onSort={changeSort}
+        />
+      ),
       cell: ({ getValue, row }) => {
         const instances =
           instancesByCanonicalTab.get(row.original.id) ?? EMPTY_TAB_INSTANCES;
@@ -847,7 +960,15 @@ export function App() {
       },
     }),
     columnHelper.accessor("status", {
-      header: t("Status"),
+      header: () => (
+        <SortableColumnHeader
+          label={t("Status")}
+          sort={sort}
+          sortBy="status"
+          t={t}
+          onSort={changeSort}
+        />
+      ),
       cell: ({ getValue }) => {
         const status = getValue();
         return (
@@ -858,11 +979,27 @@ export function App() {
       },
     }),
     columnHelper.accessor("importance", {
-      header: t("Importance"),
+      header: () => (
+        <SortableColumnHeader
+          label={t("Importance")}
+          sort={sort}
+          sortBy="importance"
+          t={t}
+          onSort={changeSort}
+        />
+      ),
       cell: ({ getValue }) => <Importance level={getValue()} />,
     }),
     columnHelper.accessor("isOpen", {
-      header: t("State"),
+      header: () => (
+        <SortableColumnHeader
+          label={t("State")}
+          sort={sort}
+          sortBy="state"
+          t={t}
+          onSort={changeSort}
+        />
+      ),
       cell: ({ getValue }) => (
         <span className={getValue() ? "open-state is-open" : "open-state"}>
           <span aria-hidden="true" />
@@ -872,7 +1009,15 @@ export function App() {
     }),
     columnHelper.accessor("firstSeenAt", {
       id: "age",
-      header: t("Age"),
+      header: () => (
+        <SortableColumnHeader
+          label={t("Age")}
+          sort={sort}
+          sortBy="age"
+          t={t}
+          onSort={changeSort}
+        />
+      ),
       cell: ({ getValue }) => <RelativeAge value={getValue()} />,
     }),
   ]);
@@ -894,7 +1039,7 @@ export function App() {
 
   useEffect(() => {
     rowVirtualizer.scrollToOffset(0);
-  }, [browser, duplicatesOnly, importance, openState, page, q, rowVirtualizer, status, tag]);
+  }, [browser, duplicatesOnly, importance, openState, page, q, rowVirtualizer, sort, status, tag]);
 
   const hasFilters =
     browser !== "all" ||
@@ -1306,7 +1451,14 @@ export function App() {
                     {table.getHeaderGroups().map((headerGroup) => (
                       <tr key={headerGroup.id}>
                         {headerGroup.headers.map((header) => (
-                          <th data-column={header.column.id} key={header.id} scope="col">
+                          <th
+                            aria-sort={
+                              libraryColumnAriaSort(sort, header.column.id)
+                            }
+                            data-column={header.column.id}
+                            key={header.id}
+                            scope="col"
+                          >
                             {header.isPlaceholder ? null : <table.FlexRender header={header} />}
                           </th>
                         ))}
