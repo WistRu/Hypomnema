@@ -165,11 +165,11 @@ describe("translations", () => {
 
   it("localizes controlled extension errors and hides unknown English bridge errors", () => {
     const known = new Error(
-      "That browser tab is no longer available. Refresh Open tabs and try again.",
+      "That browser tab is no longer available. Refresh the Library and try again.",
     );
     known.name = "ExtensionBridgeError";
     expect(localizedErrorMessage("ru", known)).toBe(
-      "Эта вкладка браузера больше недоступна. Обновите список открытых вкладок и повторите попытку.",
+      "Эта вкладка браузера больше недоступна. Обновите библиотеку и повторите попытку.",
     );
 
     const unknown = new Error("No tab with id: 42");

@@ -42,6 +42,7 @@ export type OpenFilter = "all" | "open" | "closed";
 
 export interface TabListFilters {
   browser: string;
+  duplicatesOnly?: boolean;
   importance: "all" | TabImportance;
   openState: OpenFilter;
   page: number;
@@ -223,6 +224,10 @@ function appendLibraryTabFilters(
     searchParams.set("browser", filters.browser);
   }
 
+  if (filters.duplicatesOnly) {
+    searchParams.set("duplicates_only", "true");
+  }
+
   if (filters.openState !== "all") {
     searchParams.set("is_open", String(filters.openState === "open"));
   }
@@ -342,6 +347,29 @@ export async function fetchAllLibraryTabIds(
     throw new Error("TabHub returned an unexpected Library tab selection.");
   }
   return parsed.data.ids;
+}
+
+export async function fetchLibraryOpenTabs(
+  filters: LibraryTabFilters,
+  signal?: AbortSignal,
+) {
+  const searchParams = new URLSearchParams();
+  appendLibraryTabFilters(searchParams, filters);
+  const query = searchParams.toString();
+  const payload = await requestJson(
+    `/api/tab-instances/library-bulk${query ? `?${query}` : ""}`,
+    {
+      headers: { Accept: "application/json" },
+      signal: signal ?? null,
+    },
+    "TabHub could not load the Library's open physical tabs",
+    "TabHub returned an unreadable Library open-tab selection.",
+  );
+  const parsed = tabInstanceBulkResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected Library open-tab selection.");
+  }
+  return parsed.data.items;
 }
 
 export async function fetchAllOpenTabs(

@@ -124,6 +124,7 @@ const russianMessages: Record<string, Message> = {
   Kind: "Тип",
   "Knowledge graph": "Граф знаний",
   Library: "Библиотека",
+  "Library selection mode": "Режим выбора в библиотеке",
   Links: "Связи",
   "Loading collection": "Загрузка коллекции",
   "Loading graph view": "Загрузка графа",
@@ -140,6 +141,7 @@ const russianMessages: Record<string, Message> = {
   "On screen": "На экране",
   "Open-tab activity": "Активность открытых вкладок",
   "No open copies": "Нет открытых копий",
+  "Open copies unavailable": "Открытые копии недоступны",
   "Combined across currently open physical copies.":
     "Сумма по физическим копиям, открытым сейчас.",
   "On-screen time within 60 seconds of recent mouse, keyboard, scroll, or touch input.":
@@ -154,6 +156,7 @@ const russianMessages: Record<string, Message> = {
   "Open tab details": "Открыть сведения о вкладке",
   "Open tabs": "Открытые вкладки",
   "Open copies": "Открытые копии",
+  "Multiple open copies": "Несколько открытых копий",
   "Activity is tracked separately for each physical tab in its current browser session.":
     "Активность учитывается отдельно для каждой физической вкладки в текущей сессии браузера.",
   "Loading open copies...": "Загрузка открытых копий...",
@@ -166,6 +169,7 @@ const russianMessages: Record<string, Message> = {
   "Optional value": "Необязательное значение",
   Outgoing: "Исходящая",
   "Page {page} of {total}": "Страница {page} из {total}",
+  Pages: "Страницы",
   "Preparing the interactive canvas...": "Подготовка интерактивного полотна...",
   Previous: "Предыдущая",
   "Reading the local collection...": "Чтение локальной коллекции...",
@@ -185,9 +189,16 @@ const russianMessages: Record<string, Message> = {
   "Search tab titles and content": "Поиск по заголовкам и содержимому",
   "Search titles and content": "Найти заголовки и содержимое",
   "Select {tab}": "Выбрать «{tab}»",
+  "Select all browser tabs on this page":
+    "Выбрать все вкладки браузеров на этой странице",
   "Selected while its browser window was in the foreground and the computer was active.":
     "Вкладка была выбрана, окно браузера находилось на переднем плане, а компьютер был активен.",
   "Select all tabs on this page": "Выбрать все вкладки на этой странице",
+  "Select browser tabs for {tab}": "Выбрать вкладки браузеров для «{tab}»",
+  "Select and manage exact tabs in their owning browsers.":
+    "Выбирайте и управляйте конкретными вкладками в их браузерах.",
+  "Select saved pages to organize status and topics.":
+    "Выбирайте сохранённые страницы, чтобы менять статус и темы.",
   "Show all {count} characters": "Показать все символы: {count}",
   "Show compact view": "Показать сокращённо",
   "Something went wrong.": "Что-то пошло не так.",
@@ -507,6 +518,8 @@ const russianMessages: Record<string, Message> = {
   "Copied {count} tabs as {format}.": "Скопировано вкладок: {count} ({format}).",
   "Duplicate cleanup: {succeeded} closed · {skipped} skipped · {failed} failed · {notRun} profiles not completed · {unknown} profiles unknown":
     "Очистка дубликатов: закрыто {succeeded} · пропущено {skipped} · ошибок {failed} · профилей без завершения {notRun} · профилей с неизвестным результатом {unknown}",
+  "Close: {succeeded} closed · {skipped} skipped · {failed} failed · {notRun} profiles not completed · {unknown} profiles unknown":
+    "Закрытие: закрыто {succeeded} · пропущено {skipped} · ошибок {failed} · профилей без завершения {notRun} · профилей с неизвестным результатом {unknown}",
   "{copies} copies in {groups} groups were unavailable or changed.":
     "Недоступны или изменились копии ({copies}) в группах ({groups}).",
   "{browser} · installation {id}: {closed} closed · {skipped} skipped · {failed} failed":
@@ -543,6 +556,7 @@ const russianMessages: Record<string, Message> = {
   "Pinned; kept copy: {location}":
     "Закреплена; сохраняемая копия: {location}",
   "Installation {id}": "Установка {id}",
+  "Session {id}": "Сессия {id}",
   "{count} open copy": "{count} открытая копия",
   "{count} open copies": (params) => {
     const count = numericParam(params, "rawCount");
@@ -569,6 +583,8 @@ const russianMessages: Record<string, Message> = {
     "Все проверенные группы дубликатов изменились. Обновите список и повторите попытку.",
   "The live duplicate preview expired. Run the check again; no tabs were closed.":
     "Проверка дубликатов устарела. Запустите её снова; вкладки не были закрыты.",
+  "The live close preview expired. Run the check again; no tabs were closed.":
+    "Актуальная проверка закрытия устарела. Запустите её снова; вкладки не были закрыты.",
   "TabHub returned an incomplete close result. The outcome is unknown.":
     "TabHub получил неполный результат закрытия. Итог операции неизвестен.",
   "This duplicate group changed or is not controllable. Refresh and try again.":
@@ -590,6 +606,16 @@ const russianMessages: Record<string, Message> = {
   Muted: "Без звука",
   "No exact duplicates match": "Подходящих точных дубликатов нет",
   "No connected browser profiles": "Нет подключённых профилей браузера",
+  "No connected browser profile can close the selected tabs.":
+    "Ни один подключённый профиль браузера не может закрыть выбранные вкладки.",
+  "No connected browser profile passed the live close preview.":
+    "Ни один подключённый профиль браузера не прошёл актуальную проверку закрытия.",
+  "No connected browser profile can close the matching duplicate copies.":
+    "Ни один подключённый профиль браузера не может закрыть найденные копии-дубликаты.",
+  "The browser profile changed during the live duplicate preview.":
+    "Профиль браузера изменился во время актуальной проверки дубликатов.",
+  "Excluded profiles: {profiles}": "Исключённые профили: {profiles}",
+  "{profile} ({count} tabs)": "{profile} (вкладок: {count})",
   "No connected TabHub extension can control this browser profile.":
     "Ни одно подключённое расширение TabHub не может управлять этим профилем браузера.",
   "No single connected browser profile owns every selected tab.":
@@ -622,6 +648,8 @@ const russianMessages: Record<string, Message> = {
   "Reading physical tabs...": "Чтение физических вкладок...",
   "Selection spans multiple browser profiles. Select one profile for browser actions.":
     "Выбраны вкладки из нескольких профилей браузера. Для действий выберите вкладки одного профиля.",
+  "Close can run across connected profiles; other browser actions require one profile.":
+    "Закрытие выполняется по всем подключённым профилям; для остальных действий нужен один профиль.",
   "The selected browser profile is offline.":
     "Выбранный профиль браузера не подключён.",
   "Waiting for a fresh physical-tab snapshot for this selection.":
@@ -929,8 +957,8 @@ const russianMessages: Record<string, Message> = {
     "TabHub не удалось определить окно браузера.",
   "TabHub could not identify the browser tab controlling this action.":
     "TabHub не удалось определить вкладку браузера, из которой выполняется это действие.",
-  "That browser tab is no longer available. Refresh Open tabs and try again.":
-    "Эта вкладка браузера больше недоступна. Обновите список открытых вкладок и повторите попытку.",
+  "That browser tab is no longer available. Refresh the Library and try again.":
+    "Эта вкладка браузера больше недоступна. Обновите библиотеку и повторите попытку.",
   "That browser tab changed while TabHub was switching to it.":
     "Эта вкладка браузера изменилась, пока TabHub переключался на неё.",
   "That tab belongs to a different browser installation or session. Open TabHub in that browser and try again.":

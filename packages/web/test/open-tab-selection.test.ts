@@ -96,14 +96,24 @@ describe("open-tab smart selection", () => {
     ]);
   });
 
-  it("does not group URL variants or copies from another installation", () => {
+  it("does not group URL variants or copies from another install or session", () => {
     const first = tab(1, "https://youtube.com/watch?v=one");
     const variant = tab(2, "https://youtube.com/watch?v=two");
     const anotherInstall = tab(3, first.url, {
       installationId: "323e4567-e89b-42d3-a456-426614174000",
     });
+    const anotherSession = tab(4, first.url, {
+      browserSessionId: "423e4567-e89b-42d3-a456-426614174000",
+    });
 
-    expect(extraExactCopyCandidates([first, variant, anotherInstall])).toEqual([]);
+    expect(
+      extraExactCopyCandidates([
+        first,
+        variant,
+        anotherInstall,
+        anotherSession,
+      ]),
+    ).toEqual([]);
   });
 
   it("keeps the exact-copy keeper attached to the destructive close target", () => {

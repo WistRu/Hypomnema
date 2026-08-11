@@ -129,7 +129,7 @@ export function extraExactCopyPlan(
 ): ExactCopySelection[] {
   const groups = new Map<string, TabInstance[]>();
   for (const tab of tabs) {
-    const key = `${tab.browser}\n${tab.installationId}\n${tab.url}`;
+    const key = `${tab.browser}\n${tab.installationId}\n${tab.browserSessionId ?? ""}\n${tab.url}`;
     const group = groups.get(key);
     if (group) group.push(tab);
     else groups.set(key, [tab]);

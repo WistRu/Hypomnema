@@ -88,6 +88,9 @@ export function registerTabRoutes(
         ...(parsed.data.browser === undefined
           ? {}
           : { browser: parsed.data.browser }),
+        ...(parsed.data.duplicates_only
+          ? { duplicatesOnly: true }
+          : {}),
         ...(parsed.data.is_open === undefined
           ? {}
           : { isOpen: parsed.data.is_open }),
@@ -120,6 +123,7 @@ export function registerTabRoutes(
       return tabListResponseSchema.parse(
         tabCatalog.listTabs({
           browser: parsed.data.browser,
+          duplicatesOnly: parsed.data.duplicates_only,
           isOpen: parsed.data.is_open,
           page: parsed.data.page,
           pageSize: parsed.data.pageSize,
@@ -162,6 +166,7 @@ export function registerTabRoutes(
     return tabBulkIdsResponseSchema.parse(
       tabCatalog.listTabIds({
         browser: parsed.data.browser,
+        duplicatesOnly: parsed.data.duplicates_only,
         isOpen: parsed.data.is_open,
         q: parsed.data.q,
         status: parsed.data.status,

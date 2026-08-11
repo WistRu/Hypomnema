@@ -84,7 +84,7 @@ export async function activateExistingTab(
   const current = await adapter.get(tabId);
   if (!isLiveTab(current, tabId)) {
     throw new Error(
-      "That browser tab is no longer available. Refresh Open tabs and try again.",
+      "That browser tab is no longer available. Refresh the Library and try again.",
     );
   }
 

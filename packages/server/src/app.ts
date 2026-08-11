@@ -208,7 +208,7 @@ export function createApp(options: CreateAppOptions): TabHubApp {
 
   registerTabRoutes(app, tabCatalog, embeddingCatalog);
   registerActivityRoutes(app, activityCatalog);
-  registerTabInstanceRoutes(app, tabInstanceCatalog);
+  registerTabInstanceRoutes(app, tabInstanceCatalog, tabCatalog);
   registerTagRoutes(app, tagCatalog);
   registerStatsRoutes(app, statsCatalog);
   registerSummaryRoutes(app, {

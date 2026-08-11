@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchAllLibraryTabIds, fetchTabs } from "../src/api";
+import {
+  fetchAllLibraryTabIds,
+  fetchLibraryOpenTabs,
+  fetchTabs,
+} from "../src/api";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -15,6 +19,7 @@ describe("Library bulk selection API", () => {
     await expect(
       fetchAllLibraryTabIds({
         browser: "chrome",
+        duplicatesOnly: true,
         importance: 2,
         openState: "open",
         q: "research",
@@ -25,12 +30,86 @@ describe("Library bulk selection API", () => {
 
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "/api/tabs/bulk-ids?browser=chrome&is_open=true&status=in_progress&importance=2&q=research&tag=Work%2FAI",
+      "/api/tabs/bulk-ids?browser=chrome&duplicates_only=true&is_open=true&status=in_progress&importance=2&q=research&tag=Work%2FAI",
+    );
+  });
+
+  it("loads every physical instance through the same canonical Library filter", async () => {
+    const item = {
+      active: false,
+      audible: false,
+      browser: "chrome",
+      browserSessionId: "323e4567-e89b-42d3-a456-426614174000",
+      browserTabId: 42,
+      canonicalTabId: 17,
+      discarded: false,
+      duplicateGroupSize: 2,
+      engagedTimeMs: 0,
+      faviconUrl: null,
+      firstSeenAt: "2026-08-10T00:00:00.000Z",
+      foregroundTimeMs: 0,
+      importance: 2,
+      index: 0,
+      installationId: "223e4567-e89b-42d3-a456-426614174000",
+      instanceId: 9,
+      lastAccessed: null,
+      lastSeenAt: "2026-08-10T00:01:00.000Z",
+      muted: false,
+      pinned: false,
+      status: "in_progress",
+      summary: null,
+      tagPaths: ["Work/AI"],
+      title: "Research",
+      url: "https://example.com/research",
+      urlNormalized: "https://example.com/research",
+      windowId: 1,
+    };
+    const fetchMock = vi.fn(async () =>
+      Response.json({ items: [item], total: 1 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchLibraryOpenTabs({
+        browser: "chrome",
+        duplicatesOnly: true,
+        importance: 2,
+        openState: "open",
+        q: "research",
+        status: "in_progress",
+        tag: "Work/AI",
+      }),
+    ).resolves.toEqual([item]);
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/tab-instances/library-bulk?browser=chrome&duplicates_only=true&is_open=true&status=in_progress&importance=2&q=research&tag=Work%2FAI",
     );
   });
 });
 
 describe("Library activity API", () => {
+  it("serializes the canonical duplicate filter for paginated Library rows", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({ items: [], page: 2, pageSize: 50, total: 0 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchTabs({
+      browser: "all",
+      duplicatesOnly: true,
+      importance: "all",
+      openState: "all",
+      page: 2,
+      q: "",
+      status: "all",
+      tag: "",
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/tabs?page=2&pageSize=50&duplicates_only=true",
+    );
+  });
+
   it("preserves the current-copy activity aggregate returned by the server", async () => {
     vi.stubGlobal(
       "fetch",

@@ -10,6 +10,7 @@ import { I18nProvider } from "../src/i18n";
 
 const mocks = vi.hoisted(() => ({
   assignTag: vi.fn(),
+  fetchLibraryOpenTabs: vi.fn(),
   fetchTabs: vi.fn(),
   fetchTagTree: vi.fn(),
 }));
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../src/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/api")>()),
   assignTag: mocks.assignTag,
+  fetchLibraryOpenTabs: mocks.fetchLibraryOpenTabs,
   fetchTabs: mocks.fetchTabs,
   fetchTagTree: mocks.fetchTagTree,
 }));
@@ -45,8 +47,11 @@ vi.mock("../src/use-canonical-tab-activation", () => ({
   useCanonicalTabActivation: () => ({
     busy: false,
     errorFor: () => undefined,
+    errorForPhysical: () => undefined,
     isActivating: () => false,
+    isActivatingPhysical: () => false,
     run: vi.fn(),
+    runPhysical: vi.fn(),
   }),
 }));
 
@@ -54,8 +59,11 @@ vi.mock("../src/use-single-tab-close", () => ({
   useSingleTabClose: () => ({
     busy: false,
     closeCanonical: vi.fn(),
+    closePhysical: vi.fn(),
     errorForCanonical: () => undefined,
+    errorForPhysical: () => undefined,
     isClosingCanonical: () => false,
+    isClosingPhysical: () => false,
   }),
 }));
 
@@ -142,6 +150,7 @@ describe("Library bulk topic assignment", () => {
         "tabs",
         {
           browser: "all",
+          duplicatesOnly: false,
           importance: "all",
           openState: "all",
           page: 1,
@@ -151,6 +160,22 @@ describe("Library bulk topic assignment", () => {
         },
       ],
       tabs,
+    );
+    queryClient.setQueryData(
+      [
+        "tab-instances",
+        "library",
+        {
+          browser: "all",
+          duplicatesOnly: false,
+          importance: "all",
+          openState: "all",
+          q: "",
+          status: "all",
+          tag: "",
+        },
+      ],
+      [],
     );
     queryClient.setQueryData(["tags"], topics);
 

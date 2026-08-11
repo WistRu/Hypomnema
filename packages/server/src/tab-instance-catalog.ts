@@ -16,6 +16,7 @@ import { stableBrowserOrderSql } from "./stable-tab-order.js";
 export interface FilterTabInstancesInput {
   browser: string | undefined;
   canonicalTabId?: number | undefined;
+  canonicalTabIds?: readonly number[] | undefined;
   q: string | undefined;
   duplicatesOnly: boolean;
 }
@@ -39,6 +40,9 @@ export interface TabInstanceCatalog {
   syncSnapshot(snapshot: IngestSnapshot, now: string): { closed: number };
   listInstances(input: ListTabInstancesInput): TabInstanceListResponse;
   listAllInstances(input: FilterTabInstancesInput): TabInstanceBulkResponse;
+  listInstancesForCanonicalTabs(
+    canonicalTabIds: readonly number[],
+  ): TabInstanceBulkResponse;
   listDuplicateGroups(
     input: ListDuplicateGroupsInput,
   ): DuplicateGroupListResponse;
@@ -132,6 +136,13 @@ function tabInstanceQuery(input: FilterTabInstancesInput): TabInstanceQuery {
   if (input.canonicalTabId !== undefined) {
     predicates.push("canonical_tab_id = ?");
     parameters.push(input.canonicalTabId);
+  }
+  if (input.canonicalTabIds !== undefined) {
+    predicates.push(`canonical_tab_id IN (
+      SELECT CAST(value AS INTEGER)
+      FROM json_each(?)
+    )`);
+    parameters.push(JSON.stringify(input.canonicalTabIds));
   }
   if (input.q !== undefined) {
     predicates.push("(url LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\')");
@@ -621,6 +632,39 @@ export function createTabInstanceCatalog(
     return readSnapshot();
   };
 
+  const readAllInstances = (
+    input: FilterTabInstancesInput,
+  ): TabInstanceBulkResponse => {
+    const readSnapshot = connection.transaction(() => {
+      const { baseQuery, parameters, whereClause } = tabInstanceQuery(input);
+      const rows = connection
+        .prepare(`
+            ${baseQuery}
+            SELECT *
+            FROM instances
+            ${whereClause}
+             ORDER BY
+               ${stableBrowserOrderSql},
+               installation_id COLLATE NOCASE,
+               installation_id,
+               window_id,
+               tab_index,
+               instance_id
+          `)
+        .all(...parameters) as TabInstanceRow[];
+      const tagPathsByTab = loadTagPaths(rows);
+
+      return {
+        items: rows.map((row) =>
+          mapInstanceRow(row, tagPathsByTab.get(row.canonical_tab_id) ?? []),
+        ),
+        total: rows.length,
+      };
+    });
+
+    return readSnapshot();
+  };
+
   return {
     syncSnapshot(snapshot, now) {
       const installationId = installationIdFor(snapshot);
@@ -752,34 +796,16 @@ export function createTabInstanceCatalog(
     },
 
     listAllInstances(input) {
-      const readSnapshot = connection.transaction(() => {
-        const { baseQuery, parameters, whereClause } = tabInstanceQuery(input);
-        const rows = connection
-          .prepare(`
-            ${baseQuery}
-            SELECT *
-            FROM instances
-            ${whereClause}
-             ORDER BY
-               ${stableBrowserOrderSql},
-               installation_id COLLATE NOCASE,
-               installation_id,
-               window_id,
-               tab_index,
-               instance_id
-          `)
-          .all(...parameters) as TabInstanceRow[];
-        const tagPathsByTab = loadTagPaths(rows);
+      return readAllInstances(input);
+    },
 
-        return {
-          items: rows.map((row) =>
-            mapInstanceRow(row, tagPathsByTab.get(row.canonical_tab_id) ?? []),
-          ),
-          total: rows.length,
-        };
+    listInstancesForCanonicalTabs(canonicalTabIds) {
+      return readAllInstances({
+        browser: undefined,
+        canonicalTabIds,
+        duplicatesOnly: false,
+        q: undefined,
       });
-
-      return readSnapshot();
     },
 
     listDuplicateGroups(input) {

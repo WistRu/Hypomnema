@@ -24,6 +24,7 @@ import type { TabInstanceCatalog } from "./tab-instance-catalog.js";
 
 export interface FilterTabsInput {
   browser: string | undefined;
+  duplicatesOnly: boolean;
   isOpen: boolean | undefined;
   q: string | undefined;
   status: TabStatus | undefined;
@@ -160,6 +161,15 @@ function tabFilter(input: FilterTabsInput): {
   if (input.browser !== undefined) {
     predicates.push("tabs.browser = ?");
     parameters.push(input.browser);
+  }
+
+  if (input.duplicatesOnly) {
+    predicates.push(`tabs.id IN (
+      SELECT tab_instances.tab_id
+      FROM tab_instances
+      GROUP BY tab_instances.tab_id
+      HAVING COUNT(*) > 1
+    )`);
   }
 
   if (input.isOpen !== undefined) {

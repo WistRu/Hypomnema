@@ -1,4 +1,4 @@
-export type WorkspaceView = "open" | "library" | "graph";
+export type WorkspaceView = "library" | "graph";
 
 export function shouldRefreshLibrary(
   current: WorkspaceView,

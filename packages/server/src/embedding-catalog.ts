@@ -20,6 +20,7 @@ const CLUSTER_KEYWORD_CHARACTERS = 4_000;
 
 export interface EmbeddingSearchFilters {
   browser?: string;
+  duplicatesOnly?: boolean;
   isOpen?: boolean;
   status?: TabStatus;
   importance?: TabImportance;
@@ -387,6 +388,14 @@ export function createEmbeddingCatalog(
     if (filters.browser !== undefined) {
       predicates.push("tabs.browser = ?");
       parameters.push(filters.browser);
+    }
+    if (filters.duplicatesOnly) {
+      predicates.push(`tabs.id IN (
+        SELECT tab_instances.tab_id
+        FROM tab_instances
+        GROUP BY tab_instances.tab_id
+        HAVING COUNT(*) > 1
+      )`);
     }
     if (filters.isOpen !== undefined) {
       predicates.push("tabs.is_open = ?");

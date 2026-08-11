@@ -315,6 +315,7 @@ export function TopicSidebar({
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["tags"] }),
       queryClient.invalidateQueries({ queryKey: ["tabs"] }),
+      queryClient.invalidateQueries({ queryKey: ["tab-instances", "library"] }),
       queryClient.invalidateQueries({ queryKey: ["tab"] }),
       queryClient.invalidateQueries({ queryKey: ["graph"] }),
     ]);

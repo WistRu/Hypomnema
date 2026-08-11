@@ -1030,6 +1030,7 @@ const queryBooleanSchema = z.preprocess((value) => {
 
 const tabFilterQueryShape = {
   browser: browserIdentifierSchema.optional(),
+  duplicates_only: queryBooleanSchema.default(false),
   is_open: queryBooleanSchema.optional(),
   q: z.string().trim().min(1).max(500).optional(),
   status: tabStatusSchema.optional(),

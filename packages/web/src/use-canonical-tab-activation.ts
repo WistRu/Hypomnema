@@ -1,4 +1,5 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import type { TabInstance } from "@tabhub/shared";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 
 import {
@@ -16,14 +17,25 @@ import {
   canonicalTabBrowserActionSelection,
   type CanonicalTabBrowserActionRequest,
   executeTabActivation,
+  tabActivationAvailability,
 } from "./open-tab-activation";
 
 export interface CanonicalTabActivationController {
   run(request: CanonicalTabBrowserActionRequest): void;
+  runPhysical(tab: TabInstance): void;
   busy: boolean;
   errorFor(canonicalTabId: number): unknown | undefined;
+  errorForPhysical(instanceId: number): unknown | undefined;
   isActivating(canonicalTabId: number): boolean;
+  isActivatingPhysical(instanceId: number): boolean;
 }
+
+type TabActivationRequest =
+  | {
+      kind: "canonical";
+      request: CanonicalTabBrowserActionRequest;
+    }
+  | { kind: "physical"; tab: TabInstance };
 
 export function openConfirmedClosedUrl(url: string): void {
   const opened = window.open("about:blank", "_blank");
@@ -49,6 +61,7 @@ function unavailableProbe(): ExtensionProbe {
 }
 
 export function useCanonicalTabActivation(): CanonicalTabActivationController {
+  const queryClient = useQueryClient();
   const bridge = useMemo(() => createWindowExtensionBridge(), []);
   const probeQuery = useQuery({
     queryKey: ["extension-bridge", "probe"],
@@ -67,7 +80,34 @@ export function useCanonicalTabActivation(): CanonicalTabActivationController {
   });
 
   const activationMutation = useMutation({
-    mutationFn: async (request: CanonicalTabBrowserActionRequest) => {
+    mutationFn: async (activationRequest: TabActivationRequest) => {
+      if (activationRequest.kind === "physical") {
+        const [probe, connectedScopes] = await Promise.all([
+          probeQuery.data === undefined
+            ? bridge.probe().catch(() => unavailableProbe())
+            : Promise.resolve(probeQuery.data),
+          relayScopesQuery.data === undefined
+            ? fetchConnectedTabCommandScopes().catch(
+                (): PhysicalTabScope[] => [],
+              )
+            : Promise.resolve(relayScopesQuery.data),
+        ]);
+        const availability = tabActivationAvailability(
+          activationRequest.tab,
+          probe,
+          undefined,
+          connectedScopes,
+        );
+        if (availability.kind !== "ready") {
+          throw new ExtensionBridgeError(availability.message);
+        }
+        return executeTabActivation(availability, {
+          direct: (target) => bridge.activate(target),
+          relay: executeRelayedTabCommand,
+        });
+      }
+
+      const request = activationRequest.request;
       // Resolve first so a confirmed-closed URL does not wait for a bridge
       // timeout and lose the browser's transient click activation.
       const tabs = await fetchCanonicalTabInstances(request.canonicalTabId);
@@ -119,24 +159,46 @@ export function useCanonicalTabActivation(): CanonicalTabActivationController {
         relay: executeRelayedTabCommand,
       });
     },
-    onError: () => {
-      void Promise.allSettled([
+    onError: (_error, request) => {
+      const refreshes: Promise<unknown>[] = [
         probeQuery.refetch(),
         relayScopesQuery.refetch(),
-      ]);
+      ];
+      if (request.kind === "physical") {
+        refreshes.push(
+          queryClient.invalidateQueries({ queryKey: ["tab-instances"] }),
+          queryClient.invalidateQueries({ queryKey: ["tabs"] }),
+        );
+      }
+      void Promise.allSettled(refreshes);
     },
   });
 
   return {
-    run: (request) => activationMutation.mutate(request),
+    run: (request) =>
+      activationMutation.mutate({ kind: "canonical", request }),
+    runPhysical: (tab) =>
+      activationMutation.mutate({ kind: "physical", tab }),
     busy: activationMutation.isPending,
     errorFor: (canonicalTabId) =>
       activationMutation.isError &&
-      activationMutation.variables?.canonicalTabId === canonicalTabId
+      activationMutation.variables?.kind === "canonical" &&
+      activationMutation.variables.request.canonicalTabId === canonicalTabId
+        ? activationMutation.error
+        : undefined,
+    errorForPhysical: (instanceId) =>
+      activationMutation.isError &&
+      activationMutation.variables?.kind === "physical" &&
+      activationMutation.variables.tab.instanceId === instanceId
         ? activationMutation.error
         : undefined,
     isActivating: (canonicalTabId) =>
       activationMutation.isPending &&
-      activationMutation.variables?.canonicalTabId === canonicalTabId,
+      activationMutation.variables?.kind === "canonical" &&
+      activationMutation.variables.request.canonicalTabId === canonicalTabId,
+    isActivatingPhysical: (instanceId) =>
+      activationMutation.isPending &&
+      activationMutation.variables?.kind === "physical" &&
+      activationMutation.variables.tab.instanceId === instanceId,
   };
 }

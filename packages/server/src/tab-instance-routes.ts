@@ -7,15 +7,18 @@ import {
   tabInstanceBulkResponseSchema,
   tabInstanceListQuerySchema,
   tabInstanceListResponseSchema,
+  tabBulkIdsQuerySchema,
   tabIdParamSchema,
 } from "@tabhub/shared";
 import type { FastifyInstance } from "fastify";
 
 import type { TabInstanceCatalog } from "./tab-instance-catalog.js";
+import type { TabCatalog } from "./tab-catalog.js";
 
 export function registerTabInstanceRoutes(
   app: FastifyInstance,
   catalog: TabInstanceCatalog,
+  tabCatalog: TabCatalog,
 ): void {
   app.get("/api/tab-instances", async (request, reply) => {
     const parsed = tabInstanceListQuerySchema.safeParse(request.query);
@@ -52,6 +55,29 @@ export function registerTabInstanceRoutes(
         q: parsed.data.q,
         duplicatesOnly: parsed.data.duplicates_only,
       }),
+    );
+  });
+
+  app.get("/api/tab-instances/library-bulk", async (request, reply) => {
+    const parsed = tabBulkIdsQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: "VALIDATION_ERROR",
+        issues: parsed.error.issues,
+      });
+    }
+
+    const canonicalTabs = tabCatalog.listTabIds({
+      browser: parsed.data.browser,
+      duplicatesOnly: parsed.data.duplicates_only,
+      isOpen: parsed.data.is_open,
+      q: parsed.data.q,
+      status: parsed.data.status,
+      importance: parsed.data.importance,
+      tag: parsed.data.tag,
+    });
+    return tabInstanceBulkResponseSchema.parse(
+      catalog.listInstancesForCanonicalTabs(canonicalTabs.ids),
     );
   });
 

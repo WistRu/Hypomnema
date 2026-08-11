@@ -1,6 +1,7 @@
 import {
   knownBrowserOptions,
   type TabImportance,
+  type TabInstance,
   type TabListItem,
   type TabStatus,
 } from "@tabhub/shared";
@@ -21,6 +22,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -29,14 +31,28 @@ import {
   assignTag,
   enqueueShortSummary,
   fetchAllLibraryTabIds,
+  fetchLibraryOpenTabs,
   fetchSummaryJob,
   fetchTabs,
   updateTabStatuses,
   type LibraryTabFilters,
   type OpenFilter,
 } from "./api";
-import { ActivityMetrics, OpenCopyCount } from "./ActivityMetrics";
-import { OpenTabsView } from "./OpenTabsView";
+import { ActivityMetrics } from "./ActivityMetrics";
+import {
+  LibraryPhysicalCopies,
+  physicalTabAccessibleLabel,
+} from "./LibraryPhysicalCopies";
+import { LibraryPhysicalTabActions } from "./LibraryPhysicalTabActions";
+import {
+  effectiveLibraryOpenCopyCount,
+  reconcileLibraryPhysicalSelection,
+  retainLibraryPhysicalSelectionForContext,
+  setLibraryCanonicalRowsSelected,
+  setLibraryPhysicalInstanceSelected,
+  type LibraryPhysicalSelection,
+  type LibraryPhysicalSelectionContext,
+} from "./library-physical-selection";
 import { TabBrowserAction } from "./TabBrowserAction";
 import { useI18n, type TranslationParams } from "./i18n";
 import {
@@ -56,9 +72,12 @@ import { useSingleTabClose } from "./use-single-tab-close";
 const GraphView = lazy(() => import("./GraphView"));
 
 const EMPTY_TABS: TabListItem[] = [];
+const EMPTY_TAB_INSTANCES: TabInstance[] = [];
+const EMPTY_PHYSICAL_SELECTION: LibraryPhysicalSelection = new Map();
 const tableFeatureSet = tableFeatures({});
 const columnHelper = createColumnHelper<typeof tableFeatureSet, TabListItem>();
 const CurrentTimeContext = createContext(Date.now());
+type LibrarySelectionMode = "canonical" | "physical";
 
 const BROWSER_LABELS: Record<string, string> = {
   chrome: "Chrome",
@@ -165,12 +184,14 @@ function Importance({ level }: { level: number }) {
 
 function SelectionCheckbox({
   checked,
+  disabled = false,
   indeterminate = false,
   label,
   onChange,
   onClick,
 }: {
   checked: boolean;
+  disabled?: boolean;
   indeterminate?: boolean;
   label: string;
   onChange: (checked: boolean) => void;
@@ -186,6 +207,7 @@ function SelectionCheckbox({
     <input
       aria-label={label}
       checked={checked}
+      disabled={disabled}
       className="selection-checkbox"
       ref={ref}
       type="checkbox"
@@ -247,6 +269,7 @@ function SummaryAction({ tab }: { tab: TabListItem }) {
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: ["tabs"] }),
         queryClient.invalidateQueries({ queryKey: ["tab", tab.id] }),
+        queryClient.invalidateQueries({ queryKey: ["tab-instances", "library"] }),
       ]);
     }
   }, [job?.id, job?.status, queryClient, tab.id]);
@@ -344,8 +367,9 @@ export function App() {
     useI18n();
   const canonicalTabActivation = useCanonicalTabActivation();
   const singleTabClose = useSingleTabClose();
-  const [view, setView] = useState<WorkspaceView>("open");
+  const [view, setView] = useState<WorkspaceView>("library");
   const [browser, setBrowser] = useState("all");
+  const [duplicatesOnly, setDuplicatesOnly] = useState(false);
   const [openState, setOpenState] = useState<OpenFilter>("all");
   const [status, setStatus] = useState<"all" | TabStatus>("all");
   const [importance, setImportance] = useState<"all" | TabImportance>("all");
@@ -354,6 +378,13 @@ export function App() {
   const [selectedTopic, setSelectedTopic] = useState<SelectedTopic | null>(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+  const [selectionMode, setSelectionMode] =
+    useState<LibrarySelectionMode>("canonical");
+  const [physicalSelection, setPhysicalSelection] =
+    useState<LibraryPhysicalSelection>(() => new Map());
+  const [expandedPhysicalRows, setExpandedPhysicalRows] = useState<Set<number>>(
+    () => new Set(),
+  );
   const [bulkStatus, setBulkStatus] = useState<TabStatus>("in_progress");
   const [bulkTag, setBulkTag] = useState("");
   const [activeTabId, setActiveTabId] = useState<number | null>(null);
@@ -366,6 +397,7 @@ export function App() {
   const tag = selectedTopic?.path ?? "";
   const libraryFilters: LibraryTabFilters = {
     browser,
+    duplicatesOnly,
     importance,
     openState,
     q,
@@ -383,15 +415,66 @@ export function App() {
 
   useEffect(() => {
     setSelectedIds(new Set());
+  }, [libraryFilterKey, selectionMode]);
+
+  useEffect(() => {
+    if (view !== "library") setPhysicalSelection(new Map());
+  }, [view]);
+
+  useEffect(() => {
+    setExpandedPhysicalRows(new Set());
   }, [libraryFilterKey]);
 
+  const previousPhysicalSelectionContext = useRef<LibraryPhysicalSelectionContext>({
+    filterKey: libraryFilterKey,
+    mode: selectionMode,
+  });
+  useEffect(() => {
+    const nextContext: LibraryPhysicalSelectionContext = {
+      filterKey: libraryFilterKey,
+      mode: selectionMode,
+    };
+    setPhysicalSelection((current) =>
+      retainLibraryPhysicalSelectionForContext(
+        current,
+        previousPhysicalSelectionContext.current,
+        nextContext,
+      ),
+    );
+    previousPhysicalSelectionContext.current = nextContext;
+  }, [libraryFilterKey, selectionMode]);
+
   const tabsQuery = useQuery({
-    queryKey: ["tabs", { browser, importance, openState, page, q, status, tag }],
+    queryKey: [
+      "tabs",
+      { browser, duplicatesOnly, importance, openState, page, q, status, tag },
+    ],
     queryFn: ({ signal }) =>
-      fetchTabs({ browser, importance, openState, page, q, status, tag }, signal),
+      fetchTabs(
+        { browser, duplicatesOnly, importance, openState, page, q, status, tag },
+        signal,
+      ),
     refetchInterval: view === "library" ? 15_000 : false,
     refetchOnWindowFocus: view === "library" ? "always" : false,
   });
+  const libraryOpenTabsQuery = useQuery({
+    enabled: view === "library",
+    queryKey: ["tab-instances", "library", libraryFilters],
+    queryFn: ({ signal }) => fetchLibraryOpenTabs(libraryFilters, signal),
+    refetchInterval: view === "library" ? 15_000 : false,
+    refetchOnWindowFocus: view === "library" ? "always" : false,
+  });
+
+  useEffect(() => {
+    if (libraryOpenTabsQuery.isError) {
+      setPhysicalSelection(new Map());
+      return;
+    }
+    if (libraryOpenTabsQuery.data === undefined) return;
+    setPhysicalSelection((current) =>
+      reconcileLibraryPhysicalSelection(current, libraryOpenTabsQuery.data),
+    );
+  }, [libraryOpenTabsQuery.data, libraryOpenTabsQuery.isError]);
   const selectAllLibraryMutation = useMutation({
     mutationFn: ({ filters }: { filters: LibraryTabFilters; filterKey: string }) =>
       fetchAllLibraryTabIds(filters),
@@ -413,6 +496,7 @@ export function App() {
       setSelectedIds(new Set());
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["tabs"] }),
+        queryClient.invalidateQueries({ queryKey: ["tab-instances", "library"] }),
         queryClient.invalidateQueries({ queryKey: ["graph"] }),
       ]);
     },
@@ -424,6 +508,7 @@ export function App() {
       setBulkTag("");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["tabs"] }),
+        queryClient.invalidateQueries({ queryKey: ["tab-instances", "library"] }),
         queryClient.invalidateQueries({ queryKey: ["tags"] }),
         queryClient.invalidateQueries({ queryKey: ["graph"] }),
       ]);
@@ -431,10 +516,40 @@ export function App() {
   });
 
   const tabs = tabsQuery.data?.items ?? EMPTY_TABS;
+  const libraryPhysicalResolutionAvailable =
+    libraryOpenTabsQuery.data !== undefined && !libraryOpenTabsQuery.isError;
+  const libraryOpenTabs = libraryPhysicalResolutionAvailable
+    ? libraryOpenTabsQuery.data
+    : EMPTY_TAB_INSTANCES;
+  const effectivePhysicalSelection = libraryPhysicalResolutionAvailable
+    ? physicalSelection
+    : EMPTY_PHYSICAL_SELECTION;
+  const instancesByCanonicalTab = useMemo(() => {
+    const grouped = new Map<number, TabInstance[]>();
+    for (const instance of libraryOpenTabs) {
+      const instances = grouped.get(instance.canonicalTabId);
+      if (instances === undefined) grouped.set(instance.canonicalTabId, [instance]);
+      else instances.push(instance);
+    }
+    return grouped;
+  }, [libraryOpenTabs]);
   const visibleIds = tabs.map((tabItem) => tabItem.id);
-  const visibleSelected = visibleIds.filter((id) => selectedIds.has(id)).length;
-  const allVisibleSelected = visibleIds.length > 0 && visibleSelected === visibleIds.length;
-  const someVisibleSelected = visibleSelected > 0 && !allVisibleSelected;
+  const visiblePhysicalTabs = tabs.flatMap(
+    ({ id }) => instancesByCanonicalTab.get(id) ?? EMPTY_TAB_INSTANCES,
+  );
+  const visibleCanonicalSelected = visibleIds.filter((id) => selectedIds.has(id)).length;
+  const visiblePhysicalSelected = visiblePhysicalTabs.filter(({ instanceId }) =>
+    physicalSelection.has(instanceId),
+  ).length;
+  const visibleSelectionCount =
+    selectionMode === "canonical"
+      ? visibleCanonicalSelected
+      : visiblePhysicalSelected;
+  const visibleSelectionSize =
+    selectionMode === "canonical" ? visibleIds.length : visiblePhysicalTabs.length;
+  const allVisibleSelected =
+    visibleSelectionSize > 0 && visibleSelectionCount === visibleSelectionSize;
+  const someVisibleSelected = visibleSelectionCount > 0 && !allVisibleSelected;
   const setTabSelected = (id: number, checked: boolean) => {
     setSelectedIds((current) => {
       const next = new Set(current);
@@ -444,6 +559,12 @@ export function App() {
     });
   };
   const setPageSelected = (checked: boolean) => {
+    if (selectionMode === "physical") {
+      setPhysicalSelection((current) =>
+        setLibraryCanonicalRowsSelected(current, tabs, visiblePhysicalTabs, checked),
+      );
+      return;
+    }
     setSelectedIds((current) => {
       const next = new Set(current);
       for (const id of visibleIds) {
@@ -460,59 +581,154 @@ export function App() {
       header: () => (
         <SelectionCheckbox
           checked={allVisibleSelected}
+          disabled={visibleSelectionSize === 0}
           indeterminate={someVisibleSelected}
-          label={t("Select all tabs on this page")}
+          label={
+            selectionMode === "physical"
+              ? t("Select all browser tabs on this page")
+              : t("Select all tabs on this page")
+          }
           onChange={setPageSelected}
         />
       ),
-      cell: ({ row }) => (
-        <SelectionCheckbox
-          checked={selectedIds.has(row.original.id)}
-          label={t("Select {tab}", {
-            tab: row.original.title?.trim() || hostname(row.original.url),
-          })}
-          onChange={(checked) => setTabSelected(row.original.id, checked)}
-          onClick={(event) => event.stopPropagation()}
-        />
-      ),
+      cell: ({ row }) => {
+        const instances =
+          instancesByCanonicalTab.get(row.original.id) ?? EMPTY_TAB_INSTANCES;
+        const selectedCopies = instances.filter(({ instanceId }) =>
+          physicalSelection.has(instanceId),
+        ).length;
+        const selectingPhysicalTabs = selectionMode === "physical";
+        return (
+          <SelectionCheckbox
+            checked={
+              selectingPhysicalTabs
+                ? instances.length > 0 && selectedCopies === instances.length
+                : selectedIds.has(row.original.id)
+            }
+            disabled={selectingPhysicalTabs && instances.length === 0}
+            indeterminate={
+              selectingPhysicalTabs &&
+              selectedCopies > 0 &&
+              selectedCopies < instances.length
+            }
+            label={
+              selectingPhysicalTabs
+                ? t("Select browser tabs for {tab}", {
+                    tab: row.original.title?.trim() || hostname(row.original.url),
+                  })
+                : t("Select {tab}", {
+                    tab: row.original.title?.trim() || hostname(row.original.url),
+                  })
+            }
+            onChange={(checked) => {
+              if (selectingPhysicalTabs) {
+                setPhysicalSelection((current) =>
+                  setLibraryCanonicalRowsSelected(
+                    current,
+                    [row.original],
+                    instances,
+                    checked,
+                  ),
+                );
+              } else {
+                setTabSelected(row.original.id, checked);
+              }
+            }}
+            onClick={(event) => event.stopPropagation()}
+          />
+        );
+      },
     }),
     columnHelper.accessor("title", {
       header: t("Tab"),
       cell: ({ row }) => {
         const tabItem = row.original;
+        const instances =
+          instancesByCanonicalTab.get(tabItem.id) ?? EMPTY_TAB_INSTANCES;
+        const openCopyCount = effectiveLibraryOpenCopyCount(
+          tabItem.openInstanceCount,
+          instances,
+          libraryPhysicalResolutionAvailable,
+        );
+        const onlyInstance = instances.length === 1 ? instances[0] : undefined;
+        const tabLabel = tabItem.title?.trim() || hostname(tabItem.url);
+        const onlyInstanceLabel =
+          onlyInstance === undefined
+            ? undefined
+            : physicalTabAccessibleLabel(
+                onlyInstance,
+                tabLabel,
+                t,
+                formatNumber,
+              );
         return (
           <div className="tab-title-cell">
             <div className="tab-title-line">
               <button
+                aria-label={
+                  onlyInstance
+                    ? t("Switch to existing tab: {label}", {
+                        label: onlyInstanceLabel ?? tabLabel,
+                      })
+                    : undefined
+                }
                 className="tab-open-button"
-                title={t("Open tab details")}
+                disabled={
+                  onlyInstance !== undefined &&
+                  (canonicalTabActivation.isActivatingPhysical(
+                    onlyInstance.instanceId,
+                  ) || singleTabClose.isClosingPhysical(onlyInstance.instanceId))
+                }
+                title={
+                  onlyInstance
+                    ? t("Switch to this existing browser tab")
+                    : instances.length > 1
+                      ? t("{count} open copies", {
+                          count: formatNumber(instances.length),
+                          rawCount: instances.length,
+                        })
+                      : t("Open tab details")
+                }
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
-                  setActiveTabId(tabItem.id);
+                  if (onlyInstance !== undefined) {
+                    canonicalTabActivation.runPhysical(onlyInstance);
+                  } else if (instances.length > 1) {
+                    setExpandedPhysicalRows((current) => {
+                      const next = new Set(current);
+                      if (next.has(tabItem.id)) next.delete(tabItem.id);
+                      else next.add(tabItem.id);
+                      return next;
+                    });
+                  } else {
+                    setActiveTabId(tabItem.id);
+                  }
                 }}
               >
-                {tabItem.title?.trim() || hostname(tabItem.url)}
+                {tabLabel}
               </button>
-              <TabBrowserAction
-                activationError={
-                  singleTabClose.errorForCanonical(tabItem.id) !== undefined
-                    ? localizeError(singleTabClose.errorForCanonical(tabItem.id))
-                    : canonicalTabActivation.errorFor(tabItem.id) === undefined
-                      ? undefined
-                      : localizeError(canonicalTabActivation.errorFor(tabItem.id))
-                }
-                activationInProgress={
-                  canonicalTabActivation.busy || singleTabClose.busy
-                }
-                className="tab-browser-action"
-                closeInProgress={singleTabClose.isClosingCanonical(tabItem.id)}
-                isActivating={canonicalTabActivation.isActivating(tabItem.id)}
-                stopPropagation
-                tab={tabItem}
-                onBrowserAction={canonicalTabActivation.run}
-                onMiddleClose={singleTabClose.closeCanonical}
-              />
+              {openCopyCount === 0 ? (
+                <TabBrowserAction
+                  activationError={
+                    singleTabClose.errorForCanonical(tabItem.id) !== undefined
+                      ? localizeError(singleTabClose.errorForCanonical(tabItem.id))
+                      : canonicalTabActivation.errorFor(tabItem.id) === undefined
+                        ? undefined
+                        : localizeError(canonicalTabActivation.errorFor(tabItem.id))
+                  }
+                  activationInProgress={
+                    canonicalTabActivation.busy || singleTabClose.busy
+                  }
+                  className="tab-browser-action"
+                  closeInProgress={singleTabClose.isClosingCanonical(tabItem.id)}
+                  isActivating={canonicalTabActivation.isActivating(tabItem.id)}
+                  stopPropagation
+                  tab={tabItem}
+                  onBrowserAction={canonicalTabActivation.run}
+                  onMiddleClose={singleTabClose.closeCanonical}
+                />
+              ) : null}
             </div>
             <span>{hostname(tabItem.url)} | #{tabItem.id}</span>
             <SummaryAction tab={tabItem} />
@@ -547,7 +763,13 @@ export function App() {
       id: "activity",
       header: t("Open-tab activity"),
       cell: ({ getValue, row }) => {
-        const count = getValue();
+        const instances =
+          instancesByCanonicalTab.get(row.original.id) ?? EMPTY_TAB_INSTANCES;
+        const count = effectiveLibraryOpenCopyCount(
+          getValue(),
+          instances,
+          libraryPhysicalResolutionAvailable,
+        );
         if (count === 0) {
           return (
             <span className="no-library-activity" title={t("No open copies")}>
@@ -566,9 +788,46 @@ export function App() {
               engagedTimeMs={row.original.openEngagedTimeMs}
               foregroundTimeMs={row.original.openForegroundTimeMs}
             />
-            <span>
-              <OpenCopyCount count={count} />
-            </span>
+            {libraryOpenTabsQuery.isPending ? (
+              <span>{t("Loading open copies...")}</span>
+            ) : libraryOpenTabsQuery.isError ? (
+              <span className="physical-tab-action-error">
+                {t("Open copies unavailable")}
+              </span>
+            ) : (
+              <LibraryPhysicalCopies
+                activationErrorFor={(instanceId) => {
+                  const error = canonicalTabActivation.errorForPhysical(instanceId);
+                  return error === undefined ? undefined : localizeError(error);
+                }}
+                closeErrorFor={(instanceId) => {
+                  const error = singleTabClose.errorForPhysical(instanceId);
+                  return error === undefined ? undefined : localizeError(error);
+                }}
+                expanded={expandedPhysicalRows.has(row.original.id)}
+                instances={instances}
+                isActivating={canonicalTabActivation.isActivatingPhysical}
+                isClosing={singleTabClose.isClosingPhysical}
+                selection={physicalSelection}
+                selectionEnabled={selectionMode === "physical"}
+                tab={row.original}
+                onActivate={canonicalTabActivation.runPhysical}
+                onClose={singleTabClose.closePhysical}
+                onExpandedChange={(expanded) =>
+                  setExpandedPhysicalRows((current) => {
+                    const next = new Set(current);
+                    if (expanded) next.add(row.original.id);
+                    else next.delete(row.original.id);
+                    return next;
+                  })
+                }
+                onSelectedChange={(instance, selected) =>
+                  setPhysicalSelection((current) =>
+                    setLibraryPhysicalInstanceSelected(current, instance, selected),
+                  )
+                }
+              />
+            )}
           </div>
         );
       },
@@ -621,10 +880,11 @@ export function App() {
 
   useEffect(() => {
     rowVirtualizer.scrollToOffset(0);
-  }, [browser, importance, openState, page, q, rowVirtualizer, status, tag]);
+  }, [browser, duplicatesOnly, importance, openState, page, q, rowVirtualizer, status, tag]);
 
   const hasFilters =
     browser !== "all" ||
+    duplicatesOnly ||
     importance !== "all" ||
     openState !== "all" ||
     search.length > 0 ||
@@ -632,6 +892,7 @@ export function App() {
     tag.length > 0;
   const hasAppliedFilters =
     browser !== "all" ||
+    duplicatesOnly ||
     importance !== "all" ||
     openState !== "all" ||
     q.length > 0 ||
@@ -639,6 +900,7 @@ export function App() {
     tag.length > 0;
   const clearFilters = () => {
     setBrowser("all");
+    setDuplicatesOnly(false);
     setImportance("all");
     setOpenState("all");
     setPage(1);
@@ -679,6 +941,7 @@ export function App() {
     tabId: number,
     event: KeyboardEvent<HTMLTableRowElement>,
   ) => {
+    if (event.target !== event.currentTarget) return;
     if (event.key === "Enter") {
       event.preventDefault();
       setActiveTabId(tabId);
@@ -721,20 +984,16 @@ export function App() {
               <p className="eyebrow">{t("Workspace")}</p>
               <div className="title-row">
                 <h2 id="tab-list-title">
-                  {view === "open"
-                    ? t("Open tabs")
-                    : view === "graph"
-                      ? tag || t("Knowledge graph")
-                      : tag || t("Library")}
+                  {view === "graph"
+                    ? tag || t("Knowledge graph")
+                    : tag || t("Library")}
                 </h2>
                 {view === "library" && tabsQuery.data ? (
                   <span>{formatNumber(tabsQuery.data.total)}</span>
                 ) : null}
               </div>
               <p>
-                {view === "open"
-                  ? t("Every physical browser tab, including repeated URLs.")
-                  : view === "graph"
+                {view === "graph"
                   ? tag
                     ? t("Directed links under {tag} and its descendants.", { tag })
                     : t("Explore relationships across every captured tab.")
@@ -751,13 +1010,6 @@ export function App() {
                 </span>
               ) : null}
               <div className="view-switch" aria-label={t("Workspace view")} role="group">
-                <button
-                  aria-pressed={view === "open"}
-                  type="button"
-                  onClick={() => selectView("open")}
-                >
-                  {t("Open tabs")}
-                </button>
                 <button
                   aria-pressed={view === "library"}
                   type="button"
@@ -776,21 +1028,44 @@ export function App() {
             </div>
           </section>
 
-          <div className={view === "open" ? "workspace-layout is-open-tabs" : "workspace-layout"}>
-            {view !== "open" ? (
-              <TopicSidebar
-                selectedTopic={selectedTopic}
-                onSelectTopic={(topic) => {
-                  setSelectedTopic(topic);
-                  setPage(1);
-                }}
-              />
-            ) : null}
+          <div className="workspace-layout">
+            <TopicSidebar
+              selectedTopic={selectedTopic}
+              onSelectTopic={(topic) => {
+                setSelectedTopic(topic);
+                setPage(1);
+              }}
+            />
 
-            {view === "open" ? (
-              <OpenTabsView onSelectCanonicalTab={setActiveTabId} />
-            ) : view === "library" ? (
+            {view === "library" ? (
               <section className="table-panel" aria-label={t("Browser tabs")}>
+              <div className="library-mode-bar">
+                <div
+                  className="view-switch library-selection-mode"
+                  aria-label={t("Library selection mode")}
+                  role="group"
+                >
+                  <button
+                    aria-pressed={selectionMode === "canonical"}
+                    type="button"
+                    onClick={() => setSelectionMode("canonical")}
+                  >
+                    {t("Pages")}
+                  </button>
+                  <button
+                    aria-pressed={selectionMode === "physical"}
+                    type="button"
+                    onClick={() => setSelectionMode("physical")}
+                  >
+                    {t("Browser tabs")}
+                  </button>
+                </div>
+                <p>
+                  {selectionMode === "physical"
+                    ? t("Select and manage exact tabs in their owning browsers.")
+                    : t("Select saved pages to organize status and topics.")}
+                </p>
+              </div>
               <div className="filter-bar">
                 <div className="filter-label">
                   <FilterIcon />
@@ -878,6 +1153,20 @@ export function App() {
                     <option value="3">{t("3 - High")}</option>
                   </select>
                 </label>
+                <label className="duplicates-toggle">
+                  <input
+                    aria-label={t("Multiple open copies")}
+                    checked={duplicatesOnly}
+                    type="checkbox"
+                    onChange={(event) => {
+                      const checked = event.target.checked;
+                      setDuplicatesOnly(checked);
+                      if (checked) setOpenState("open");
+                      setPage(1);
+                    }}
+                  />
+                  <span>{t("Multiple open copies")}</span>
+                </label>
                 {hasFilters ? (
                   <button className="clear-button" type="button" onClick={clearFilters}>
                     {t("Clear filters")}
@@ -899,28 +1188,60 @@ export function App() {
                 <button
                   className="clear-button"
                   disabled={
-                    bulkBusy ||
+                    (selectionMode === "canonical"
+                      ? bulkBusy
+                      : !libraryPhysicalResolutionAvailable) ||
                     !tabsQuery.data ||
                     tabsQuery.data.total === 0
                   }
                   type="button"
-                  onClick={() =>
+                  onClick={() => {
+                    if (selectionMode === "physical") {
+                      setPhysicalSelection(
+                        new Map(
+                          libraryOpenTabs.map((instance) => [
+                            instance.instanceId,
+                            instance,
+                          ]),
+                        ),
+                      );
+                      return;
+                    }
                     selectAllLibraryMutation.mutate({
                       filterKey: libraryFilterKey,
                       filters: libraryFilters,
-                    })
-                  }
+                    });
+                  }}
                 >
                   {t("All filtered results")}
                 </button>
-                {selectAllLibraryMutation.isError ? (
+                {selectionMode === "canonical" && selectAllLibraryMutation.isError ? (
                   <span className="bulk-error" role="alert">
                     {localizeError(selectAllLibraryMutation.error)}
                   </span>
                 ) : null}
               </div>
 
-              {selectedIds.size > 0 ? (
+              <LibraryPhysicalTabActions
+                allFilteredInstances={libraryOpenTabs}
+                selection={
+                  selectionMode === "physical"
+                    ? effectivePhysicalSelection
+                    : EMPTY_PHYSICAL_SELECTION
+                }
+                showSelectionControls={
+                  selectionMode === "physical" &&
+                  libraryPhysicalResolutionAvailable
+                }
+                onRefresh={() =>
+                  Promise.all([
+                    tabsQuery.refetch(),
+                    libraryOpenTabsQuery.refetch(),
+                  ])
+                }
+                onSelectionChange={setPhysicalSelection}
+              />
+              {selectionMode === "canonical" && selectedIds.size > 0 ? (
                 <div className="bulk-toolbar" aria-label={t("Bulk tab actions")}>
                   <strong>
                     {t("{count} selected", { count: formatNumber(selectedIds.size) })}
@@ -1006,23 +1327,34 @@ export function App() {
                       ? rowVirtualizer.getVirtualItems().map((virtualRow) => {
                           const row = tableRows[virtualRow.index];
                           if (!row) return null;
+                          const rowInstances =
+                            instancesByCanonicalTab.get(row.original.id) ??
+                            EMPTY_TAB_INSTANCES;
+                          const rowSelected =
+                            selectionMode === "canonical"
+                              ? selectedIds.has(row.original.id)
+                              : rowInstances.length > 0 &&
+                                rowInstances.every(({ instanceId }) =>
+                                  physicalSelection.has(instanceId),
+                                );
 
                           return (
                             <tr
                               aria-rowindex={virtualRow.index + 2}
-                              aria-selected={selectedIds.has(row.original.id)}
-                              className={
-                                selectedIds.has(row.original.id) ? "is-selected" : undefined
-                              }
+                              aria-selected={rowSelected}
+                              className={rowSelected ? "is-selected" : undefined}
                               data-index={virtualRow.index}
                               key={row.id}
                               ref={(element) => rowVirtualizer.measureElement(element)}
                               style={{ transform: `translateY(${virtualRow.start}px)` }}
                               tabIndex={0}
                               onAuxClick={(event) => {
-                                if (!row.original.isOpen) return;
+                                const onlyInstance = rowInstances[0];
+                                if (rowInstances.length !== 1 || onlyInstance === undefined) {
+                                  return;
+                                }
                                 handleMiddleClickClose(event, () =>
-                                  singleTabClose.closeCanonical(row.original.id),
+                                  singleTabClose.closePhysical(onlyInstance),
                                 );
                               }}
                               onClick={(event) => openRow(row.original.id, event)}

@@ -556,6 +556,43 @@ describe("semantic tab search", () => {
     });
     expect(beyondWindow.statusCode).toBe(200);
     expect(beyondWindow.json()).toMatchObject({ total: 2, items: [] });
+
+    await app.inject({
+      method: "POST",
+      url: "/api/ingest/snapshot",
+      payload: {
+        browser: "chrome",
+        tabs: [
+          {
+            url: "https://example.com/rust",
+            title: "Rust borrow checker",
+            windowId: 1,
+            index: 0,
+          },
+          {
+            url: "https://example.com/rust",
+            title: "Rust borrow checker copy",
+            windowId: 2,
+            index: 0,
+          },
+          {
+            url: "https://example.com/bread",
+            title: "Sourdough recipe",
+            windowId: 1,
+            index: 1,
+          },
+        ],
+      },
+    });
+    const duplicatesOnly = await app.inject({
+      method: "GET",
+      url: "/api/tabs?q=compiler&search_mode=semantic&duplicates_only=true",
+    });
+    expect(duplicatesOnly.statusCode).toBe(200);
+    expect(duplicatesOnly.json()).toMatchObject({ total: 1 });
+    expect(
+      duplicatesOnly.json().items.map((tab: { id: number }) => tab.id),
+    ).toEqual([ids["Rust borrow checker"]]);
   });
 
   it("clusters safely when a valid vector cancels in the signed projection", async () => {
