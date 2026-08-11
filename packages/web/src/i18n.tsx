@@ -143,9 +143,13 @@ const russianMessages: Record<string, Message> = {
   "No captured content.": "Сохранённого содержимого нет.",
   "No summary yet.": "Сводки пока нет.",
   "On screen": "На экране",
+  "Page activity": "Активность страницы",
   "Open-tab activity": "Активность открытых вкладок",
   "No open copies": "Нет открытых копий",
+  "No recorded activity": "Нет записанной активности",
   "Open copies unavailable": "Открытые копии недоступны",
+  "Accumulated for this page across tracked browser sessions.":
+    "Накоплено для этой страницы за все отслеженные сессии браузера.",
   "Combined across currently open physical copies.":
     "Сумма по физическим копиям, открытым сейчас.",
   "On-screen time within 60 seconds of recent mouse, keyboard, scroll, or touch input.":

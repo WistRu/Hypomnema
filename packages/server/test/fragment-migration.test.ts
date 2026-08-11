@@ -118,7 +118,7 @@ describe("fragment-aware canonical page migration", () => {
     const app = createApp({ databasePath, logger: false });
     try {
       const health = await app.inject({ method: "GET", url: "/api/health" });
-      expect(health.json().schemaVersion).toBe(14);
+      expect(health.json().schemaVersion).toBe(15);
 
       const library = await app.inject({
         method: "GET",

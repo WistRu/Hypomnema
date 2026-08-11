@@ -36,6 +36,8 @@ const detailResponse: TabDetailResponse = {
   closedAt: null,
   summary: null,
   tagPaths: [],
+  foregroundTimeMs: 125_000,
+  engagedTimeMs: 45_000,
   openInstanceCount: 0,
   openForegroundTimeMs: 0,
   openEngagedTimeMs: 0,

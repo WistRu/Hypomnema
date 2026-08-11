@@ -71,6 +71,8 @@ const tab: TabListItem = {
   index: 0,
   isOpen: true,
   lastSeenAt: "2026-08-11T00:01:00.000Z",
+  engagedTimeMs: 0,
+  foregroundTimeMs: 0,
   openEngagedTimeMs: 12_000,
   openForegroundTimeMs: 61_000,
   openInstanceCount: 0,

@@ -11,7 +11,7 @@ const BROWSER_SESSION_ID = "223e4567-e89b-42d3-a456-426614174000";
 const EVENT_ID = "323e4567-e89b-42d3-a456-426614174000";
 
 describe("tab activity ingestion", () => {
-  it("exposes the combined activity of current physical copies in Library", async () => {
+  it("keeps canonical page activity in Library after its physical copies close", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-library-activity-"));
     const app = createApp({
       databasePath: join(directory, "tabhub.sqlite"),
@@ -87,6 +87,8 @@ describe("tab activity ingestion", () => {
       expect(library.statusCode).toBe(200);
       expect(library.json().items).toEqual([
         expect.objectContaining({
+          foregroundTimeMs: 15_000,
+          engagedTimeMs: 5_000,
           openInstanceCount: 2,
           openForegroundTimeMs: 15_000,
           openEngagedTimeMs: 5_000,
@@ -98,6 +100,8 @@ describe("tab activity ingestion", () => {
         url: `/api/tabs/${canonicalId}`,
       });
       expect(detail.json()).toMatchObject({
+        foregroundTimeMs: 15_000,
+        engagedTimeMs: 5_000,
         openInstanceCount: 2,
         openForegroundTimeMs: 15_000,
         openEngagedTimeMs: 5_000,
@@ -121,6 +125,8 @@ describe("tab activity ingestion", () => {
       });
       expect(closedLibrary.json().items).toEqual([
         expect.objectContaining({
+          foregroundTimeMs: 15_000,
+          engagedTimeMs: 5_000,
           openInstanceCount: 0,
           openForegroundTimeMs: 0,
           openEngagedTimeMs: 0,
@@ -274,6 +280,32 @@ describe("tab activity ingestion", () => {
           engagedTimeMs: 5_000,
         }),
       ]);
+      const libraryAfterNavigation = await app.inject({
+        method: "GET",
+        url: "/api/tabs?browser=chrome&pageSize=50",
+      });
+      const canonicalActivityByUrl = new Map(
+        libraryAfterNavigation
+          .json()
+          .items.map(
+            (item: {
+              engagedTimeMs: number;
+              foregroundTimeMs: number;
+              url: string;
+            }) => [
+              item.url,
+              [item.foregroundTimeMs, item.engagedTimeMs],
+            ],
+          ),
+      );
+      expect(canonicalActivityByUrl.get("https://example.com/article")).toEqual([
+        10_000,
+        4_000,
+      ]);
+      expect(canonicalActivityByUrl.get("https://example.com/next")).toEqual([
+        5_000,
+        1_000,
+      ]);
 
       await app.inject({
         method: "POST",
@@ -304,6 +336,17 @@ describe("tab activity ingestion", () => {
           engagedTimeMs: 0,
         }),
       ]);
+      const libraryAfterSessionRollover = await app.inject({
+        method: "GET",
+        url: "/api/tabs?browser=chrome&pageSize=50",
+      });
+      expect(
+        libraryAfterSessionRollover
+          .json()
+          .items.find(
+            (item: { url: string }) => item.url === "https://example.com/next",
+          ),
+      ).toMatchObject({ foregroundTimeMs: 5_000, engagedTimeMs: 1_000 });
 
       const firstInNextSession = await app.inject({
         method: "POST",
@@ -334,6 +377,17 @@ describe("tab activity ingestion", () => {
           engagedTimeMs: 1_000,
         }),
       ]);
+      const libraryAfterNextSessionActivity = await app.inject({
+        method: "GET",
+        url: "/api/tabs?browser=chrome&pageSize=50",
+      });
+      expect(
+        libraryAfterNextSessionActivity
+          .json()
+          .items.find(
+            (item: { url: string }) => item.url === "https://example.com/next",
+          ),
+      ).toMatchObject({ foregroundTimeMs: 7_000, engagedTimeMs: 2_000 });
     } finally {
       await app.close();
       await rm(directory, { recursive: true, force: true });
@@ -394,6 +448,18 @@ describe("tab activity ingestion", () => {
       expect(instances.json().items).toEqual([
         expect.objectContaining({
           browserTabId: 42,
+          foregroundTimeMs: 3_000,
+          engagedTimeMs: 2_000,
+        }),
+      ]);
+
+      const library = await app.inject({
+        method: "GET",
+        url: "/api/tabs?browser=chrome&pageSize=50",
+      });
+      expect(library.json().items).toEqual([
+        expect.objectContaining({
+          url: "https://example.com/activity-first",
           foregroundTimeMs: 3_000,
           engagedTimeMs: 2_000,
         }),

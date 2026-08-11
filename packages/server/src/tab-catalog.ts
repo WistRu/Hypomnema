@@ -113,12 +113,16 @@ interface TabTagPathRow {
 
 interface TabActivitySummaryRow {
   tab_id: number;
+  foreground_time_ms: number;
+  engaged_time_ms: number;
   open_instance_count: number;
   open_foreground_time_ms: number;
   open_engaged_time_ms: number;
 }
 
 interface TabActivitySummary {
+  foregroundTimeMs: number;
+  engagedTimeMs: number;
   openInstanceCount: number;
   openForegroundTimeMs: number;
   openEngagedTimeMs: number;
@@ -250,6 +254,8 @@ function tabFilter(input: FilterTabsInput): {
 }
 
 const emptyTabActivitySummary: TabActivitySummary = {
+  foregroundTimeMs: 0,
+  engagedTimeMs: 0,
   openInstanceCount: 0,
   openForegroundTimeMs: 0,
   openEngagedTimeMs: 0,
@@ -435,19 +441,27 @@ export function createTabCatalog(
     const rows = connection
       .prepare(`
         SELECT
-          tab_instances.tab_id,
-          COUNT(*) AS open_instance_count,
+          tabs.id AS tab_id,
+          COALESCE(tab_page_activity_totals.foreground_ms, 0)
+            AS foreground_time_ms,
+          COALESCE(tab_page_activity_totals.engaged_ms, 0)
+            AS engaged_time_ms,
+          COUNT(tab_instances.id) AS open_instance_count,
           COALESCE(SUM(tab_activity_totals.foreground_ms), 0)
             AS open_foreground_time_ms,
           COALESCE(SUM(tab_activity_totals.engaged_ms), 0)
             AS open_engaged_time_ms
-        FROM tab_instances
+        FROM tabs
+        LEFT JOIN tab_page_activity_totals
+          ON tab_page_activity_totals.browser = tabs.browser
+         AND tab_page_activity_totals.url_normalized = tabs.url_normalized
+        LEFT JOIN tab_instances ON tab_instances.tab_id = tabs.id
         LEFT JOIN tab_activity_totals
           ON tab_activity_totals.installation_id = tab_instances.installation_id
          AND tab_activity_totals.browser_session_id IS tab_instances.browser_session_id
          AND tab_activity_totals.browser_tab_id IS tab_instances.browser_tab_id
-        WHERE tab_instances.tab_id IN (${placeholders})
-        GROUP BY tab_instances.tab_id
+        WHERE tabs.id IN (${placeholders})
+        GROUP BY tabs.id
       `)
       .all(...tabIds) as TabActivitySummaryRow[];
 
@@ -455,6 +469,8 @@ export function createTabCatalog(
       rows.map((row) => [
         row.tab_id,
         {
+          foregroundTimeMs: row.foreground_time_ms,
+          engagedTimeMs: row.engaged_time_ms,
           openInstanceCount: row.open_instance_count,
           openForegroundTimeMs: row.open_foreground_time_ms,
           openEngagedTimeMs: row.open_engaged_time_ms,

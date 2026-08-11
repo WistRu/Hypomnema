@@ -78,6 +78,8 @@ const tabs: TabListResponse = {
       index: 0,
       isOpen: true,
       lastSeenAt: "2026-08-10T00:01:00.000Z",
+      engagedTimeMs: 45_000,
+      foregroundTimeMs: 125_000,
       openEngagedTimeMs: 12_000,
       openForegroundTimeMs: 61_000,
       openInstanceCount: 1,
@@ -99,6 +101,8 @@ const tabs: TabListResponse = {
       index: null,
       isOpen: false,
       lastSeenAt: "2026-08-10T00:05:00.000Z",
+      engagedTimeMs: 8_000,
+      foregroundTimeMs: 33_000,
       openEngagedTimeMs: 0,
       openForegroundTimeMs: 0,
       openInstanceCount: 0,
@@ -123,7 +127,7 @@ afterEach(() => {
 });
 
 describe("Library activity", () => {
-  it("shows combined current-copy activity without presenting closed tabs as zero time", () => {
+  it("shows lifetime page activity for open and closed Library rows", () => {
     class ResizeObserverStub {
       disconnect() {}
       observe() {}
@@ -226,9 +230,9 @@ describe("Library activity", () => {
       throw new Error("Missing tracked Library cells");
     }
     expect(within(trackedActivityCell).getByText("On screen")).toBeTruthy();
-    expect(within(trackedActivityCell).getByText("1m 1s")).toBeTruthy();
+    expect(within(trackedActivityCell).getByText("2m 5s")).toBeTruthy();
     expect(within(trackedActivityCell).getByText("Active use")).toBeTruthy();
-    expect(within(trackedActivityCell).getByText("12s")).toBeTruthy();
+    expect(within(trackedActivityCell).getByText("45s")).toBeTruthy();
     expect(
       within(trackedTabCell).getByRole("button", {
         name: /^Close for Tracked tab \|/,
@@ -254,8 +258,10 @@ describe("Library activity", () => {
       'td[data-column="activity"]',
     );
     if (!closedActivityCell) throw new Error("Missing closed activity cell");
-    expect(within(closedActivityCell).getByText("No open copies")).toBeTruthy();
-    expect(within(closedActivityCell).queryByText("0s")).toBeNull();
+    expect(within(closedActivityCell).getByText("On screen")).toBeTruthy();
+    expect(within(closedActivityCell).getByText("33s")).toBeTruthy();
+    expect(within(closedActivityCell).getByText("Active use")).toBeTruthy();
+    expect(within(closedActivityCell).getByText("8s")).toBeTruthy();
     queryClient.clear();
   });
 });

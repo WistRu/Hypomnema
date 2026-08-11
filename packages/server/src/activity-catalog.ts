@@ -7,6 +7,8 @@ import type {
   IngestActivityResponse,
 } from "@tabhub/shared";
 
+import { normalizeUrl } from "./normalize-url.js";
+
 interface ActivityStreamCursorRow {
   last_event_id: string;
   last_payload_digest: string;
@@ -80,6 +82,46 @@ export function createActivityCatalog(
       engaged_ms = tab_activity_totals.engaged_ms + excluded.engaged_ms,
       updated_at = excluded.updated_at
   `);
+  const incrementPageTotals = connection.prepare(`
+    INSERT INTO tab_page_activity_totals (
+      browser,
+      url_normalized,
+      url,
+      foreground_ms,
+      engaged_ms,
+      first_activity_at,
+      last_activity_at,
+      updated_at
+    ) VALUES (
+      @browser,
+      @urlNormalized,
+      @url,
+      @foregroundMs,
+      @engagedMs,
+      @firstActivityAt,
+      @lastActivityAt,
+      @updatedAt
+    )
+    ON CONFLICT (browser, url_normalized) DO UPDATE SET
+      url = CASE
+        WHEN excluded.last_activity_at >= tab_page_activity_totals.last_activity_at
+          THEN excluded.url
+        ELSE tab_page_activity_totals.url
+      END,
+      foreground_ms =
+        tab_page_activity_totals.foreground_ms + excluded.foreground_ms,
+      engaged_ms =
+        tab_page_activity_totals.engaged_ms + excluded.engaged_ms,
+      first_activity_at = MIN(
+        tab_page_activity_totals.first_activity_at,
+        excluded.first_activity_at
+      ),
+      last_activity_at = MAX(
+        tab_page_activity_totals.last_activity_at,
+        excluded.last_activity_at
+      ),
+      updated_at = MAX(tab_page_activity_totals.updated_at, excluded.updated_at)
+  `);
   const advanceCursor = connection.prepare(`
     INSERT INTO tab_activity_stream_cursors (
       installation_id,
@@ -135,6 +177,16 @@ export function createActivityCatalog(
         foregroundMs: activity.foregroundMs,
         installationId: activity.installationId,
         updatedAt,
+      });
+      incrementPageTotals.run({
+        browser: activity.browser,
+        engagedMs: activity.engagedMs,
+        firstActivityAt: activity.startedAt,
+        foregroundMs: activity.foregroundMs,
+        lastActivityAt: activity.endedAt,
+        updatedAt,
+        url: activity.url,
+        urlNormalized: normalizeUrl(activity.url),
       });
       advanceCursor.run({
         browserSessionId: activity.browserSessionId,

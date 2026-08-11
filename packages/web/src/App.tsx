@@ -918,7 +918,7 @@ export function App() {
       ),
       cell: ({ getValue }) => <BrowserBadge browser={getValue()} />,
     }),
-    columnHelper.accessor("openInstanceCount", {
+    columnHelper.accessor("foregroundTimeMs", {
       id: "activity",
       header: () => (
         <SortableColumnHeader
@@ -930,18 +930,11 @@ export function App() {
         />
       ),
       cell: ({ getValue, row }) => {
-        const instances =
-          instancesByCanonicalTab.get(row.original.id) ?? EMPTY_TAB_INSTANCES;
-        const count = effectiveLibraryOpenCopyCount(
-          getValue(),
-          instances,
-          libraryPhysicalResolutionAvailable,
-        );
-        if (count === 0) {
+        if (getValue() === 0) {
           return (
-            <span className="no-library-activity" title={t("No open copies")}>
+            <span className="no-library-activity" title={t("No recorded activity")}>
               <span aria-hidden="true">—</span>
-              <span className="sr-only">{t("No open copies")}</span>
+              <span className="sr-only">{t("No recorded activity")}</span>
             </span>
           );
         }
@@ -949,11 +942,11 @@ export function App() {
         return (
           <div
             className="library-activity"
-            title={t("Combined across currently open physical copies.")}
+            title={t("Accumulated for this page across tracked browser sessions.")}
           >
             <ActivityMetrics
-              engagedTimeMs={row.original.openEngagedTimeMs}
-              foregroundTimeMs={row.original.openForegroundTimeMs}
+              engagedTimeMs={row.original.engagedTimeMs}
+              foregroundTimeMs={row.original.foregroundTimeMs}
             />
           </div>
         );

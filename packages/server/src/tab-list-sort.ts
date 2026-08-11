@@ -80,24 +80,18 @@ export function tabListSortSql(
         joinClause: `
           LEFT JOIN (
             SELECT
-              tab_instances.tab_id,
-              COUNT(*) AS open_instance_count,
-              COALESCE(SUM(tab_activity_totals.foreground_ms), 0)
-                AS open_foreground_time_ms,
-              COALESCE(SUM(tab_activity_totals.engaged_ms), 0)
-                AS open_engaged_time_ms
-            FROM tab_instances
-            LEFT JOIN tab_activity_totals
-              ON tab_activity_totals.installation_id = tab_instances.installation_id
-             AND tab_activity_totals.browser_session_id IS tab_instances.browser_session_id
-             AND tab_activity_totals.browser_tab_id IS tab_instances.browser_tab_id
-            GROUP BY tab_instances.tab_id
-          ) AS tab_sort_activity ON tab_sort_activity.tab_id = tabs.id
+              browser AS activity_browser,
+              url_normalized AS activity_url_normalized,
+              foreground_ms,
+              engaged_ms
+            FROM tab_page_activity_totals
+          ) AS tab_sort_activity
+            ON tab_sort_activity.activity_browser = tabs.browser
+           AND tab_sort_activity.activity_url_normalized = tabs.url_normalized
         `,
         orderClause: `
-          COALESCE(tab_sort_activity.open_foreground_time_ms, 0) ${direction},
-          COALESCE(tab_sort_activity.open_engaged_time_ms, 0) ${direction},
-          COALESCE(tab_sort_activity.open_instance_count, 0) ${direction},
+          COALESCE(tab_sort_activity.foreground_ms, 0) ${direction},
+          COALESCE(tab_sort_activity.engaged_ms, 0) ${direction},
           ${defaultOrderClause}
         `,
       };

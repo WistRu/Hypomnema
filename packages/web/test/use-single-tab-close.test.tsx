@@ -85,6 +85,8 @@ function tabList(
   openInstanceCount: number,
   openEngagedTimeMs = 0,
   openForegroundTimeMs = 0,
+  engagedTimeMs = 0,
+  foregroundTimeMs = 0,
 ): TabListResponse {
   return {
     items: [
@@ -98,6 +100,8 @@ function tabList(
         index: 0,
         isOpen: true,
         lastSeenAt: "2026-08-11T00:01:00.000Z",
+        engagedTimeMs,
+        foregroundTimeMs,
         openEngagedTimeMs,
         openForegroundTimeMs,
         openInstanceCount,
@@ -164,7 +168,7 @@ afterEach(() => {
 });
 
 describe("useSingleTabClose Library feedback", () => {
-  it("removes a successfully closed physical copy from Library caches immediately", async () => {
+  it("removes a closed copy and refreshes authoritative page activity", async () => {
     const queryClient = new QueryClient({
       defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
     });
@@ -198,13 +202,22 @@ describe("useSingleTabClose Library feedback", () => {
     const staleLibraryFetch = vi
       .fn()
       .mockResolvedValue([closedCopy, remainingCopy]);
-    const staleTabsFetch = vi
+    const authoritativeTabsFetch = vi
       .fn()
-      .mockResolvedValue(tabList(1, 5_000, 12_000));
+      .mockResolvedValue(tabList(1, 3_000, 7_000, 5_500, 13_000));
+    const detailKey = ["tab", closedCopy.canonicalTabId] as const;
+    const authoritativeDetailFetch = vi.fn().mockResolvedValue({
+      engagedTimeMs: 5_500,
+      foregroundTimeMs: 13_000,
+    });
     queryClient.setQueryData(libraryKey, [closedCopy, remainingCopy]);
     queryClient.setQueryData(drawerKey, [closedCopy, remainingCopy]);
-    queryClient.setQueryData(tabsKey, tabList(1, 5_000, 12_000));
+    queryClient.setQueryData(tabsKey, tabList(2, 5_000, 12_000, 4_000, 11_000));
     queryClient.setQueryData(duplicateTabsKey, tabList(3, 5_000, 12_000));
+    queryClient.setQueryData(detailKey, {
+      engagedTimeMs: 4_000,
+      foregroundTimeMs: 11_000,
+    });
     const rendered = renderHook(
       () => {
         const close = useSingleTabClose();
@@ -214,8 +227,13 @@ describe("useSingleTabClose Library feedback", () => {
           staleTime: Infinity,
         });
         useQuery({
-          queryFn: staleTabsFetch,
+          queryFn: authoritativeTabsFetch,
           queryKey: tabsKey,
+          staleTime: Infinity,
+        });
+        useQuery({
+          queryFn: authoritativeDetailFetch,
+          queryKey: detailKey,
           staleTime: Infinity,
         });
         return close;
@@ -233,7 +251,8 @@ describe("useSingleTabClose Library feedback", () => {
       expect(queryClient.isMutating()).toBe(0);
     });
     expect(staleLibraryFetch).not.toHaveBeenCalled();
-    expect(staleTabsFetch).not.toHaveBeenCalled();
+    expect(authoritativeTabsFetch).toHaveBeenCalledOnce();
+    expect(authoritativeDetailFetch).toHaveBeenCalledOnce();
     expect(queryClient.getQueryData(libraryKey)).toEqual([remainingCopy]);
     expect(queryClient.getQueryData(drawerKey)).toEqual([remainingCopy]);
     expect(
@@ -243,6 +262,12 @@ describe("useSingleTabClose Library feedback", () => {
       openEngagedTimeMs: 3_000,
       openForegroundTimeMs: 7_000,
       openInstanceCount: 1,
+      engagedTimeMs: 5_500,
+      foregroundTimeMs: 13_000,
+    });
+    expect(queryClient.getQueryData(detailKey)).toEqual({
+      engagedTimeMs: 5_500,
+      foregroundTimeMs: 13_000,
     });
     expect(
       queryClient.getQueryData<TabListResponse>(duplicateTabsKey),

@@ -126,6 +126,103 @@ describe("Library tab sorting", () => {
     }
   });
 
+  it("sorts lifetime activity across closed pages before pagination", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-activity-sorting-"));
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+    });
+    const installationId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const browserSessionId = "55555555-5555-4555-8555-555555555555";
+    const rows = [
+      { browserTabId: 1, foregroundMs: 1_000, slug: "least" },
+      { browserTabId: 2, foregroundMs: 3_000, slug: "most" },
+      { browserTabId: 3, foregroundMs: 2_000, slug: "middle" },
+    ] as const;
+
+    try {
+      await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          installationId,
+          browserSessionId,
+          tabs: rows.map((row, index) => ({
+            tabId: row.browserTabId,
+            url: `https://example.com/${row.slug}`,
+            title: row.slug,
+            windowId: 1,
+            index,
+          })),
+        },
+      });
+
+      for (const [index, row] of rows.entries()) {
+        const activity = await app.inject({
+          method: "POST",
+          url: "/api/ingest/activity",
+          payload: {
+            id: `${String(index + 1).padStart(8, "0")}-6666-4666-8666-666666666666`,
+            browser: "chrome",
+            installationId,
+            browserSessionId,
+            browserTabId: row.browserTabId,
+            sequence: index + 1,
+            url: `https://example.com/${row.slug}`,
+            startedAt: "2026-08-05T10:00:00.000Z",
+            endedAt: "2026-08-05T10:00:10.000Z",
+            foregroundMs: row.foregroundMs,
+            engagedMs: Math.floor(row.foregroundMs / 2),
+          },
+        });
+        expect(activity.statusCode).toBe(200);
+      }
+
+      const closeMiddle = await app.inject({
+        method: "POST",
+        url: "/api/ingest/snapshot",
+        payload: {
+          browser: "chrome",
+          installationId,
+          browserSessionId,
+          tabs: rows
+            .filter(({ slug }) => slug !== "middle")
+            .map((row, index) => ({
+              tabId: row.browserTabId,
+              url: `https://example.com/${row.slug}`,
+              title: row.slug,
+              windowId: 1,
+              index,
+            })),
+        },
+      });
+      expect(closeMiddle.statusCode).toBe(200);
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/tabs?sort_by=activity&sort_direction=desc&page=2&pageSize=1",
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        items: [
+          {
+            title: "middle",
+            foregroundTimeMs: 2_000,
+            engagedTimeMs: 1_000,
+            isOpen: false,
+          },
+        ],
+        page: 2,
+        pageSize: 1,
+        total: 3,
+      });
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("sorts every visible data column using its user-facing meaning", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-column-sorting-"));
     let now = new Date("2026-08-01T10:00:00.000Z");
@@ -233,7 +330,7 @@ describe("Library tab sorting", () => {
         ["topics", "asc", ["yandex", "other", "chrome", "edge"]],
         ["browser", "asc", ["chrome", "edge", "yandex", "other"]],
         ["browser", "desc", ["yandex", "edge", "chrome", "other"]],
-        ["activity", "desc", ["edge", "other", "chrome", "yandex"]],
+        ["activity", "desc", ["edge", "other", "yandex", "chrome"]],
         ["status", "asc", ["yandex", "other", "chrome", "edge"]],
         ["importance", "desc", ["yandex", "other", "chrome", "edge"]],
         ["state", "desc", ["chrome", "edge", "other", "yandex"]],

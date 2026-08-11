@@ -433,6 +433,8 @@ export const tabListItemSchema = z.object({
   closedAt: z.string().datetime().nullable(),
   summary: z.string().nullable(),
   tagPaths: z.array(z.string()),
+  foregroundTimeMs: z.number().int().nonnegative().default(0),
+  engagedTimeMs: z.number().int().nonnegative().default(0),
   openInstanceCount: z.number().int().nonnegative().default(0),
   openForegroundTimeMs: z.number().int().nonnegative().default(0),
   openEngagedTimeMs: z.number().int().nonnegative().default(0),

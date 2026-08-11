@@ -80,7 +80,7 @@ describe("knowledge graph migration", () => {
 
     const upgraded = openDatabase(databasePath);
     try {
-      expect(upgraded.schemaVersion).toBe(14);
+      expect(upgraded.schemaVersion).toBe(15);
       expect(
         upgraded.connection
           .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'links'")

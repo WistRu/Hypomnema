@@ -133,7 +133,7 @@ describe("Library activity API", () => {
     );
   });
 
-  it("preserves the current-copy activity aggregate returned by the server", async () => {
+  it("preserves lifetime page activity separately from current-copy activity", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
@@ -149,6 +149,8 @@ describe("Library activity API", () => {
               index: 0,
               isOpen: true,
               lastSeenAt: "2026-08-10T00:01:00.000Z",
+              engagedTimeMs: 45_000,
+              foregroundTimeMs: 125_000,
               openEngagedTimeMs: 12_000,
               openForegroundTimeMs: 61_000,
               openInstanceCount: 2,
@@ -179,6 +181,8 @@ describe("Library activity API", () => {
     });
 
     expect(response.items[0]).toMatchObject({
+      engagedTimeMs: 45_000,
+      foregroundTimeMs: 125_000,
       openEngagedTimeMs: 12_000,
       openForegroundTimeMs: 61_000,
       openInstanceCount: 2,

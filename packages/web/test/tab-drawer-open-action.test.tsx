@@ -25,6 +25,8 @@ function tabDetail(isOpen: boolean): TabDetailResponse {
     isOpen,
     lastSeenAt: "2026-08-09T00:15:00.000Z",
     links: [],
+    engagedTimeMs: 83_000,
+    foregroundTimeMs: 754_000,
     openEngagedTimeMs: isOpen ? 17_000 : 0,
     openForegroundTimeMs: isOpen ? 361_000 : 0,
     openInstanceCount: isOpen ? 2 : 0,
@@ -148,9 +150,12 @@ describe("tab drawer browser action", () => {
     expect(markup).toContain("5s");
   });
 
-  it("does not present a closed canonical record as zero lifetime activity", () => {
+  it("shows lifetime page activity even when no physical copy is open", () => {
     const markup = renderDrawer(tabDetail(false));
 
+    expect(markup).toContain("Page activity");
+    expect(markup).toContain("12m 34s");
+    expect(markup).toContain("1m 23s");
     expect(markup).toContain("No open copies in the current browser session.");
     expect(markup).not.toContain(">0s<");
   });

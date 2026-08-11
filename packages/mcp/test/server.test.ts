@@ -34,6 +34,8 @@ const tabList: TabListResponse = {
       closedAt: null,
       summary: null,
       tagPaths: ["Work/Research"],
+      foregroundTimeMs: 125_000,
+      engagedTimeMs: 45_000,
       openInstanceCount: 0,
       openForegroundTimeMs: 0,
       openEngagedTimeMs: 0,

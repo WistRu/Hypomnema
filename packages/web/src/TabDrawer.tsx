@@ -517,9 +517,32 @@ export function TabDrawer({
               {mutationError ? <SectionError error={mutationError} /> : null}
             </section>
 
-            <section className="drawer-section" aria-labelledby={`${headingId}-activity`}>
+            <section
+              className="drawer-section"
+              aria-labelledby={`${headingId}-page-activity`}
+            >
               <div className="section-heading">
-                <h3 id={`${headingId}-activity`}>{t("Open copies")}</h3>
+                <h3 id={`${headingId}-page-activity`}>{t("Page activity")}</h3>
+              </div>
+              {tab.foregroundTimeMs > 0 ? (
+                <div className="drawer-activity-summary">
+                  <p>{t("Accumulated for this page across tracked browser sessions.")}</p>
+                  <ActivityMetrics
+                    engagedTimeMs={tab.engagedTimeMs}
+                    foregroundTimeMs={tab.foregroundTimeMs}
+                  />
+                </div>
+              ) : (
+                <p className="muted-copy">{t("No recorded activity")}</p>
+              )}
+            </section>
+
+            <section
+              className="drawer-section"
+              aria-labelledby={`${headingId}-open-copies`}
+            >
+              <div className="section-heading">
+                <h3 id={`${headingId}-open-copies`}>{t("Open copies")}</h3>
                 <span>
                   <OpenCopyCount count={openCopyCount} />
                 </span>

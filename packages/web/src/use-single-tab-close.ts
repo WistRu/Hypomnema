@@ -453,6 +453,10 @@ export function useSingleTabClose(): SingleTabCloseController {
       );
     },
     onSettled: async (result, _error, request) => {
+      const canonicalTabId =
+        request.kind === "canonical"
+          ? request.canonicalTabId
+          : request.tab.canonicalTabId;
       try {
         await Promise.all([
           ...(result === undefined
@@ -460,9 +464,9 @@ export function useSingleTabClose(): SingleTabCloseController {
                 queryClient.invalidateQueries({
                   queryKey: ["tab-instances"],
                 }),
-                queryClient.invalidateQueries({ queryKey: ["tabs"] }),
               ]
             : []),
+          queryClient.invalidateQueries({ queryKey: ["tabs"] }),
           queryClient.invalidateQueries({ queryKey: ["duplicate-groups"] }),
           queryClient.invalidateQueries({ queryKey: ["graph"] }),
           queryClient.invalidateQueries({
@@ -471,13 +475,9 @@ export function useSingleTabClose(): SingleTabCloseController {
           queryClient.invalidateQueries({
             queryKey: ["tab-command-relay", "browser-state"],
           }),
-          ...(request.kind === "canonical"
-            ? [
-                queryClient.invalidateQueries({
-                  queryKey: ["tab", request.canonicalTabId],
-                }),
-              ]
-            : []),
+          queryClient.invalidateQueries({
+            queryKey: ["tab", canonicalTabId],
+          }),
         ]);
       } finally {
         inFlight.current = false;

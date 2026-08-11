@@ -21,6 +21,8 @@ function canonicalTab(openInstanceCount: number): TabListItem {
     index: openInstanceCount === 0 ? null : 0,
     isOpen: openInstanceCount > 0,
     lastSeenAt: "2026-08-11T00:01:00.000Z",
+    engagedTimeMs: 0,
+    foregroundTimeMs: 0,
     openEngagedTimeMs: 0,
     openForegroundTimeMs: 0,
     openInstanceCount,
