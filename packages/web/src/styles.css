@@ -506,10 +506,10 @@ thead {
   width: 100%;
   grid-template-columns:
     42px
-    minmax(230px, 28fr)
+    minmax(320px, 34fr)
     minmax(110px, 14fr)
     minmax(85px, 9fr)
-    minmax(220px, 20fr)
+    minmax(155px, 14fr)
     minmax(85px, 9fr)
     minmax(80px, 8fr)
     minmax(70px, 7fr)
@@ -2680,6 +2680,38 @@ tbody tr.is-selected {
 
 .library-physical-copies {
   min-width: 0;
+}
+
+.library-tab-physical {
+  min-width: 0;
+  margin-top: 7px;
+}
+
+.library-tab-physical > span {
+  color: #667286;
+  font-size: 9px;
+}
+
+.library-single-physical-copy {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 7px;
+}
+
+.library-single-physical-browser,
+.library-single-physical-location {
+  overflow: hidden;
+  color: #7f8ba0;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-single-physical-location {
+  min-width: 0;
+  flex: 1 1 150px;
 }
 
 .library-physical-copies-toggle {

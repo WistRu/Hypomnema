@@ -210,21 +210,35 @@ describe("Library activity", () => {
     fireEvent.click(within(rendered.container).getByRole("button", { name: "Library" }));
 
     expect(within(rendered.container).getByRole("columnheader", {
-      name: "Open-tab activity",
+      name: "Activity",
     })).toBeTruthy();
     const trackedRow = within(rendered.container)
       .getByRole("button", { name: /^Switch to existing tab: Tracked tab \|/ })
       .closest("tr");
     if (!trackedRow) throw new Error("Missing tracked Library row");
-    expect(within(trackedRow).getByText("On screen")).toBeTruthy();
-    expect(within(trackedRow).getByText("1m 1s")).toBeTruthy();
-    expect(within(trackedRow).getByText("Active use")).toBeTruthy();
-    expect(within(trackedRow).getByText("12s")).toBeTruthy();
+    const trackedTabCell = trackedRow.querySelector<HTMLElement>(
+      'td[data-column="title"]',
+    );
+    const trackedActivityCell = trackedRow.querySelector<HTMLElement>(
+      'td[data-column="activity"]',
+    );
+    if (!trackedTabCell || !trackedActivityCell) {
+      throw new Error("Missing tracked Library cells");
+    }
+    expect(within(trackedActivityCell).getByText("On screen")).toBeTruthy();
+    expect(within(trackedActivityCell).getByText("1m 1s")).toBeTruthy();
+    expect(within(trackedActivityCell).getByText("Active use")).toBeTruthy();
+    expect(within(trackedActivityCell).getByText("12s")).toBeTruthy();
     expect(
-      within(trackedRow).getByRole("button", {
+      within(trackedTabCell).getByRole("button", {
         name: /^Close for Tracked tab \|/,
       }),
     ).toBeTruthy();
+    expect(
+      within(trackedActivityCell).queryByRole("button", {
+        name: /^Close for/,
+      }),
+    ).toBeNull();
     expect(
       within(trackedRow).getByText("How activity is measured").closest("summary"),
     ).toBeTruthy();
@@ -236,8 +250,12 @@ describe("Library activity", () => {
 
     const closedRow = within(rendered.container).getByText("Closed tab").closest("tr");
     if (!closedRow) throw new Error("Missing closed Library row");
-    expect(within(closedRow).getByText("No open copies")).toBeTruthy();
-    expect(within(closedRow).queryByText("0s")).toBeNull();
+    const closedActivityCell = closedRow.querySelector<HTMLElement>(
+      'td[data-column="activity"]',
+    );
+    if (!closedActivityCell) throw new Error("Missing closed activity cell");
+    expect(within(closedActivityCell).getByText("No open copies")).toBeTruthy();
+    expect(within(closedActivityCell).queryByText("0s")).toBeNull();
     queryClient.clear();
   });
 });

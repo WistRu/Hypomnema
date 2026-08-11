@@ -99,7 +99,7 @@ describe("Library physical copies", () => {
     expect(screen.queryByRole("checkbox")).toBeNull();
   });
 
-  it("renders the sole physical copy without a redundant nested switch", () => {
+  it("renders the sole physical copy as compact metadata without repeating the page", () => {
     const onlyCopy = physicalTab(1, 4);
     const { onActivate, onClose, onSelectedChange } = renderCopies([onlyCopy]);
 
@@ -112,16 +112,18 @@ describe("Library physical copies", () => {
         name: /^Switch to existing tab: Physical copy 1 \|/,
       }),
     ).toBeNull();
+    expect(screen.queryByText("Physical copy 1")).toBeNull();
+    expect(screen.queryByText("https://example.com/page")).toBeNull();
+    expect(screen.getByText("Chrome")).toBeTruthy();
+    expect(screen.getByText("Window 4 | position 1 | tab 101")).toBeTruthy();
+    expect(screen.queryByRole("checkbox")).toBeNull();
     fireEvent.click(
       screen.getByRole("button", { name: /^Close for Physical copy 1 \|/ }),
-    );
-    fireEvent.click(
-      screen.getByRole("checkbox", { name: /^Select Physical copy 1 \|/ }),
     );
 
     expect(onActivate).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledWith(onlyCopy);
-    expect(onSelectedChange).toHaveBeenCalledWith(onlyCopy, true);
+    expect(onSelectedChange).not.toHaveBeenCalled();
   });
 
   it("expands repeated copies and addresses the chosen physical instance", () => {
@@ -190,6 +192,37 @@ describe("Library physical copies", () => {
     );
     expect(onActivate).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledWith(onlyCopy);
+  });
+
+  it("keeps duplicate-copy controls from opening the canonical row", () => {
+    const firstCopy = physicalTab(1, 4);
+    const secondCopy = physicalTab(2, 9);
+    const onParentClick = vi.fn();
+    const onClose = vi.fn();
+
+    render(
+      <I18nProvider initialLocale="en">
+        <div onClick={onParentClick}>
+          <LibraryPhysicalCopies
+            expanded
+            instances={[firstCopy, secondCopy]}
+            selection={new Map()}
+            selectionEnabled
+            tab={canonicalTab(2)}
+            onActivate={vi.fn()}
+            onClose={onClose}
+            onSelectedChange={vi.fn()}
+          />
+        </div>
+      </I18nProvider>,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /^Close for Physical copy 2 \|/ }),
+    );
+
+    expect(onClose).toHaveBeenCalledWith(secondCopy);
+    expect(onParentClick).not.toHaveBeenCalled();
   });
 
   it("shows exact-instance failures next to the affected copy", () => {

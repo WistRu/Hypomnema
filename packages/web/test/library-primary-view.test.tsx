@@ -229,7 +229,11 @@ describe("Library as the primary workspace", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("Unique physical tab")).toBeTruthy();
+      expect(
+        screen.getByRole("button", {
+          name: /^Switch to existing tab: Unique page \|/,
+        }),
+      ).toBeTruthy();
     });
     fireEvent.click(
       screen.getByRole("button", {
@@ -240,9 +244,24 @@ describe("Library as the primary workspace", () => {
 
     const duplicatedRow = screen.getByText("Duplicated page").closest("tr");
     if (!duplicatedRow) throw new Error("Missing duplicated Library row");
+    const tabCell = duplicatedRow.querySelector<HTMLElement>(
+      'td[data-column="title"]',
+    );
+    const activityCell = duplicatedRow.querySelector<HTMLElement>(
+      'td[data-column="activity"]',
+    );
+    if (!tabCell || !activityCell) throw new Error("Missing Library cells");
     fireEvent.click(within(duplicatedRow).getByRole("button", { name: "Duplicated page" }));
-    expect(within(duplicatedRow).getByText("Duplicate copy A")).toBeTruthy();
-    expect(within(duplicatedRow).getByText("Duplicate copy B")).toBeTruthy();
+    expect(within(tabCell).getByText("Duplicate copy A")).toBeTruthy();
+    expect(within(tabCell).getByText("Duplicate copy B")).toBeTruthy();
+    expect(within(activityCell).queryByText("Duplicate copy A")).toBeNull();
+    expect(within(activityCell).queryByRole("button", { name: /^Close for/ })).toBeNull();
+    fireEvent.click(
+      within(tabCell).getByRole("button", {
+        name: /^Close for Duplicate copy B \|/,
+      }),
+    );
+    expect(mocks.closePhysical).toHaveBeenCalledWith(physicalTabs[2]);
 
     const selectionMode = screen.getByRole("group", { name: "Library selection mode" });
     expect(within(selectionMode).getByRole("button", { name: "Pages" })).toBeTruthy();

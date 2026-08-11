@@ -4,8 +4,14 @@ import {
   tabCommandScopeSchema,
   type TabCommandRelayConnectedScope,
   type TabInstance,
+  type TabListResponse,
 } from "@tabhub/shared";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useMemo, useRef } from "react";
 
 import {
@@ -207,6 +213,126 @@ function closeCommand(
   }
 }
 
+function updateCanonicalTabCachesAfterClose(
+  queryClient: QueryClient,
+  closedTab: TabInstance,
+  remainingInstances: readonly TabInstance[] | undefined,
+): void {
+  const closedAt = new Date().toISOString();
+  for (const [queryKey, current] of queryClient.getQueriesData<TabListResponse>({
+    queryKey: ["tabs"],
+  })) {
+    if (current === undefined) continue;
+    const filters =
+      typeof queryKey[1] === "object" && queryKey[1] !== null
+        ? (queryKey[1] as {
+            duplicatesOnly?: boolean;
+            openState?: "all" | "closed" | "open";
+          })
+        : {};
+    let removed = 0;
+    const items = current.items.flatMap((item) => {
+      if (item.id !== closedTab.canonicalTabId) return [item];
+      const openInstanceCount =
+        remainingInstances?.length ?? Math.max(0, item.openInstanceCount - 1);
+      const isOpen = openInstanceCount > 0;
+      const openEngagedTimeMs =
+        remainingInstances?.reduce(
+          (total, instance) => total + instance.engagedTimeMs,
+          0,
+        ) ??
+        Math.max(0, item.openEngagedTimeMs - closedTab.engagedTimeMs);
+      const openForegroundTimeMs =
+        remainingInstances?.reduce(
+          (total, instance) => total + instance.foregroundTimeMs,
+          0,
+        ) ??
+        Math.max(0, item.openForegroundTimeMs - closedTab.foregroundTimeMs);
+      const updated = {
+        ...item,
+        closedAt: isOpen ? item.closedAt : closedAt,
+        index: isOpen ? item.index : null,
+        isOpen,
+        openEngagedTimeMs,
+        openForegroundTimeMs,
+        openInstanceCount,
+        windowId: isOpen ? item.windowId : null,
+      };
+      const noLongerMatches =
+        (filters.duplicatesOnly === true && openInstanceCount <= 1) ||
+        (filters.openState === "open" && !isOpen) ||
+        (filters.openState === "closed" && isOpen);
+      if (noLongerMatches) {
+        removed += 1;
+        return [];
+      }
+      return [updated];
+    });
+    if (
+      removed > 0 ||
+      items.some((item, index) => item !== current.items[index])
+    ) {
+      queryClient.setQueryData<TabListResponse>(queryKey, {
+        ...current,
+        items,
+        total: Math.max(0, current.total - removed),
+      });
+    }
+  }
+}
+
+function resolvedRemainingInstances(
+  queryClient: QueryClient,
+  closedTab: TabInstance,
+): readonly TabInstance[] | undefined {
+  const candidates = queryClient
+    .getQueryCache()
+    .findAll({ queryKey: ["tab-instances"] })
+    .flatMap((query) => {
+      const key = query.queryKey;
+      const second = key[1];
+      const exactCanonicalQuery =
+        typeof second === "object" &&
+        second !== null &&
+        "canonicalTabId" in second &&
+        second.canonicalTabId === closedTab.canonicalTabId;
+      const libraryQuery = second === "library";
+      if (!exactCanonicalQuery && !libraryQuery) return [];
+      const instances = query.state.data;
+      if (
+        !Array.isArray(instances) ||
+        !instances.some(
+          (instance) =>
+            typeof instance === "object" &&
+            instance !== null &&
+            "instanceId" in instance &&
+            instance.instanceId === closedTab.instanceId,
+        )
+      ) {
+        return [];
+      }
+      return [
+        {
+          dataUpdatedAt: query.state.dataUpdatedAt,
+          instances: instances as TabInstance[],
+          priority:
+            (query.getObserversCount() > 0 ? 2 : 0) +
+            (exactCanonicalQuery ? 1 : 0),
+        },
+      ];
+    })
+    .sort(
+      (left, right) =>
+        right.priority - left.priority ||
+        right.dataUpdatedAt - left.dataUpdatedAt,
+    );
+  return candidates[0]?.instances.filter(
+    ({ canonicalTabId, instanceId }) =>
+      canonicalTabId === closedTab.canonicalTabId &&
+      instanceId !== closedTab.instanceId,
+  );
+}
+
 export function useSingleTabClose(): SingleTabCloseController {
   const { t } = useI18n();
   const bridge = useMemo(() => createWindowExtensionBridge(), []);
@@ -275,6 +401,7 @@ export function useSingleTabClose(): SingleTabCloseController {
           : Promise.resolve(relayScopesQuery.data),
       ]);
 
+      let closedTab: TabInstance;
       let plan: SingleTabClosePlan;
       if (request.kind === "canonical") {
         const selection = canonicalSingleTabCloseSelection(
@@ -286,25 +413,57 @@ export function useSingleTabClose(): SingleTabCloseController {
         if (selection.kind !== "ready") {
           throw new ExtensionBridgeError(selection.message);
         }
-        plan = planForTab(selection.tab, probe, connectedScopes, t);
+        closedTab = selection.tab;
+        plan = planForTab(closedTab, probe, connectedScopes, t);
       } else {
-        plan = planForTab(request.tab, probe, connectedScopes, t);
+        closedTab = request.tab;
+        plan = planForTab(closedTab, probe, connectedScopes, t);
       }
 
-      return executeSingleTabCloseForConnectedScopes(
+      const result = await executeSingleTabCloseForConnectedScopes(
         plan,
         probe,
         connectedScopes,
         execute,
         t,
       );
+      return { closedTab, result };
     },
-    onSettled: async (_result, _error, request) => {
+    onSuccess: ({ closedTab }) => {
+      const remainingInstances = resolvedRemainingInstances(
+        queryClient,
+        closedTab,
+      );
+      const removeClosedCopy = (instances: TabInstance[] | undefined) =>
+        instances?.filter(
+          ({ instanceId }) => instanceId !== closedTab.instanceId,
+        );
+      queryClient.setQueriesData<TabInstance[]>(
+        { queryKey: ["tab-instances", "library"] },
+        removeClosedCopy,
+      );
+      queryClient.setQueryData<TabInstance[]>(
+        ["tab-instances", { canonicalTabId: closedTab.canonicalTabId }],
+        removeClosedCopy,
+      );
+      updateCanonicalTabCachesAfterClose(
+        queryClient,
+        closedTab,
+        remainingInstances,
+      );
+    },
+    onSettled: async (result, _error, request) => {
       try {
         await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ["tab-instances"] }),
+          ...(result === undefined
+            ? [
+                queryClient.invalidateQueries({
+                  queryKey: ["tab-instances"],
+                }),
+                queryClient.invalidateQueries({ queryKey: ["tabs"] }),
+              ]
+            : []),
           queryClient.invalidateQueries({ queryKey: ["duplicate-groups"] }),
-          queryClient.invalidateQueries({ queryKey: ["tabs"] }),
           queryClient.invalidateQueries({ queryKey: ["graph"] }),
           queryClient.invalidateQueries({
             queryKey: ["extension-bridge", "probe"],

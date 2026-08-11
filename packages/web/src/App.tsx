@@ -735,6 +735,55 @@ export function App() {
             {tabItem.summary?.trim() ? (
               <SummaryDisclosure summary={tabItem.summary.trim()} />
             ) : null}
+            {openCopyCount > 0 ? (
+              <div className="library-tab-physical">
+                {libraryOpenTabsQuery.isPending ? (
+                  <span>{t("Loading open copies...")}</span>
+                ) : libraryOpenTabsQuery.isError ? (
+                  <span className="physical-tab-action-error">
+                    {t("Open copies unavailable")}
+                  </span>
+                ) : (
+                  <LibraryPhysicalCopies
+                    activationErrorFor={(instanceId) => {
+                      const error =
+                        canonicalTabActivation.errorForPhysical(instanceId);
+                      return error === undefined ? undefined : localizeError(error);
+                    }}
+                    closeErrorFor={(instanceId) => {
+                      const error = singleTabClose.errorForPhysical(instanceId);
+                      return error === undefined ? undefined : localizeError(error);
+                    }}
+                    expanded={expandedPhysicalRows.has(tabItem.id)}
+                    instances={instances}
+                    isActivating={canonicalTabActivation.isActivatingPhysical}
+                    isClosing={singleTabClose.isClosingPhysical}
+                    selection={physicalSelection}
+                    selectionEnabled={selectionMode === "physical"}
+                    tab={tabItem}
+                    onActivate={canonicalTabActivation.runPhysical}
+                    onClose={singleTabClose.closePhysical}
+                    onExpandedChange={(expanded) =>
+                      setExpandedPhysicalRows((current) => {
+                        const next = new Set(current);
+                        if (expanded) next.add(tabItem.id);
+                        else next.delete(tabItem.id);
+                        return next;
+                      })
+                    }
+                    onSelectedChange={(instance, selected) =>
+                      setPhysicalSelection((current) =>
+                        setLibraryPhysicalInstanceSelected(
+                          current,
+                          instance,
+                          selected,
+                        ),
+                      )
+                    }
+                  />
+                )}
+              </div>
+            ) : null}
           </div>
         );
       },
@@ -761,7 +810,7 @@ export function App() {
     }),
     columnHelper.accessor("openInstanceCount", {
       id: "activity",
-      header: t("Open-tab activity"),
+      header: t("Activity"),
       cell: ({ getValue, row }) => {
         const instances =
           instancesByCanonicalTab.get(row.original.id) ?? EMPTY_TAB_INSTANCES;
@@ -788,46 +837,6 @@ export function App() {
               engagedTimeMs={row.original.openEngagedTimeMs}
               foregroundTimeMs={row.original.openForegroundTimeMs}
             />
-            {libraryOpenTabsQuery.isPending ? (
-              <span>{t("Loading open copies...")}</span>
-            ) : libraryOpenTabsQuery.isError ? (
-              <span className="physical-tab-action-error">
-                {t("Open copies unavailable")}
-              </span>
-            ) : (
-              <LibraryPhysicalCopies
-                activationErrorFor={(instanceId) => {
-                  const error = canonicalTabActivation.errorForPhysical(instanceId);
-                  return error === undefined ? undefined : localizeError(error);
-                }}
-                closeErrorFor={(instanceId) => {
-                  const error = singleTabClose.errorForPhysical(instanceId);
-                  return error === undefined ? undefined : localizeError(error);
-                }}
-                expanded={expandedPhysicalRows.has(row.original.id)}
-                instances={instances}
-                isActivating={canonicalTabActivation.isActivatingPhysical}
-                isClosing={singleTabClose.isClosingPhysical}
-                selection={physicalSelection}
-                selectionEnabled={selectionMode === "physical"}
-                tab={row.original}
-                onActivate={canonicalTabActivation.runPhysical}
-                onClose={singleTabClose.closePhysical}
-                onExpandedChange={(expanded) =>
-                  setExpandedPhysicalRows((current) => {
-                    const next = new Set(current);
-                    if (expanded) next.add(row.original.id);
-                    else next.delete(row.original.id);
-                    return next;
-                  })
-                }
-                onSelectedChange={(instance, selected) =>
-                  setPhysicalSelection((current) =>
-                    setLibraryPhysicalInstanceSelected(current, instance, selected),
-                  )
-                }
-              />
-            )}
           </div>
         );
       },

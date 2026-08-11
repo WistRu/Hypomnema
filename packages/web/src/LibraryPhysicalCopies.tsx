@@ -44,13 +44,12 @@ function browserLabel(browser: string, t: (key: string) => string): string {
   return browser;
 }
 
-export function physicalTabAccessibleLabel(
+function physicalLocation(
   instance: TabInstance,
-  fallbackLabel: string,
   t: (key: string, params?: Record<string, number | string>) => string,
   formatNumber: (value: number) => string,
 ): string {
-  const location = t("Window {windowId} | position {position} | {tab}", {
+  return t("Window {windowId} | position {position} | {tab}", {
     position: formatNumber(instance.index + 1),
     tab:
       instance.browserTabId === null
@@ -58,6 +57,15 @@ export function physicalTabAccessibleLabel(
         : t("tab {tabId}", { tabId: formatNumber(instance.browserTabId) }),
     windowId: formatNumber(instance.windowId),
   });
+}
+
+export function physicalTabAccessibleLabel(
+  instance: TabInstance,
+  fallbackLabel: string,
+  t: (key: string, params?: Record<string, number | string>) => string,
+  formatNumber: (value: number) => string,
+): string {
+  const location = physicalLocation(instance, t, formatNumber);
   return [
     fallbackLabel,
     browserLabel(instance.browser, t),
@@ -106,6 +114,7 @@ function PhysicalCopy({
           checked={selection.has(instance.instanceId)}
           type="checkbox"
           onChange={(event) => onSelectedChange(instance, event.target.checked)}
+          onClick={(event) => event.stopPropagation()}
         />
       ) : null}
       <div className="library-physical-copy-identity">
@@ -117,7 +126,10 @@ function PhysicalCopy({
             className="physical-tab-switch"
             disabled={activating || closing}
             type="button"
-            onClick={() => onActivate(instance)}
+            onClick={(event) => {
+              event.stopPropagation();
+              onActivate(instance);
+            }}
           >
             {label}
           </button>
@@ -150,16 +162,7 @@ function PhysicalCopy({
           {instance.url}
         </span>
         <span className="physical-location">
-          {t("Window {windowId} | position {position} | {tab}", {
-            position: formatNumber(instance.index + 1),
-            tab:
-              instance.browserTabId === null
-                ? t("unknown tab")
-                : t("tab {tabId}", {
-                    tabId: formatNumber(instance.browserTabId),
-                  }),
-            windowId: formatNumber(instance.windowId),
-          })}
+          {physicalLocation(instance, t, formatNumber)}
         </span>
         <div className="physical-flags">
           {instance.active ? (
@@ -203,7 +206,83 @@ function PhysicalCopy({
         className="library-physical-copy-close"
         disabled={activating || closing}
         type="button"
-        onClick={() => onClose(instance)}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClose(instance);
+        }}
+      >
+        {t("Close")}
+      </button>
+    </div>
+  );
+}
+
+function CompactPhysicalCopy({
+  instance,
+  tab,
+  activationErrorFor = () => undefined,
+  closeErrorFor = () => undefined,
+  isActivating = () => false,
+  isClosing = () => false,
+  onClose,
+}: PhysicalCopyProps) {
+  const { formatNumber, t } = useI18n();
+  const accessibleLabel = physicalTabAccessibleLabel(
+    instance,
+    copyLabel(instance, tab),
+    t,
+    formatNumber,
+  );
+  const activating = isActivating(instance.instanceId);
+  const closing = isClosing(instance.instanceId);
+  const error =
+    closeErrorFor(instance.instanceId) ??
+    activationErrorFor(instance.instanceId);
+
+  return (
+    <div className="library-single-physical-copy" title={accessibleLabel}>
+      <span className="library-single-physical-browser">
+        {browserLabel(instance.browser, t)}
+      </span>
+      <span className="library-single-physical-location">
+        {physicalLocation(instance, t, formatNumber)}
+      </span>
+      {instance.active ? (
+        <span className="physical-flag is-active">{t("Active")}</span>
+      ) : null}
+      {instance.pinned ? (
+        <span className="physical-flag is-protected">{t("Pinned")}</span>
+      ) : null}
+      {instance.audible ? (
+        <span className="physical-flag is-audible">{t("Playing")}</span>
+      ) : null}
+      {instance.muted ? (
+        <span className="physical-flag is-muted">{t("Muted")}</span>
+      ) : null}
+      {instance.discarded ? (
+        <span className="physical-flag is-sleeping">{t("Sleeping")}</span>
+      ) : null}
+      {activating || closing ? (
+        <span className="physical-tab-action-state" role="status">
+          {activating ? t("Switching...") : t("Closing...")}
+        </span>
+      ) : error ? (
+        <span className="physical-tab-action-error" role="alert">
+          {error}
+        </span>
+      ) : null}
+      <button
+        aria-label={t("{action} for {tab}", {
+          action: t("Close"),
+          tab: accessibleLabel,
+        })}
+        className="library-physical-copy-close"
+        disabled={activating || closing}
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          onClose(instance);
+        }}
       >
         {t("Close")}
       </button>
@@ -233,11 +312,7 @@ export function LibraryPhysicalCopies({
   if (instances.length === 1) {
     return (
       <div className="library-physical-copies is-single">
-        <PhysicalCopy
-          activationControl={false}
-          instance={instances[0]!}
-          {...props}
-        />
+        <CompactPhysicalCopy instance={instances[0]!} {...props} />
       </div>
     );
   }
@@ -255,7 +330,10 @@ export function LibraryPhysicalCopies({
         aria-label={countLabel}
         className="library-physical-copies-toggle"
         type="button"
-        onClick={() => setExpanded(!expanded)}
+        onClick={(event) => {
+          event.stopPropagation();
+          setExpanded(!expanded);
+        }}
       >
         <span>{countLabel}</span>
         <span aria-hidden="true">{expanded ? "−" : "+"}</span>
