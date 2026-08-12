@@ -47,6 +47,10 @@ import {
 } from "./LibraryPhysicalCopies";
 import { LibraryPhysicalTabActions } from "./LibraryPhysicalTabActions";
 import {
+  PageRetentionPanel,
+  type RetentionCollection,
+} from "./PageRetentionPanel";
+import {
   effectiveLibraryOpenCopyCount,
   reconcileLibraryPhysicalSelection,
   retainLibraryPhysicalSelectionForContext,
@@ -86,6 +90,7 @@ const tableFeatureSet = tableFeatures({});
 const columnHelper = createColumnHelper<typeof tableFeatureSet, TabListItem>();
 const CurrentTimeContext = createContext(Date.now());
 type LibrarySelectionMode = "canonical" | "physical";
+type LibraryCollection = "all" | RetentionCollection;
 
 const BROWSER_LABELS: Record<string, string> = {
   chrome: "Chrome",
@@ -424,6 +429,8 @@ export function App() {
   const canonicalTabActivation = useCanonicalTabActivation();
   const singleTabClose = useSingleTabClose();
   const [view, setView] = useState<WorkspaceView>("library");
+  const [libraryCollection, setLibraryCollection] =
+    useState<LibraryCollection>("all");
   const [browser, setBrowser] = useState("all");
   const [duplicatesOnly, setDuplicatesOnly] = useState(false);
   const [openState, setOpenState] = useState<OpenFilter>("all");
@@ -1192,25 +1199,63 @@ export function App() {
             {view === "library" ? (
               <section className="table-panel" aria-label={t("Library pages")}>
               <div className="library-mode-bar">
-                <button
-                  aria-pressed={selectionMode === "physical"}
-                  className="manage-browser-tabs-button"
-                  type="button"
-                  onClick={() => {
-                    if (selectionMode === "physical") {
-                      setPhysicalSelection(new Map());
-                      setSelectionMode("canonical");
-                      return;
-                    }
-                    setSelectionMode("physical");
-                  }}
+                <div
+                  aria-label={t("Library collection")}
+                  className="library-collection-switch"
+                  role="group"
                 >
-                  {t("Manage browser tabs")}
-                </button>
-                {selectionMode === "physical" ? (
-                  <p>{t("Select and manage exact tabs in their owning browsers.")}</p>
+                  {(["all", "review", "trash"] as const).map((collection) => (
+                    <button
+                      aria-pressed={libraryCollection === collection}
+                      key={collection}
+                      type="button"
+                      onClick={() => {
+                        setLibraryCollection(collection);
+                        if (collection !== "all") {
+                          setPhysicalSelection(new Map());
+                          setSelectionMode("canonical");
+                        }
+                      }}
+                    >
+                      {t(
+                        collection === "all"
+                          ? "All pages"
+                          : collection === "review"
+                            ? "To review"
+                            : "Trash",
+                      )}
+                    </button>
+                  ))}
+                </div>
+                {libraryCollection === "all" ? (
+                  <>
+                    <button
+                      aria-pressed={selectionMode === "physical"}
+                      className="manage-browser-tabs-button"
+                      type="button"
+                      onClick={() => {
+                        if (selectionMode === "physical") {
+                          setPhysicalSelection(new Map());
+                          setSelectionMode("canonical");
+                          return;
+                        }
+                        setSelectionMode("physical");
+                      }}
+                    >
+                      {t("Manage browser tabs")}
+                    </button>
+                    {selectionMode === "physical" ? (
+                      <p>
+                        {t(
+                          "Select and manage exact tabs in their owning browsers.",
+                        )}
+                      </p>
+                    ) : null}
+                  </>
                 ) : null}
               </div>
+              {libraryCollection === "all" ? (
+              <div className="library-default-collection">
               <div className="filter-bar">
                 <div className="filter-label">
                   <FilterIcon />
@@ -1592,6 +1637,13 @@ export function App() {
                   </div>
                 </nav>
               ) : null}
+              </div>
+              ) : (
+                <PageRetentionPanel
+                  collection={libraryCollection}
+                  onSelectTab={setActiveTabId}
+                />
+              )}
               </section>
             ) : (
               <Suspense

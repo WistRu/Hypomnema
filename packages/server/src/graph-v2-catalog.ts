@@ -66,6 +66,12 @@ interface RelationRow {
 
 const selectedGraphCte = `
   WITH RECURSIVE
+    active_tabs(id) AS MATERIALIZED (
+      SELECT tabs.id
+      FROM tabs
+      LEFT JOIN page_retention ON page_retention.tab_id = tabs.id
+      WHERE page_retention.state IS NULL OR page_retention.state != 'trashed'
+    ),
     tag_paths(id, parent_id, name, color, path, root_name) AS (
       SELECT id, parent_id, name, color, name, name
       FROM tags
@@ -93,12 +99,13 @@ const selectedGraphCte = `
     ),
     selected_tabs(id) AS (
       SELECT id
-      FROM tabs
+      FROM active_tabs
       WHERE @rootTopicId IS NULL
       UNION
       SELECT tab_tags.tab_id
       FROM tab_tags
       JOIN selected_topic_ids ON selected_topic_ids.id = tab_tags.tag_id
+      JOIN active_tabs ON active_tabs.id = tab_tags.tab_id
       WHERE @rootTopicId IS NOT NULL
     ),
     visible_entities(id) AS MATERIALIZED (
@@ -107,7 +114,14 @@ const selectedGraphCte = `
       LEFT JOIN tags
         ON knowledge_entities.kind = 'topic'
        AND tags.id = knowledge_entities.topic_id
-      WHERE knowledge_entities.kind = 'tab'
+      WHERE (
+          knowledge_entities.kind = 'tab'
+          AND EXISTS (
+            SELECT 1
+            FROM active_tabs
+            WHERE active_tabs.id = knowledge_entities.tab_id
+          )
+        )
          OR (
            knowledge_entities.kind = 'topic'
            AND tags.system_kind IS NULL
@@ -264,6 +278,7 @@ export function createGraphV2Catalog(
     topic_tab_memberships(topic_id, tab_id) AS (
       SELECT tab_tags.tag_id, tab_tags.tab_id
       FROM tab_tags
+      JOIN active_tabs ON active_tabs.id = tab_tags.tab_id
       UNION
       SELECT tags.parent_id, topic_tab_memberships.tab_id
       FROM topic_tab_memberships
@@ -279,6 +294,7 @@ export function createGraphV2Catalog(
       (
         SELECT COUNT(DISTINCT direct_tags.tab_id)
         FROM tab_tags AS direct_tags
+        JOIN active_tabs ON active_tabs.id = direct_tags.tab_id
         WHERE direct_tags.tag_id = tag_paths.id
       ) AS direct_tab_count,
       (

@@ -34,6 +34,12 @@ interface GraphEdgeRow {
 
 const selectedTabsCte = `
   WITH RECURSIVE
+    active_tabs(id) AS MATERIALIZED (
+      SELECT tabs.id
+      FROM tabs
+      LEFT JOIN page_retention ON page_retention.tab_id = tabs.id
+      WHERE page_retention.state IS NULL OR page_retention.state != 'trashed'
+    ),
     tag_paths(id, path, root_name) AS (
       SELECT id, name, name
       FROM tags
@@ -57,12 +63,13 @@ const selectedTabsCte = `
     ),
     selected_tabs(id) AS (
       SELECT id
-      FROM tabs
+      FROM active_tabs
       WHERE @rootTag IS NULL
       UNION
       SELECT tab_tags.tab_id
       FROM tab_tags
       JOIN selected_tag_ids ON selected_tag_ids.id = tab_tags.tag_id
+      JOIN active_tabs ON active_tabs.id = tab_tags.tab_id
       WHERE @rootTag IS NOT NULL
     )
 `;

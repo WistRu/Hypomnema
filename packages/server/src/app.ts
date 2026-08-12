@@ -45,6 +45,9 @@ import {
 import type { BrowserForegroundHandoff } from "./browser-foreground.js";
 import { createActivityCatalog } from "./activity-catalog.js";
 import { registerActivityRoutes } from "./activity-routes.js";
+import { createRetentionCatalog } from "./retention-catalog.js";
+import { registerRetentionRoutes } from "./retention-routes.js";
+import { createRetentionLifecycle } from "./retention-lifecycle.js";
 
 export interface CreateAppOptions {
   browserForegroundHandoff?: BrowserForegroundHandoff | undefined;
@@ -140,6 +143,17 @@ export function createApp(options: CreateAppOptions): TabHubApp {
             options.tabCommandRelayRegistrationTimeoutMs,
         }),
   });
+  const retentionCatalog = createRetentionCatalog(
+    database.connection,
+    tabCatalog,
+    options.clock,
+  );
+  const retentionLifecycle = createRetentionLifecycle({
+    catalog: retentionCatalog,
+    relay: tabCommandRelay,
+    tabInstanceCatalog,
+  });
+  let retentionPurgeTimer: NodeJS.Timeout | undefined;
   const summaryWorker =
     options.summaryProvider === undefined
       ? undefined
@@ -189,10 +203,20 @@ export function createApp(options: CreateAppOptions): TabHubApp {
   }
 
   app.addHook("onReady", async () => {
+    retentionCatalog.purgeDue();
+    retentionPurgeTimer = setInterval(
+      () => retentionCatalog.purgeDue(),
+      60 * 60 * 1_000,
+    );
+    retentionPurgeTimer.unref();
     summaryWorker?.start();
   });
 
   app.addHook("onClose", async () => {
+    if (retentionPurgeTimer !== undefined) {
+      clearInterval(retentionPurgeTimer);
+      retentionPurgeTimer = undefined;
+    }
     tabCommandRelay.close();
     await summaryWorker?.stop();
     database.close();
@@ -208,6 +232,7 @@ export function createApp(options: CreateAppOptions): TabHubApp {
 
   registerTabRoutes(app, tabCatalog, embeddingCatalog);
   registerActivityRoutes(app, activityCatalog);
+  registerRetentionRoutes(app, retentionLifecycle);
   registerTabInstanceRoutes(app, tabInstanceCatalog, tabCatalog);
   registerTagRoutes(app, tagCatalog);
   registerStatsRoutes(app, statsCatalog);

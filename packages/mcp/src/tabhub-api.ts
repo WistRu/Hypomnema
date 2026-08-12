@@ -1,6 +1,10 @@
 import {
   assignTagsResponseSchema,
   clusterInboxResponseSchema,
+  retentionDecisionResponseSchema,
+  retentionForgetResponseSchema,
+  retentionReviewResponseSchema,
+  retentionTrashResponseSchema,
   setImportanceResponseSchema,
   setStatusResponseSchema,
   summaryEnqueueResponseSchema,
@@ -12,6 +16,10 @@ import {
   tagTreeResponseSchema,
   type AssignTagsResponse,
   type ClusterInboxResponse,
+  type RetentionDecisionResponse,
+  type RetentionForgetResponse,
+  type RetentionReviewResponse,
+  type RetentionTrashResponse,
   type SearchMode,
   type SetImportanceResponse,
   type SetStatusResponse,
@@ -40,7 +48,27 @@ export interface ListTabsInput {
   pageSize: number;
 }
 
+export interface RetentionPageInput {
+  page: number;
+  pageSize: number;
+}
+
 export interface TabHubApi {
+  reviewDisposablePages(
+    input: RetentionPageInput,
+  ): Promise<RetentionReviewResponse>;
+  listRetentionTrash(
+    input: RetentionPageInput,
+  ): Promise<RetentionTrashResponse>;
+  setRetentionDecision(input: {
+    tabId: number;
+    decision: "keep" | "later";
+  }): Promise<RetentionDecisionResponse>;
+  closeAndForgetPage(input: {
+    tabId: number;
+    confirmed: true;
+  }): Promise<RetentionForgetResponse>;
+  restoreRetentionPage(tabId: number): Promise<RetentionDecisionResponse>;
   listTabs(input: ListTabsInput): Promise<TabListResponse>;
   getTab(id: number): Promise<TabDetailResponse>;
   setStatus(input: {
@@ -131,6 +159,74 @@ export function createTabHubApi(
   }
 
   return {
+    async reviewDisposablePages(input) {
+      const searchParams = new URLSearchParams({
+        page: String(input.page),
+        pageSize: String(input.pageSize),
+      });
+
+      return request(
+        `/api/retention/review?${searchParams.toString()}`,
+        retentionReviewResponseSchema,
+        { method: "GET" },
+      );
+    },
+
+    async listRetentionTrash(input) {
+      const searchParams = new URLSearchParams({
+        page: String(input.page),
+        pageSize: String(input.pageSize),
+      });
+
+      return request(
+        `/api/retention/trash?${searchParams.toString()}`,
+        retentionTrashResponseSchema,
+        { method: "GET" },
+      );
+    },
+
+    async setRetentionDecision(input) {
+      return request(
+        `/api/retention/tabs/${input.tabId}`,
+        retentionDecisionResponseSchema,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            decision: input.decision,
+            decidedBy: "agent",
+          }),
+        },
+      );
+    },
+
+    async closeAndForgetPage(input) {
+      return request(
+        `/api/retention/tabs/${input.tabId}/forget`,
+        retentionForgetResponseSchema,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            decidedBy: "agent",
+            confirmed: input.confirmed,
+          }),
+        },
+      );
+    },
+
+    async restoreRetentionPage(tabId) {
+      return request(
+        `/api/retention/trash/${tabId}/restore`,
+        retentionDecisionResponseSchema,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ decidedBy: "agent" }),
+        },
+      );
+    },
+
     async listTabs(input) {
       const searchParams = new URLSearchParams({
         page: String(input.page),

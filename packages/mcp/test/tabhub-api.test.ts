@@ -1,5 +1,9 @@
 import type {
   ClusterInboxResponse,
+  RetentionDecisionResponse,
+  RetentionForgetResponse,
+  RetentionReviewResponse,
+  RetentionTrashResponse,
   SummaryEnqueueResponse,
   SummaryJob,
   StatsResponse,
@@ -8,6 +12,7 @@ import type {
   TabListResponse,
   TagTreeResponse,
 } from "@tabhub/shared";
+import { tabListItemSchema } from "@tabhub/shared";
 import { describe, expect, it, vi } from "vitest";
 
 import { createTabHubApi } from "../src/tabhub-api.js";
@@ -45,6 +50,60 @@ const detailResponse: TabDetailResponse = {
   tags: [],
   links: [],
   customFields: {},
+};
+
+const retentionReviewResponse: RetentionReviewResponse = {
+  items: [
+    {
+      tab: tabListItemSchema.parse(detailResponse),
+      score: 0.8,
+      reasons: ["closed", "no_captured_content"],
+      warnings: [],
+    },
+  ],
+  total: 1,
+  page: 2,
+  pageSize: 25,
+};
+
+const keptRetentionResponse: RetentionDecisionResponse = {
+  tabId: 3,
+  decision: "keep",
+  state: "kept",
+  decidedBy: "agent",
+  decidedAt: "2026-08-12T06:30:00.000Z",
+  reviewAfter: null,
+  trashedAt: null,
+  purgeAt: null,
+};
+
+const deferredRetentionResponse: RetentionDecisionResponse = {
+  ...keptRetentionResponse,
+  decision: "later",
+  state: "deferred",
+  reviewAfter: "2026-08-19T06:30:00.000Z",
+};
+
+const forgottenRetentionResponse: RetentionForgetResponse = {
+  tabId: 3,
+  outcome: "trashed",
+  reason: null,
+  closedInstanceCount: 2,
+  purgeAt: "2026-08-19T06:30:00.000Z",
+};
+
+const retentionTrashResponse: RetentionTrashResponse = {
+  items: [
+    {
+      tab: retentionReviewResponse.items[0]!.tab,
+      decidedBy: "agent",
+      trashedAt: "2026-08-12T06:30:00.000Z",
+      purgeAt: "2026-08-19T06:30:00.000Z",
+    },
+  ],
+  total: 1,
+  page: 1,
+  pageSize: 50,
 };
 
 const tagTree: TagTreeResponse = { items: [] };
@@ -114,6 +173,169 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("TabHub REST adapter", () => {
+  it("reviews disposable-page candidates through the exact paginated REST endpoint", async () => {
+    const fetchImpl: typeof fetch = vi.fn(async () =>
+      jsonResponse(retentionReviewResponse),
+    );
+    const api = createTabHubApi({
+      baseUrl: "http://127.0.0.1:7717/",
+      fetchImpl,
+    });
+
+    await expect(
+      api.reviewDisposablePages({ page: 2, pageSize: 25 }),
+    ).resolves.toEqual(retentionReviewResponse);
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    const [requestUrl, init] = vi.mocked(fetchImpl).mock.calls[0]!;
+    expect(String(requestUrl)).toBe(
+      "http://127.0.0.1:7717/api/retention/review?page=2&pageSize=25",
+    );
+    expect(init?.method).toBe("GET");
+  });
+
+  it("applies keep and later retention decisions with agent provenance", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl
+      .mockResolvedValueOnce(jsonResponse(keptRetentionResponse))
+      .mockResolvedValueOnce(jsonResponse(deferredRetentionResponse));
+    const api = createTabHubApi({
+      baseUrl: "http://127.0.0.1:7717/",
+      fetchImpl,
+    });
+
+    await expect(
+      api.setRetentionDecision({ tabId: 3, decision: "keep" }),
+    ).resolves.toEqual(keptRetentionResponse);
+    await expect(
+      api.setRetentionDecision({ tabId: 3, decision: "later" }),
+    ).resolves.toEqual(deferredRetentionResponse);
+
+    expect(
+      fetchImpl.mock.calls.map(([url, init]) => ({
+        url: String(url),
+        method: init?.method,
+        body: init?.body,
+      })),
+    ).toEqual([
+      {
+        url: "http://127.0.0.1:7717/api/retention/tabs/3",
+        method: "PATCH",
+        body: JSON.stringify({ decision: "keep", decidedBy: "agent" }),
+      },
+      {
+        url: "http://127.0.0.1:7717/api/retention/tabs/3",
+        method: "PATCH",
+        body: JSON.stringify({ decision: "later", decidedBy: "agent" }),
+      },
+    ]);
+  });
+
+  it("uses the close-and-forget lifecycle only after explicit confirmation", async () => {
+    const fetchImpl: typeof fetch = vi.fn(async () =>
+      jsonResponse(forgottenRetentionResponse),
+    );
+    const api = createTabHubApi({
+      baseUrl: "http://127.0.0.1:7717/",
+      fetchImpl,
+    });
+
+    await expect(
+      api.closeAndForgetPage({ tabId: 3, confirmed: true }),
+    ).resolves.toEqual(forgottenRetentionResponse);
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://127.0.0.1:7717/api/retention/tabs/3/forget",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decidedBy: "agent", confirmed: true }),
+      },
+    );
+  });
+
+  it("lists the retention trash through the exact paginated REST endpoint", async () => {
+    const fetchImpl: typeof fetch = vi.fn(async () =>
+      jsonResponse(retentionTrashResponse),
+    );
+    const api = createTabHubApi({
+      baseUrl: "http://127.0.0.1:7717/",
+      fetchImpl,
+    });
+
+    await expect(
+      api.listRetentionTrash({ page: 1, pageSize: 50 }),
+    ).resolves.toEqual(retentionTrashResponse);
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://127.0.0.1:7717/api/retention/trash?page=1&pageSize=50",
+      { method: "GET" },
+    );
+  });
+
+  it("restores a trashed page with agent provenance", async () => {
+    const fetchImpl: typeof fetch = vi.fn(async () =>
+      jsonResponse(keptRetentionResponse),
+    );
+    const api = createTabHubApi({
+      baseUrl: "http://127.0.0.1:7717/",
+      fetchImpl,
+    });
+
+    await expect(api.restoreRetentionPage(3)).resolves.toEqual(
+      keptRetentionResponse,
+    );
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://127.0.0.1:7717/api/retention/trash/3/restore",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decidedBy: "agent" }),
+      },
+    );
+  });
+
+  it("rejects malformed retention lifecycle responses", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl
+      .mockResolvedValueOnce(
+        jsonResponse({ ...retentionReviewResponse, total: -1 }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ ...keptRetentionResponse, state: "unknown" }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ ...forgottenRetentionResponse, reason: "unknown" }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ ...retentionTrashResponse, pageSize: 0 }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ ...keptRetentionResponse, decidedAt: "not-a-date" }),
+      );
+    const api = createTabHubApi({
+      baseUrl: "http://127.0.0.1:7717/",
+      fetchImpl,
+    });
+
+    await expect(
+      api.reviewDisposablePages({ page: 1, pageSize: 50 }),
+    ).rejects.toThrow("returned an invalid response");
+    await expect(
+      api.setRetentionDecision({ tabId: 3, decision: "keep" }),
+    ).rejects.toThrow("returned an invalid response");
+    await expect(
+      api.closeAndForgetPage({ tabId: 3, confirmed: true }),
+    ).rejects.toThrow("returned an invalid response");
+    await expect(
+      api.listRetentionTrash({ page: 1, pageSize: 50 }),
+    ).rejects.toThrow("returned an invalid response");
+    await expect(api.restoreRetentionPage(3)).rejects.toThrow(
+      "returned an invalid response",
+    );
+  });
+
   it("maps list filters to the server query contract and validates the response", async () => {
     const fetchImpl: typeof fetch = vi.fn(async () => jsonResponse(listResponse));
     const api = createTabHubApi({

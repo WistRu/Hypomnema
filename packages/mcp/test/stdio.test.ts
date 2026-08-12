@@ -66,7 +66,7 @@ describe("TabHub built stdio server", () => {
                 index: 0,
               },
               {
-                url: "https://example.com/mcp-related",
+                url: "https://www.google.com/search?q=mcp-related",
                 title: "Related MCP reference",
                 windowId: 1,
                 index: 1,
@@ -127,18 +127,36 @@ describe("TabHub built stdio server", () => {
 
         const tools = await client.listTools();
         expect(tools.tools.map((tool) => tool.name).sort()).toEqual([
+          "close_and_forget_page",
           "cluster_inbox",
           "get_stats",
           "get_tab",
           "link_tabs",
+          "list_retention_trash",
           "list_tabs",
           "list_tags",
+          "restore_retention_page",
+          "review_disposable_pages",
           "search_tabs",
           "set_importance",
+          "set_page_retention",
           "set_status",
           "summarize_tab",
           "tag_tabs",
         ]);
+
+        const retentionReview = await client.callTool({
+          name: "review_disposable_pages",
+          arguments: {},
+        });
+        const retentionReviewResult = JSON.parse(
+          textResult(retentionReview),
+        ) as { items: Array<{ tab: { id: number } }> };
+        expect(
+          retentionReviewResult.items.some(
+            ({ tab }) => tab.id === relatedTabId,
+          ),
+        ).toBe(true);
 
         const semanticSearch = await client.callTool({
           name: "search_tabs",

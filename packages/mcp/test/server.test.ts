@@ -2,6 +2,8 @@ import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import type {
   ClusterInboxResponse,
+  RetentionReviewResponse,
+  RetentionTrashResponse,
   SummaryJob,
   TabDetailResponse,
   TabListResponse,
@@ -118,12 +120,53 @@ const clusterResponse: ClusterInboxResponse = {
   unclustered: 6,
 };
 
+const retentionReviewResponse: RetentionReviewResponse = {
+  items: [
+    {
+      tab: tabList.items[0]!,
+      score: 0.8,
+      reasons: ["no_captured_content", "no_links"],
+      warnings: [{ kind: "open_instances", count: 1 }],
+    },
+  ],
+  total: 1,
+  page: 2,
+  pageSize: 25,
+};
+
+const forgottenPageResponse = {
+  tabId: 1,
+  outcome: "trashed" as const,
+  reason: null,
+  closedInstanceCount: 1,
+  purgeAt: "2026-08-19T06:30:00.000Z",
+};
+
+const retentionTrashResponse: RetentionTrashResponse = {
+  items: [
+    {
+      tab: tabList.items[0]!,
+      decidedBy: "agent",
+      trashedAt: "2026-08-12T06:30:00.000Z",
+      purgeAt: "2026-08-19T06:30:00.000Z",
+    },
+  ],
+  total: 1,
+  page: 2,
+  pageSize: 10,
+};
+
 const toolNames = [
   "cluster_inbox",
+  "close_and_forget_page",
+  "review_disposable_pages",
+  "restore_retention_page",
   "list_tabs",
   "get_tab",
   "link_tabs",
+  "list_retention_trash",
   "search_tabs",
+  "set_page_retention",
   "set_status",
   "set_importance",
   "tag_tabs",
@@ -134,6 +177,27 @@ const toolNames = [
 
 function createApi(overrides: Partial<TabHubApi> = {}): TabHubApi {
   return {
+    reviewDisposablePages: async () => ({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 50,
+    }),
+    listRetentionTrash: async () => ({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 50,
+    }),
+    setRetentionDecision: async () => {
+      throw new Error("not implemented in this test");
+    },
+    closeAndForgetPage: async () => {
+      throw new Error("not implemented in this test");
+    },
+    restoreRetentionPage: async () => {
+      throw new Error("not implemented in this test");
+    },
     listTabs: async () => tabList,
     getTab: async () => {
       throw new Error("not implemented in this test");
@@ -201,6 +265,199 @@ function textResult(result: Awaited<ReturnType<Client["callTool"]>>): string {
 }
 
 describe("TabHub MCP server", () => {
+  it("reviews personalized disposable-page suggestions without mutating them", async () => {
+    const reviewDisposablePages = vi.fn(async () => retentionReviewResponse);
+    const connection = await connectClient(
+      createApi({ reviewDisposablePages }),
+    );
+
+    try {
+      const listed = await connection.client.listTools();
+      const tool = listed.tools.find(
+        ({ name }) => name === "review_disposable_pages",
+      );
+      expect(tool?.annotations).toMatchObject({
+        readOnlyHint: true,
+        openWorldHint: false,
+      });
+      expect(tool?.description).toContain("suggestions");
+
+      const result = await connection.client.callTool({
+        name: "review_disposable_pages",
+        arguments: { page: 2, page_size: 25 },
+      });
+
+      expect(reviewDisposablePages).toHaveBeenCalledWith({
+        page: 2,
+        pageSize: 25,
+      });
+      expect(JSON.parse(textResult(result))).toEqual(retentionReviewResponse);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("records keep or later retention decisions without closing pages", async () => {
+    const setRetentionDecision = vi.fn(async () => ({
+      tabId: 1,
+      decision: "later" as const,
+      state: "deferred" as const,
+      decidedBy: "agent" as const,
+      decidedAt: "2026-08-12T06:30:00.000Z",
+      reviewAfter: "2026-08-19T06:30:00.000Z",
+      trashedAt: null,
+      purgeAt: null,
+    }));
+    const connection = await connectClient(
+      createApi({ setRetentionDecision }),
+    );
+
+    try {
+      const listed = await connection.client.listTools();
+      const tool = listed.tools.find(
+        ({ name }) => name === "set_page_retention",
+      );
+      expect(tool?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      });
+
+      const unsafeTrash = await connection.client.callTool({
+        name: "set_page_retention",
+        arguments: { id: 1, decision: "trash" },
+      });
+      expect(unsafeTrash.isError).toBe(true);
+      expect(setRetentionDecision).not.toHaveBeenCalled();
+
+      const result = await connection.client.callTool({
+        name: "set_page_retention",
+        arguments: { id: 1, decision: "later" },
+      });
+
+      expect(setRetentionDecision).toHaveBeenCalledWith({
+        tabId: 1,
+        decision: "later",
+      });
+      expect(JSON.parse(textResult(result))).toMatchObject({
+        tabId: 1,
+        decision: "later",
+        state: "deferred",
+      });
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("requires explicit confirmation before closing every instance and forgetting a page", async () => {
+    const closeAndForgetPage = vi.fn(async () => forgottenPageResponse);
+    const connection = await connectClient(createApi({ closeAndForgetPage }));
+
+    try {
+      const listed = await connection.client.listTools();
+      const tool = listed.tools.find(
+        ({ name }) => name === "close_and_forget_page",
+      );
+      expect(tool?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      });
+      expect(tool?.description).toContain("explicit user confirmation");
+
+      const unconfirmed = await connection.client.callTool({
+        name: "close_and_forget_page",
+        arguments: { id: 1 },
+      });
+      expect(unconfirmed.isError).toBe(true);
+      expect(closeAndForgetPage).not.toHaveBeenCalled();
+
+      const confirmed = await connection.client.callTool({
+        name: "close_and_forget_page",
+        arguments: { id: 1, confirmed: true },
+      });
+
+      expect(closeAndForgetPage).toHaveBeenCalledWith({
+        tabId: 1,
+        confirmed: true,
+      });
+      expect(JSON.parse(textResult(confirmed))).toEqual(forgottenPageResponse);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("lists the reversible retention trash without changing it", async () => {
+    const listRetentionTrash = vi.fn(async () => retentionTrashResponse);
+    const connection = await connectClient(createApi({ listRetentionTrash }));
+
+    try {
+      const listed = await connection.client.listTools();
+      const tool = listed.tools.find(
+        ({ name }) => name === "list_retention_trash",
+      );
+      expect(tool?.annotations).toMatchObject({
+        readOnlyHint: true,
+        openWorldHint: false,
+      });
+
+      const result = await connection.client.callTool({
+        name: "list_retention_trash",
+        arguments: { page: 2, page_size: 10 },
+      });
+
+      expect(listRetentionTrash).toHaveBeenCalledWith({
+        page: 2,
+        pageSize: 10,
+      });
+      expect(JSON.parse(textResult(result))).toEqual(retentionTrashResponse);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("restores a page from retention trash with a fresh keep decision", async () => {
+    const restoredResponse = {
+      tabId: 1,
+      decision: "keep" as const,
+      state: "kept" as const,
+      decidedBy: "agent" as const,
+      decidedAt: "2026-08-12T06:35:00.000Z",
+      reviewAfter: null,
+      trashedAt: null,
+      purgeAt: null,
+    };
+    const restoreRetentionPage = vi.fn(async () => restoredResponse);
+    const connection = await connectClient(
+      createApi({ restoreRetentionPage }),
+    );
+
+    try {
+      const listed = await connection.client.listTools();
+      const tool = listed.tools.find(
+        ({ name }) => name === "restore_retention_page",
+      );
+      expect(tool?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      });
+
+      const result = await connection.client.callTool({
+        name: "restore_retention_page",
+        arguments: { id: 1 },
+      });
+
+      expect(restoreRetentionPage).toHaveBeenCalledWith(1);
+      expect(JSON.parse(textResult(result))).toEqual(restoredResponse);
+    } finally {
+      await connection.close();
+    }
+  });
+
   it("lists filtered tabs through the MCP interface", async () => {
     const listTabs = vi.fn(async (_input: ListTabsInput) => tabList);
     const connection = await connectClient(createApi({ listTabs }));

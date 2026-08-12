@@ -442,6 +442,125 @@ export const tabListItemSchema = z.object({
 
 export type TabListItem = z.infer<typeof tabListItemSchema>;
 
+export const retentionReasonSchema = z.enum([
+  "closed",
+  "search_results",
+  "no_captured_content",
+  "no_engaged_activity",
+  "no_custom_fields",
+  "no_links",
+]);
+
+export type RetentionReason = z.infer<typeof retentionReasonSchema>;
+
+export const retentionWarningSchema = z.object({
+  kind: z.enum([
+    "open_instances",
+    "pinned",
+    "workspace",
+    "links",
+    "captured_content",
+  ]),
+  count: z.number().int().positive(),
+});
+
+export type RetentionWarning = z.infer<typeof retentionWarningSchema>;
+
+export const retentionCandidateSchema = z.object({
+  tab: tabListItemSchema,
+  score: z.number().min(0).max(1),
+  reasons: z.array(retentionReasonSchema).min(1),
+  warnings: z.array(retentionWarningSchema),
+});
+
+export type RetentionCandidate = z.infer<typeof retentionCandidateSchema>;
+
+export const retentionDecisionSchema = z.enum(["keep", "later", "trash"]);
+
+export type RetentionDecision = z.infer<typeof retentionDecisionSchema>;
+
+export const retentionStateSchema = z.enum(["kept", "deferred", "trashed"]);
+
+export type RetentionState = z.infer<typeof retentionStateSchema>;
+
+export const setRetentionDecisionSchema = z
+  .object({
+    decision: retentionDecisionSchema,
+    decidedBy: assignedBySchema,
+    confirmed: z.literal(true).optional(),
+  })
+  .superRefine((input, context) => {
+    if (input.decision === "trash" && input.confirmed !== true) {
+      context.addIssue({
+        code: "custom",
+        message: "Trash decisions require explicit confirmation",
+        path: ["confirmed"],
+      });
+    }
+  });
+
+export type SetRetentionDecision = z.infer<
+  typeof setRetentionDecisionSchema
+>;
+
+export const retentionDecisionResponseSchema = z.object({
+  tabId: tabIdSchema,
+  decision: retentionDecisionSchema,
+  state: retentionStateSchema,
+  decidedBy: assignedBySchema,
+  decidedAt: z.string().datetime(),
+  reviewAfter: z.string().datetime().nullable(),
+  trashedAt: z.string().datetime().nullable(),
+  purgeAt: z.string().datetime().nullable(),
+});
+
+export type RetentionDecisionResponse = z.infer<
+  typeof retentionDecisionResponseSchema
+>;
+
+export const restoreRetentionSchema = z.object({
+  decidedBy: assignedBySchema,
+});
+
+export type RestoreRetention = z.infer<typeof restoreRetentionSchema>;
+
+export const forgetRetentionSchema = z.object({
+  decidedBy: assignedBySchema,
+  confirmed: z.literal(true),
+});
+
+export type ForgetRetention = z.infer<typeof forgetRetentionSchema>;
+
+export const retentionForgetResponseSchema = z.object({
+  tabId: tabIdSchema,
+  outcome: z.enum(["trashed", "blocked"]),
+  reason: z
+    .enum([
+      "scope_offline",
+      "outcome_unknown",
+      "unaddressable_instance",
+      "preview_changed",
+      "close_incomplete",
+      "instances_remain",
+    ])
+    .nullable(),
+  closedInstanceCount: z.number().int().nonnegative(),
+  purgeAt: z.string().datetime().nullable(),
+});
+
+export type RetentionForgetResponse = z.infer<
+  typeof retentionForgetResponseSchema
+>;
+
+export const retentionTrashItemSchema = z.object({
+  tab: tabListItemSchema,
+  decidedBy: assignedBySchema,
+  trashedAt: z.string().datetime(),
+  purgeAt: z.string().datetime(),
+});
+
+export type RetentionTrashItem = z.infer<typeof retentionTrashItemSchema>;
+
 export const tabInstanceSchema = z.object({
   instanceId: z.number().int().positive(),
   canonicalTabId: tabIdSchema,
@@ -1129,6 +1248,37 @@ export const tabListResponseSchema = z.object({
 });
 
 export type TabListResponse = z.infer<typeof tabListResponseSchema>;
+
+export const retentionReviewQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(200).default(50),
+});
+
+export type RetentionReviewQuery = z.infer<
+  typeof retentionReviewQuerySchema
+>;
+
+export const retentionReviewResponseSchema = z.object({
+  items: z.array(retentionCandidateSchema),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().positive(),
+  pageSize: z.number().int().positive(),
+});
+
+export type RetentionReviewResponse = z.infer<
+  typeof retentionReviewResponseSchema
+>;
+
+export const retentionTrashResponseSchema = z.object({
+  items: z.array(retentionTrashItemSchema),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().positive(),
+  pageSize: z.number().int().positive(),
+});
+
+export type RetentionTrashResponse = z.infer<
+  typeof retentionTrashResponseSchema
+>;
 
 export const tabInstanceListQuerySchema = z.object({
   browser: browserIdentifierSchema.optional(),

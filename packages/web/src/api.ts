@@ -7,6 +7,10 @@ import {
   graphResponseSchema,
   knowledgeRelationSchema,
   linkListResponseSchema,
+  retentionDecisionResponseSchema,
+  retentionForgetResponseSchema,
+  retentionReviewResponseSchema,
+  retentionTrashResponseSchema,
   setStatusResponseSchema,
   summaryEnqueueResponseSchema,
   summaryJobSchema,
@@ -31,6 +35,7 @@ import {
   type PatchLink,
   type PatchTab,
   type PatchTag,
+  type RetentionDecision,
   type SortDirection,
   type TabCommandRelayErrorCode,
   type TabCommandRelayHttpRequest,
@@ -336,6 +341,120 @@ export async function fetchTabs(
     throw new Error("TabHub returned an unexpected tab list.");
   }
 
+  return parsed.data;
+}
+
+export async function fetchRetentionReview(
+  page: number,
+  signal?: AbortSignal,
+) {
+  const searchParams = new URLSearchParams({
+    page: String(page),
+    pageSize: "50",
+  });
+  const payload = await requestJson(
+    `/api/retention/review?${searchParams.toString()}`,
+    {
+      headers: { Accept: "application/json" },
+      signal: signal ?? null,
+    },
+    "TabHub could not load pages suggested for review",
+    "TabHub returned an unreadable retention review queue.",
+  );
+  const parsed = retentionReviewResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected retention review queue.");
+  }
+  return parsed.data;
+}
+
+export async function fetchRetentionTrash(
+  page: number,
+  signal?: AbortSignal,
+) {
+  const searchParams = new URLSearchParams({
+    page: String(page),
+    pageSize: "50",
+  });
+  const payload = await requestJson(
+    `/api/retention/trash?${searchParams.toString()}`,
+    {
+      headers: { Accept: "application/json" },
+      signal: signal ?? null,
+    },
+    "TabHub could not load retention trash",
+    "TabHub returned unreadable retention trash.",
+  );
+  const parsed = retentionTrashResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned unexpected retention trash.");
+  }
+  return parsed.data;
+}
+
+export async function setRetentionDecision(
+  tabId: number,
+  decision: Exclude<RetentionDecision, "trash">,
+) {
+  const payload = await requestJson(
+    `/api/retention/tabs/${tabId}`,
+    {
+      body: JSON.stringify({ decision, decidedBy: "user" }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "PATCH",
+    },
+    "TabHub could not save this retention decision",
+    "TabHub returned an unreadable retention decision.",
+  );
+  const parsed = retentionDecisionResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected retention decision.");
+  }
+  return parsed.data;
+}
+
+export async function forgetRetentionTab(tabId: number) {
+  const payload = await requestJson(
+    `/api/retention/tabs/${tabId}/forget`,
+    {
+      body: JSON.stringify({ decidedBy: "user", confirmed: true }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    },
+    "TabHub could not close and forget this page",
+    "TabHub returned an unreadable close-and-forget result.",
+  );
+  const parsed = retentionForgetResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected close-and-forget result.");
+  }
+  return parsed.data;
+}
+
+export async function restoreRetentionTab(tabId: number) {
+  const payload = await requestJson(
+    `/api/retention/trash/${tabId}/restore`,
+    {
+      body: JSON.stringify({ decidedBy: "user" }),
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    },
+    "TabHub could not restore this page",
+    "TabHub returned an unreadable restore result.",
+  );
+  const parsed = retentionDecisionResponseSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new Error("TabHub returned an unexpected restore result.");
+  }
   return parsed.data;
 }
 

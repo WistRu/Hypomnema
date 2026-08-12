@@ -164,7 +164,14 @@ function tabFilter(input: FilterTabsInput): {
   parameters: Array<string | number>;
   predicates: string[];
 } {
-  const predicates: string[] = [];
+  const predicates: string[] = [
+    `NOT EXISTS (
+      SELECT 1
+      FROM page_retention
+      WHERE page_retention.tab_id = tabs.id
+        AND page_retention.state = 'trashed'
+    )`,
+  ];
   const parameters: Array<string | number> = [];
 
   if (input.browser !== undefined) {

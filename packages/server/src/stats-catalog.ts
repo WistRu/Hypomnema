@@ -47,6 +47,8 @@ export function createStatsCatalog(
       COUNT(CASE WHEN status = 'done' THEN 1 END) AS done,
       COUNT(CASE WHEN status = 'archived' THEN 1 END) AS archived
     FROM tabs
+    LEFT JOIN page_retention ON page_retention.tab_id = tabs.id
+    WHERE page_retention.state IS NULL OR page_retention.state != 'trashed'
   `);
   const selectBrowsers = connection.prepare(`
     SELECT
@@ -58,6 +60,8 @@ export function createStatsCatalog(
       COUNT(CASE WHEN status = 'done' THEN 1 END) AS done,
       COUNT(CASE WHEN status = 'archived' THEN 1 END) AS archived
     FROM tabs
+    LEFT JOIN page_retention ON page_retention.tab_id = tabs.id
+    WHERE page_retention.state IS NULL OR page_retention.state != 'trashed'
     GROUP BY browser
     ORDER BY browser COLLATE NOCASE
   `);
@@ -79,6 +83,13 @@ export function createStatsCatalog(
         SELECT descendants.ancestor_id, child.id
         FROM descendants
         JOIN tags AS child ON child.parent_id = descendants.descendant_id
+      ),
+      active_tab_tags(tab_id, tag_id) AS (
+        SELECT tab_tags.tab_id, tab_tags.tag_id
+        FROM tab_tags
+        JOIN tabs ON tabs.id = tab_tags.tab_id
+        LEFT JOIN page_retention ON page_retention.tab_id = tabs.id
+        WHERE page_retention.state IS NULL OR page_retention.state != 'trashed'
       )
     SELECT
       tags.id AS tag_id,
@@ -92,8 +103,8 @@ export function createStatsCatalog(
     FROM tags
     JOIN tag_paths ON tag_paths.id = tags.id
     LEFT JOIN descendants ON descendants.ancestor_id = tags.id
-    LEFT JOIN tab_tags ON tab_tags.tag_id = descendants.descendant_id
-    LEFT JOIN tabs ON tabs.id = tab_tags.tab_id
+    LEFT JOIN active_tab_tags ON active_tab_tags.tag_id = descendants.descendant_id
+    LEFT JOIN tabs ON tabs.id = active_tab_tags.tab_id
     GROUP BY tags.id, tag_paths.path
     ORDER BY tag_paths.path COLLATE NOCASE, tags.id
   `);

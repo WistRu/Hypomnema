@@ -22,6 +22,7 @@ import { I18nProvider } from "../src/i18n";
 const mocks = vi.hoisted(() => ({
   closePhysical: vi.fn(),
   fetchLibraryOpenTabs: vi.fn(),
+  fetchRetentionReview: vi.fn(),
   fetchTabs: vi.fn(),
   fetchTagTree: vi.fn(),
   runPhysical: vi.fn(),
@@ -30,6 +31,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../src/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/api")>()),
   fetchLibraryOpenTabs: mocks.fetchLibraryOpenTabs,
+  fetchRetentionReview: mocks.fetchRetentionReview,
   fetchTabs: mocks.fetchTabs,
   fetchTagTree: mocks.fetchTagTree,
 }));
@@ -194,6 +196,12 @@ describe("Library as the primary workspace", () => {
   it("opens Library by default and exposes Graph as the only alternate view", () => {
     mocks.fetchTabs.mockResolvedValue(emptyTabs);
     mocks.fetchTagTree.mockResolvedValue(emptyTopics);
+    mocks.fetchRetentionReview.mockResolvedValue({
+      items: [],
+      page: 1,
+      pageSize: 50,
+      total: 0,
+    });
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -212,6 +220,15 @@ describe("Library as the primary workspace", () => {
     expect(within(viewSwitch).getByRole("button", { name: "Graph" })).toBeTruthy();
     expect(within(viewSwitch).queryByRole("button", { name: "Open tabs" })).toBeNull();
     expect(screen.queryByLabelText("Legacy open tabs")).toBeNull();
+
+    const collectionSwitch = screen.getByRole("group", {
+      name: "Library collection",
+    });
+    expect(within(collectionSwitch).getByRole("button", { name: "All pages" })).toBeTruthy();
+    fireEvent.click(
+      within(collectionSwitch).getByRole("button", { name: "To review" }),
+    );
+    expect(screen.getByRole("heading", { name: "Pages suggested for review" })).toBeTruthy();
 
     queryClient.clear();
   });

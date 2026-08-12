@@ -82,6 +82,65 @@ const russianMessages: Record<string, Message> = {
   "Assign tag": "Назначить тег",
   Browser: "Браузер",
   "Manage browser tabs": "Управление вкладками",
+  "Library collection": "Коллекция библиотеки",
+  "All pages": "Все страницы",
+  "To review": "На разбор",
+  Trash: "Корзина",
+  "Pages suggested for review": "Страницы на разбор",
+  "Suggestions use weak signals and your explicit decisions. Nothing is deleted automatically.":
+    "Рекомендации основаны на слабых сигналах и ваших явных решениях. Ничего не удаляется автоматически.",
+  "Forgotten pages stay here for 7 days before permanent deletion.":
+    "Забытые страницы хранятся здесь 7 дней до окончательного удаления.",
+  "{count} pages": "Страниц: {count}",
+  "Loading retention collection": "Загрузка коллекции",
+  "No pages need review.": "Нет страниц, требующих разбора.",
+  "Trash is empty.": "Корзина пуста.",
+  "Why suggested": "Почему предложено",
+  "Closed page": "Закрытая страница",
+  "Search results page": "Страница результатов поиска",
+  "No captured content": "Нет сохранённого содержимого",
+  "No confirmed interaction": "Нет подтверждённого взаимодействия",
+  "No custom fields": "Нет произвольных полей",
+  "No links": "Нет связей",
+  "Open copies: {count}": "Открытых копий: {count}",
+  "Pinned copies: {count}": "Закреплённых копий: {count}",
+  "Saved workspaces: {count}": "Сохранённых пространств: {count}",
+  "Links: {count}": "Связей: {count}",
+  Keep: "Оставить",
+  "Keep {title}": "Оставить «{title}»",
+  Later: "Позже",
+  "Review {title} later": "Вернуть «{title}» на разбор позже",
+  "Close and forget": "Закрыть и забыть",
+  "Close and forget {title}": "Закрыть и забыть «{title}»",
+  "Closing copies...": "Закрытие копий...",
+  "Close every open copy of this page and move it to Trash? You can restore it for 7 days.":
+    "Закрыть все открытые копии этой страницы и переместить её в корзину? Восстановление доступно 7 дней.",
+  "The owning browser session is offline. Nothing was forgotten.":
+    "Нужная сессия браузера не в сети. Ничего не забыто.",
+  "The browser result is unknown. Nothing was forgotten from the Library.":
+    "Результат команды браузера неизвестен. Из библиотеки ничего не забыто.",
+  "An open copy could not be addressed safely. Nothing was forgotten.":
+    "Не удалось безопасно адресовать открытую копию. Ничего не забыто.",
+  "The open copies changed during confirmation. Nothing was forgotten.":
+    "Открытые копии изменились во время подтверждения. Ничего не забыто.",
+  "Not every open copy closed successfully. Nothing was forgotten.":
+    "Не все открытые копии успешно закрылись. Ничего не забыто.",
+  "Open copies still remain. Nothing was forgotten from the Library.":
+    "Открытые копии всё ещё существуют. Из библиотеки ничего не забыто.",
+  "TabHub could not safely forget this page.":
+    "TabHub не смог безопасно забыть эту страницу.",
+  "Permanently deleted {date}": "Окончательное удаление: {date}",
+  Restore: "Восстановить",
+  "Restore {title}": "Восстановить «{title}»",
+  "Retention pagination": "Страницы коллекции разбора",
+  "Page retention": "Хранение страницы",
+  "Your decision is personal to this page. TabHub will never delete it from a suggestion alone.":
+    "Это ваше персональное решение для этой страницы. TabHub никогда не удалит её только из-за рекомендации.",
+  "This page will stay in the Library.": "Эта страница останется в библиотеке.",
+  "This page will return to review later.":
+    "Эта страница вернётся на разбор позже.",
+  "{count} copies were already closed; the page remains in the Library.":
+    "Уже закрыто копий: {count}; страница осталась в библиотеке.",
   "Bulk tab actions": "Массовые действия с вкладками",
   "Check summary status": "Проверить статус сводки",
   Clear: "Очистить",

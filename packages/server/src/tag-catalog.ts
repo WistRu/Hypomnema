@@ -181,23 +181,31 @@ export function createTagCatalog(connection: Database.Database): TagCatalog {
     WHERE tab_id = ? AND tag_id = ?
   `);
   const selectTagTree = connection.prepare(`
-    WITH RECURSIVE descendants(ancestor_id, descendant_id) AS (
-      SELECT id, id
-      FROM tags
-      UNION ALL
-      SELECT descendants.ancestor_id, child.id
-      FROM descendants
-      JOIN tags AS child ON child.parent_id = descendants.descendant_id
-    )
+    WITH RECURSIVE
+      descendants(ancestor_id, descendant_id) AS (
+        SELECT id, id
+        FROM tags
+        UNION ALL
+        SELECT descendants.ancestor_id, child.id
+        FROM descendants
+        JOIN tags AS child ON child.parent_id = descendants.descendant_id
+      ),
+      active_tab_tags(tab_id, tag_id) AS (
+        SELECT tab_tags.tab_id, tab_tags.tag_id
+        FROM tab_tags
+        JOIN tabs ON tabs.id = tab_tags.tab_id
+        LEFT JOIN page_retention ON page_retention.tab_id = tabs.id
+        WHERE page_retention.state IS NULL OR page_retention.state != 'trashed'
+      )
     SELECT
       tags.id,
       tags.name,
       tags.parent_id,
       tags.color,
-      COUNT(DISTINCT tab_tags.tab_id) AS tab_count
+      COUNT(DISTINCT active_tab_tags.tab_id) AS tab_count
     FROM tags
     LEFT JOIN descendants ON descendants.ancestor_id = tags.id
-    LEFT JOIN tab_tags ON tab_tags.tag_id = descendants.descendant_id
+    LEFT JOIN active_tab_tags ON active_tab_tags.tag_id = descendants.descendant_id
     GROUP BY tags.id
     ORDER BY tags.name COLLATE NOCASE, tags.id
   `);

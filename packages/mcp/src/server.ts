@@ -123,6 +123,27 @@ const clusterInboxInputSchema = z.object({
   max_clusters: z.number().int().min(1).max(50).default(8),
 });
 
+const retentionPageInputSchema = z.object({
+  page: z.number().int().positive().default(1),
+  page_size: z.number().int().positive().max(200).default(50),
+});
+
+const setPageRetentionInputSchema = z.object({
+  id: z.number().int().positive(),
+  decision: z.enum(["keep", "later"]),
+});
+
+const closeAndForgetPageInputSchema = z.object({
+  id: z.number().int().positive(),
+  confirmed: z
+    .literal(true)
+    .describe("Must be true only after the user explicitly confirms closure."),
+});
+
+const restoreRetentionPageInputSchema = z.object({
+  id: z.number().int().positive(),
+});
+
 const emptyInputSchema = z.object({});
 
 const readOnlyAnnotations = {
@@ -154,6 +175,13 @@ const createMutationAnnotations = {
   destructiveHint: false,
   idempotentHint: false,
   openWorldHint: false,
+} as const;
+
+const destructiveMutationAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: false,
+  openWorldHint: true,
 } as const;
 
 const capturedTextLimit = 20_000;
@@ -345,6 +373,65 @@ export function createMcpServer(
     options.summaryPollIntervalMs ?? defaultSummaryPollIntervalMs;
   const summaryPollTimeoutMs =
     options.summaryPollTimeoutMs ?? defaultSummaryPollTimeoutMs;
+
+  server.registerTool(
+    "review_disposable_pages",
+    {
+      description:
+        "Review personalized disposable-page suggestions with reasons and safety warnings. This only returns suggestions; it never closes or deletes pages.",
+      inputSchema: retentionPageInputSchema,
+      annotations: readOnlyAnnotations,
+    },
+    async ({ page, page_size: pageSize }) =>
+      runTool(() => api.reviewDisposablePages({ page, pageSize })),
+  );
+
+  server.registerTool(
+    "set_page_retention",
+    {
+      description:
+        "Record that a page should be kept or reviewed later. This never closes the page or moves it to trash.",
+      inputSchema: setPageRetentionInputSchema,
+      annotations: createMutationAnnotations,
+    },
+    async ({ id, decision }) =>
+      runTool(() => api.setRetentionDecision({ tabId: id, decision })),
+  );
+
+  server.registerTool(
+    "close_and_forget_page",
+    {
+      description:
+        "After explicit user confirmation, close every known physical instance of a page and move its TabHub record to the seven-day trash. If closure cannot be verified exactly, the page is not trashed.",
+      inputSchema: closeAndForgetPageInputSchema,
+      annotations: destructiveMutationAnnotations,
+    },
+    async ({ id, confirmed }) =>
+      runTool(() => api.closeAndForgetPage({ tabId: id, confirmed })),
+  );
+
+  server.registerTool(
+    "list_retention_trash",
+    {
+      description:
+        "List pages in TabHub's reversible retention trash, including their scheduled permanent-deletion time.",
+      inputSchema: retentionPageInputSchema,
+      annotations: readOnlyAnnotations,
+    },
+    async ({ page, page_size: pageSize }) =>
+      runTool(() => api.listRetentionTrash({ page, pageSize })),
+  );
+
+  server.registerTool(
+    "restore_retention_page",
+    {
+      description:
+        "Restore a page from TabHub's retention trash and record it as a page to keep.",
+      inputSchema: restoreRetentionPageInputSchema,
+      annotations: createMutationAnnotations,
+    },
+    async ({ id }) => runTool(() => api.restoreRetentionPage(id)),
+  );
 
   server.registerTool(
     "list_tabs",

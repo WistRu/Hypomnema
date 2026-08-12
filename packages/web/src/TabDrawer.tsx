@@ -29,6 +29,7 @@ import {
 } from "./api";
 import { ActivityMetrics, OpenCopyCount } from "./ActivityMetrics";
 import { useI18n } from "./i18n";
+import { PageRetentionActions } from "./PageRetentionActions";
 import { defaultTopicPath } from "./system-topics";
 import { TabBrowserAction } from "./TabBrowserAction";
 import { TopicPathInput } from "./TopicPathInput";
@@ -515,6 +516,16 @@ export function TabDrawer({
                 </fieldset>
               </div>
               {mutationError ? <SectionError error={mutationError} /> : null}
+            </section>
+
+            <section
+              className="drawer-section"
+              aria-labelledby={`${headingId}-retention`}
+            >
+              <div className="section-heading">
+                <h3 id={`${headingId}-retention`}>{t("Page retention")}</h3>
+              </div>
+              <PageRetentionActions tabId={tabId} onForgotten={onClose} />
             </section>
 
             <section
