@@ -234,5 +234,122 @@
   },
   "extensionErrorOfflineQueueFull": {
     "message": "Офлайн-очередь TabHub заполнена. Подключите локальный сервер и повторите попытку."
+  },
+  "extensionErrorContextQueueCorrupted": {
+    "message": "Очередь личного контекста повреждена. Последующие изменения заблокированы до проверки."
+  },
+  "extensionErrorContextQueueChanged": {
+    "message": "Контекст в очереди изменился. Проверьте его снова перед удалением."
+  },
+  "popupContextHeading": {
+    "message": "Личный контекст"
+  },
+  "popupPairingHelp": {
+    "message": "Откройте TabHub в браузере, начните сопряжение, затем вставьте сюда ID запроса и одноразовый код."
+  },
+  "popupPairingChallengeLabel": {
+    "message": "ID запроса"
+  },
+  "popupPairingCodeLabel": {
+    "message": "Код сопряжения"
+  },
+  "popupPairButton": {
+    "message": "Подключить расширение"
+  },
+  "popupContextScopeLabel": {
+    "message": "Область"
+  },
+  "popupContextScopePage": {
+    "message": "Страница"
+  },
+  "popupContextScopeTab": {
+    "message": "Только эта открытая вкладка"
+  },
+  "popupContextKindLabel": {
+    "message": "Тип"
+  },
+  "popupContextVisibilityLabel": {
+    "message": "Видимость"
+  },
+  "popupContextLocalOnly": {
+    "message": "Только локально"
+  },
+  "popupContextShareAi": {
+    "message": "Можно использовать ИИ"
+  },
+  "popupContextBodyLabel": {
+    "message": "Почему это открыто?"
+  },
+  "popupContextSave": {
+    "message": "Сохранить контекст"
+  },
+  "popupIntentPromote": {
+    "message": "Перенести в контекст страницы"
+  },
+  "popupIntentArchive": {
+    "message": "Архивировать намерение"
+  },
+  "popupIntentHistory": {
+    "message": "История намерений"
+  },
+  "popupContextPaired": {
+    "message": "Расширение подключено."
+  },
+  "popupContextSaved": {
+    "message": "Контекст сохранён."
+  },
+  "popupContextQueued": {
+    "message": "Сохранено локально и поставлено в очередь."
+  },
+  "popupPairingRequired": {
+    "message": "Требуется сопряжение."
+  },
+  "popupContextUnavailable": {
+    "message": "Личный контекст недоступен."
+  },
+  "popupContextNoActiveTab": {
+    "message": "Нет подходящей активной HTTP(S)-вкладки."
+  },
+  "popupContextPurpose": {
+    "message": "Цель"
+  },
+  "popupContextInterest": {
+    "message": "Интерес"
+  },
+  "popupContextQuestion": {
+    "message": "Вопрос"
+  },
+  "popupContextProject": {
+    "message": "Проект"
+  },
+  "popupContextNextAction": {
+    "message": "Следующее действие"
+  },
+  "popupContextNote": {
+    "message": "Заметка"
+  },
+  "popupContextStaleQueued": {
+    "message": "Вкладка изменилась. Контекст в очереди нужно проверить перед повтором."
+  },
+  "popupContextDiscardStale": {
+    "message": "Отбросить устаревший контекст из очереди"
+  },
+  "popupContextDiscardStaleConfirm": {
+    "message": "Отбросить этот контекст для предыдущей страницы? После этого отправка следующих записей из очереди возобновится."
+  },
+  "popupContextStaleDiscarded": {
+    "message": "Устаревший контекст отброшен. Отправка следующих записей возобновлена."
+  },
+  "popupIntentStateActive": {
+    "message": "Активно"
+  },
+  "popupIntentStateArchived": {
+    "message": "В архиве"
+  },
+  "popupIntentStatePromoted": {
+    "message": "Перенесено"
+  },
+  "popupIntentStateExpired": {
+    "message": "Истекло"
   }
 }

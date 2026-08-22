@@ -154,6 +154,7 @@ function candidateFromSignals(
 export function createRetentionCatalog(
   connection: Database.Database,
   tabCatalog: TabCatalog,
+  contextEnabled = false,
   clock: () => Date = () => new Date(),
 ): RetentionCatalog {
   const selectSignals = connection.prepare(`
@@ -197,6 +198,33 @@ export function createRetentionCatalog(
      AND tab_page_activity_totals.url_normalized = tabs.url_normalized
     WHERE tabs.status = 'inbox'
       AND tabs.importance = 0
+      ${contextEnabled ? `AND NOT EXISTS (
+        SELECT 1
+        FROM context_entries AS protection
+        WHERE protection.logical_page_id = tabs.logical_page_id
+          AND protection.kind IN ('purpose', 'next_action')
+          AND protection.state = 'active'
+          AND NOT EXISTS (
+            SELECT 1 FROM context_entries AS superseding
+            WHERE superseding.supersedes_id = protection.id
+          )
+          AND (
+            protection.actor = 'user'
+            OR (
+              protection.actor = 'agent'
+              AND EXISTS (
+                SELECT 1
+                FROM context_entry_reviews AS review
+                WHERE review.context_entry_id = protection.id
+                  AND review.verdict = 'accepted'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM context_entry_reviews AS later_review
+                    WHERE later_review.supersedes_id = review.id
+                  )
+              )
+            )
+          )
+      )` : ""}
       AND (
         page_retention.tab_id IS NULL
         OR (

@@ -255,6 +255,9 @@ describe("Library tab sorting", () => {
         });
         expect(snapshot.statusCode).toBe(200);
 
+        const activityStartedAt = new Date(row.firstSeenAt);
+        const activityEndedAt = new Date(activityStartedAt.getTime() + 10_000);
+        now = activityEndedAt;
         const activity = await app.inject({
           method: "POST",
           url: "/api/ingest/activity",
@@ -266,8 +269,8 @@ describe("Library tab sorting", () => {
             browserTabId: row.browserTabId,
             sequence: 1,
             url: row.url,
-            startedAt: "2026-08-05T10:00:00.000Z",
-            endedAt: "2026-08-05T10:00:10.000Z",
+            startedAt: activityStartedAt.toISOString(),
+            endedAt: activityEndedAt.toISOString(),
             foregroundMs: row.foregroundMs,
             engagedMs: Math.floor(row.foregroundMs / 2),
           },

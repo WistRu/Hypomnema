@@ -1,0 +1,106 @@
+{
+  "gate": "G8",
+  "status": "PASS",
+  "baselineHead": "40f5297250cfd214d7fbac2639c013228044e56d",
+  "schemaVersion": 24,
+  "verificationDate": "2026-08-14",
+  "commands": {
+    "test": {
+      "command": "corepack pnpm test",
+      "exitCode": 0,
+      "files": 237,
+      "tests": 1928,
+      "packages": {
+        "shared": { "files": 10, "tests": 63 },
+        "extension": { "files": 29, "tests": 321 },
+        "mcp": { "files": 12, "tests": 140 },
+        "server": { "files": 100, "tests": 851 },
+        "web": { "files": 86, "tests": 553 }
+      },
+      "observedDiagnostics": {
+        "C50_BATCH50_P95_MS": 90.100,
+        "C52A_FACADE50_P95_MS": 0.645
+      }
+    },
+    "typecheck": {
+      "command": "corepack pnpm typecheck",
+      "exitCode": 0,
+      "packagesPassed": 5
+    },
+    "build": {
+      "command": "corepack pnpm build",
+      "exitCode": 0,
+      "packagesPassed": 5
+    },
+    "index": {
+      "command": "git diff --cached --name-only",
+      "empty": true
+    }
+  },
+  "artifacts": {
+    "serverDistSha256": "1ba7260a63eee43950b5480a3ae7bc1645dcfacda678b9d9fdbbd7efe750c7c2",
+    "retainedPostFixTestLog": ".tmp/personal-attention-layer/g8-live-20260814T111514/full-test-after-cookie-fix.stdout.log",
+    "retainedPostFixTestLogSha256": "ddcca60ceb54fdc75480f15d40976563586b360e3ac5aaebf098af289e9b029b",
+    "regressionEvidenceSha256": "803b715dd46029e210393d2b8d1c8649dd8678db7f61e051ee13011a144e02a6",
+    "extensionManifestSha256": "a7b2350eb3557b06ce964ceea3ca4d5ed634e08f439c6da7d95b6cf2c0a258d4"
+  },
+  "finalRuntime": {
+    "pid": 153452,
+    "origin": "http://127.0.0.1:7718",
+    "health": "ok",
+    "database": "ok",
+    "schemaVersion": 24,
+    "relayScope": {
+      "installationId": "9004c57e-e85e-4982-a296-6f4381845e2b",
+      "browserSessionId": "0b8447ea-51a1-4f5e-bc50-860d232e765f",
+      "protocolVersion": 5
+    },
+    "cacheBustedNavigation": "http://127.0.0.1:7718/app/?g8-final-pid=153452",
+    "protectedRequests": [
+      {
+        "at": "2026-08-14T10:21:21.734Z",
+        "method": "GET",
+        "route": "/api/research/reports",
+        "statusCode": 200
+      },
+      {
+        "at": "2026-08-14T10:21:36.584Z",
+        "method": "POST",
+        "route": "/api/research/preflight",
+        "statusCode": 200
+      }
+    ]
+  },
+  "finalPreflight": {
+    "question": "Какие основные темы и практическая ценность этой страницы?",
+    "found": 1,
+    "saved": 1,
+    "eligible": 1,
+    "used": 0,
+    "missing": 0,
+    "errors": 0,
+    "providerCallsUpperBound": 1,
+    "inputTokensUpperBound": 2483,
+    "outputTokensUpperBound": 1024,
+    "costUsdUpperBound": 1,
+    "durationMinutesUpperBound": 2,
+    "startResearchVisible": true
+  },
+  "exactPhysicalTarget": {
+    "canonicalTabId": 698,
+    "installationId": "9004c57e-e85e-4982-a296-6f4381845e2b",
+    "browserSessionId": "0b8447ea-51a1-4f5e-bc50-860d232e765f",
+    "windowId": 492456322,
+    "browserTabId": 492456323,
+    "tabIndex": 0,
+    "tabInstances": 1052,
+    "exactUrlCopies": 1,
+    "contentRevision": 1,
+    "contentBytes": 7774,
+    "contentSha256": "675b6ff61192d3aac0f1101a42cdd5945c3e1c884ee0137214951f32136f5b74",
+    "integrityCheck": "ok",
+    "foreignKeyViolations": 0
+  },
+  "providerCallMade": false,
+  "providerLiveCallRequiredForG8": false
+}

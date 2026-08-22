@@ -8,6 +8,7 @@ import * as sqliteVec from "sqlite-vec";
 import { describe, expect, it } from "vitest";
 
 import { openDatabase } from "../src/database.js";
+import { createLogicalPageCatalog } from "../src/logical-page-catalog.js";
 
 describe("knowledge graph migration", () => {
   it("upgrades v8 links into typed relations and registers future entities", async () => {
@@ -80,7 +81,7 @@ describe("knowledge graph migration", () => {
 
     const upgraded = openDatabase(databasePath);
     try {
-      expect(upgraded.schemaVersion).toBe(17);
+      expect(upgraded.schemaVersion).toBe(26);
       expect(
         upgraded.connection
           .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'links'")
@@ -122,16 +123,23 @@ describe("knowledge graph migration", () => {
         created_by: "agent",
       });
 
+      const logicalPage = createLogicalPageCatalog(
+        upgraded.connection,
+      ).resolve({
+        observedAt: "2026-08-10T00:00:00.000Z",
+        url: "https://example.com/c",
+        urlNormalized: "https://example.com/c",
+      });
       upgraded.connection
         .prepare(
           `INSERT INTO tabs (
              id, url, url_normalized, title, browser, status, importance,
-             is_open, first_seen_at, last_seen_at
+             is_open, first_seen_at, last_seen_at, logical_page_id
            ) VALUES (50, 'https://example.com/c', 'https://example.com/c',
              'C', 'chrome', 'inbox', 0, 0, '2026-08-10T00:00:00.000Z',
-             '2026-08-10T00:00:00.000Z')`,
+             '2026-08-10T00:00:00.000Z', ?)`,
         )
-        .run();
+        .run(logicalPage.id);
       upgraded.connection
         .prepare("INSERT INTO tags (id, name, parent_id) VALUES (60, 'Crypto', 30)")
         .run();

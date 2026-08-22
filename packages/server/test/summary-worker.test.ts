@@ -15,6 +15,7 @@ const claimedJob: ClaimedSummaryJob = {
   attempts: 1,
   maxAttempts: 3,
   attemptId: 100,
+  requestedBy: "user",
   requestedModel: "test-model",
   sourceContentRevision: 1,
   title: "Queued page",

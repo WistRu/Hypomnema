@@ -16,6 +16,18 @@ Copy-Item .env.example .env
 corepack pnpm dev
 ```
 
+### Personal-context local capability
+
+The first-class context routes are fail-closed behind
+`TABHUB_FEATURE_CONTEXT=true`. Production `/app` navigation receives an opaque
+`HttpOnly; SameSite=Strict` local session. During Vite development, set a random
+server-only `TABHUB_DEV_PROXY_SECRET`; the Vite proxy must call
+`POST /api/local/session/bootstrap` and inject the matching
+`x-tabhub-dev-proxy-secret` header. Never use a `VITE_` variable for this value
+or expose it to browser code. The bootstrap secret, bearer credentials, pairing
+codes, context bodies, raw search queries, and idempotency keys are excluded
+from request logs.
+
 Команда сначала собирает веб-интерфейс, затем запускает сервер. Откройте [http://127.0.0.1:7717/app/](http://127.0.0.1:7717/app/).
 
 Веб-интерфейс доступен на английском и русском языках. Язык можно выбрать в шапке приложения; выбор сохраняется в браузере. Popup и настройки расширения автоматически используют язык интерфейса браузера, если это английский или русский.
@@ -29,16 +41,98 @@ Invoke-RestMethod http://127.0.0.1:7717/api/health
 Текущий ожидаемый ответ:
 
 ```json
-{"status":"ok","database":"ok","schemaVersion":17}
+{"status":"ok","database":"ok","schemaVersion":26}
 ```
 
 База по умолчанию создаётся в `data/tabhub.sqlite` относительно корня репозитория. Путь можно изменить через `TABHUB_DB_PATH` в корневом `.env`.
+
+`TABHUB_FEATURE_LOGICAL_IMPORTANCE=false` сохраняет прежний редактор важности для отдельной физической вкладки и отключает новые logical-page endpoints. Значение `true` включает единую каноническую оценку важности для всех копий одной URL-страницы. После изменения флага перезапустите сервер. Для безопасного отката верните `false`: сохранённые канонические данные не удаляются, но legacy-интерфейс их не читает и не изменяет.
 
 Для разработки UI с hot reload запустите сервер и Vite одной командой, затем откройте адрес Vite из консоли:
 
 ```powershell
 corepack pnpm dev:web
 ```
+
+`TABHUB_FEATURE_RESOURCES=true` enables the Resource backend and REST API:
+resource list/detail/pages/all-time activity, resource context, commands, user evaluation,
+and `resource_id` intersections for tab/instance selections. The Resource UI
+facet arrives in W30 and is not enabled by this server flag alone. Set the flag
+back to `false` and restart for a safe rollback: stored mappings, context, and
+evaluations remain isolated and are neither deleted nor exposed by resource routes.
+
+The exact-copy capture and Drawer Short/Deep page-summary flow is independently
+fail-closed behind `TABHUB_FEATURE_PAGE_SUMMARY_CAPTURE=true`. It deliberately
+does not reuse the Resource research flag: a deep page summary still analyzes
+one captured page, while research has separate corpus, evidence, budget, and
+consent semantics. With this flag off (the default), `/api/features` reports
+`pageSummaryCapture: false`, the HTTP relay rejects only
+`capture-tab-content` before extension dispatch, and the exact-instance ingest
+route is absent. Ordinary content ingest, the existing Library short-summary
+action for already captured content, and activation/close/workspace relay
+commands remain available. Restart the server after changing the flag; set it
+back to `false` for the schema-compatible rollback surface.
+
+Captured-only Resource/page research is independently default-off behind
+`TABHUB_FEATURE_RESEARCH=true`. Schema 24 is installed unconditionally so
+existing research history and privacy redaction remain readable when the flag
+is returned to `false`; the disabled flag blocks only new preflight, run and
+research-cancel mutations. Execution additionally requires `ANTHROPIC_API_KEY`.
+Without a provider, preflight, history, job reads and privacy redaction remain
+available, while run/refine fail before writing with
+`503 RESEARCH_PROVIDER_UNAVAILABLE`.
+
+The provider uses `ANTHROPIC_RESEARCH_MODEL`, immutable startup prices from
+`ANTHROPIC_RESEARCH_INPUT_USD_PER_MTOK` and
+`ANTHROPIC_RESEARCH_OUTPUT_USD_PER_MTOK`, and an optional explicit
+`ANTHROPIC_RESEARCH_PRICING_VERSION`. When the version is blank, TabHub derives
+one from the effective prices. `TABHUB_RESEARCH_MAX_OUTPUT_TOKENS` is capped at
+8192 and `TABHUB_RESEARCH_TIMEOUT_MS` bounds one call. The worker permits one
+concurrent call, ten attempts and USD 2 of reservation per UTC day, while every
+run must also fit its user-approved budget. Research consumes only the captured
+approved corpus: it never fetches, opens or navigates to a URL. Restart the
+server after changing any research flag or provider setting.
+
+Schema-26 bounded live acquisition is independently default-off behind
+`TABHUB_FEATURE_LIVE_ACQUISITION=true`. When enabled, the accepted C90b
+coordinator exposes Resource-only preflight/start/status flows, uses the closed
+server-internal `SafePublicHttpClient`, materializes bounded public evidence, and
+hands an immutable captured/live corpus to the existing research workflow. It
+does not expose a generic fetch endpoint and never uses browser navigation,
+extension fetches, redirects, retries, scripts, subrequests, or tab/window
+mutation. Keep the flag `false` outside an explicitly reviewed rollout.
+
+`TABHUB_FEATURE_PRIVACY_PURGE=true` enables creation of new durable privacy
+purges. Existing schema-26 purge status and retry/recovery remain available when
+the flag is off so disabling new work cannot strand an active purge.
+
+Daily activity is controlled by two independent, fail-closed flags. Set
+`TABHUB_FEATURE_ACTIVITY_DAILY_WRITER=true` to collect accepted activity into
+UTC daily buckets and update gap/duplicate/out-of-order metrics. Set
+`TABHUB_FEATURE_ACTIVITY_WINDOWS=true` together with
+`TABHUB_FEATURE_ACTIVITY_DAILY_WRITER=true` and
+`TABHUB_FEATURE_RESOURCES=true` to advertise and expose 7d/30d page/resource
+windows and activity metrics to UI/adapters. Both activity flags default to
+`false`. Reader-only mode fails closed to G3 all-time activity because daily
+coverage would be incomplete; writer-only mode collects buckets without exposing
+the new readers and is valid for staged rollout.
+
+The immutable migration availability epoch records when daily tracking became
+available. A separate persisted writer lifecycle epoch records only the current
+continuous period during which the server-side daily writer was enabled. It does
+not claim that the browser extension delivered every possible observation; gaps
+and delivery health remain separate telemetry concerns. Disabling and re-enabling
+the writer starts a new continuous epoch, and finite readers remain unavailable
+unless both activity flags are currently enabled.
+
+Priority assessment rollout uses three independent default-off flags:
+`TABHUB_FEATURE_PRIORITY_ASSESSMENT_WRITER` permits staged assessment writes,
+`TABHUB_FEATURE_PRIORITY_READERS` permits schema-22 readers, and
+`TABHUB_FEATURE_PRIORITY_SHADOW` permits shadow presentation only when readers
+are also enabled. C50 only declares and validates these flags; it does not start
+collection or expose priority routes. A writer can be staged without readers or
+shadow, while every requested capability fails closed on a database older than
+schema 22.
 
 ### Автозапуск в Windows
 
@@ -60,7 +154,7 @@ corepack pnpm start
 - рабочая папка — путь из `(Resolve-Path .).Path`.
 - на вкладке **Параметры** отключите «Останавливать задачу, выполняемую дольше 3 дней» и включите перезапуск при сбое, например через 1 минуту до 3 раз.
 
-После сохранения запустите задачу вручную и проверьте `Invoke-RestMethod http://127.0.0.1:7717/api/health`. После обновления TabHub снова выполните `corepack pnpm install --frozen-lockfile` и `corepack pnpm build`, затем перезапустите работающий сервер (или задачу в Планировщике), чтобы применились новые миграции, и убедитесь, что health endpoint показывает `schemaVersion: 17`. Перезагрузите TabHub на странице расширений браузера и обновите страницу приложения, чтобы отправить свежий снимок; задачу пересоздавать не нужно.
+После сохранения запустите задачу вручную и проверьте `Invoke-RestMethod http://127.0.0.1:7717/api/health`. После обновления TabHub снова выполните `corepack pnpm install --frozen-lockfile` и `corepack pnpm build`, затем перезапустите работающий сервер (или задачу в Планировщике), чтобы применились новые миграции, и убедитесь, что health endpoint показывает `schemaVersion: 26`. Перезагрузите TabHub на странице расширений браузера и обновите страницу приложения, чтобы отправить свежий снимок; задачу пересоздавать не нужно.
 
 ## Расширение Chromium
 
@@ -204,7 +298,7 @@ corepack pnpm --filter @tabhub/mcp build
 corepack pnpm dev
 ```
 
-MCP-процесс использует `TABHUB_API_URL` и остаётся тонким адаптером над REST API. Он предоставляет инструменты `list_tabs`, `get_tab`, `search_tabs`, `summarize_tab`, `cluster_inbox`, `set_status`, `set_importance`, `tag_tabs`, `link_tabs`, `list_tags`, `get_stats`, `review_disposable_pages`, `set_page_retention`, `close_and_forget_page`, `list_retention_trash`, `restore_retention_page` и ресурс `tabhub://tab/{id}`. `list_tabs` принимает те же фильтры, что REST-список, включая `q`, `search_mode` и `similar_to`; `search_tabs` поддерживает режимы `fulltext` и `semantic`. `cluster_inbox` явно индексирует неразобранные вкладки и возвращает предложения с названиями, ключевыми словами и идентификаторами вкладок. `review_disposable_pages` только показывает персональные предложения и предупреждения; `set_page_retention` сохраняет решения «оставить» или «позже». Разрушающий `close_and_forget_page` требует `confirmed=true`, закрывает все известные физические экземпляры только при точно подтверждённом результате и затем переносит страницу в семидневную корзину; её можно просмотреть и отменить через `list_retention_trash` и `restore_retention_page`. `summarize_tab` помечает запрос как агентский, ставит его в ту же SQLite-очередь и ожидает завершения до 55 секунд; если работа ещё не закончилась, повторный вызов продолжит ожидание того же активного задания. Контент в ответах MCP ограничен примерно 20 000 символами.
+MCP-процесс использует `TABHUB_API_URL` и остаётся тонким адаптером над REST API. Он предоставляет инструменты `list_tabs`, `get_tab`, `search_tabs`, `summarize_tab`, `cluster_inbox`, `set_status`, `set_importance`, `tag_tabs`, `link_tabs`, `list_tags`, `get_stats`, `review_disposable_pages`, `set_page_retention`, `close_and_forget_page`, `list_retention_trash`, `restore_retention_page` и ресурс `tabhub://tab/{id}`. `list_tabs` принимает те же фильтры, что REST-список, включая `q`, `search_mode` и `similar_to`; `search_tabs` поддерживает режимы `fulltext` и `semantic`. `cluster_inbox` явно индексирует неразобранные вкладки и возвращает предложения с названиями, ключевыми словами и идентификаторами вкладок. Deprecated-инструмент `set_importance` сначала читает `/api/features`: при включённом logical importance сервер фиксирует агентскую запись `on_behalf_of_user`, а при выключенном флаге или старом schema-17 сервере используется прежняя скалярная запись только выбранных вкладок. Некорректный feature contract не приводит к записи. `review_disposable_pages` только показывает персональные предложения и предупреждения; `set_page_retention` сохраняет решения «оставить» или «позже». Разрушающий `close_and_forget_page` требует `confirmed=true`, закрывает все известные физические экземпляры только при точно подтверждённом результате и затем переносит страницу в семидневную корзину; её можно просмотреть и отменить через `list_retention_trash` и `restore_retention_page`. `summarize_tab` помечает запрос как агентский, ставит его в ту же SQLite-очередь и ожидает завершения до 55 секунд; если работа ещё не закончилась, повторный вызов продолжит ожидание того же активного задания. Контент в ответах MCP ограничен примерно 20 000 символами.
 
 ### Claude Desktop
 

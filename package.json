@@ -14,7 +14,7 @@
     "start": "pnpm --filter @tabhub/server start",
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm -r --if-present test",
+    "test": "pnpm -r --workspace-concurrency=1 --if-present test",
     "backup": "pnpm --filter @tabhub/server backup"
   },
   "devDependencies": {

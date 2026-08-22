@@ -234,5 +234,122 @@
   },
   "extensionErrorOfflineQueueFull": {
     "message": "TabHub's offline queue is full. Reconnect the local server and retry."
+  },
+  "extensionErrorContextQueueCorrupted": {
+    "message": "The personal-context queue is damaged. Later changes are blocked until it is reviewed."
+  },
+  "extensionErrorContextQueueChanged": {
+    "message": "The queued context changed. Review it again before discarding anything."
+  },
+  "popupContextHeading": {
+    "message": "Personal context"
+  },
+  "popupPairingHelp": {
+    "message": "Open TabHub in the browser, start pairing, then paste the challenge ID and one-time code here."
+  },
+  "popupPairingChallengeLabel": {
+    "message": "Challenge ID"
+  },
+  "popupPairingCodeLabel": {
+    "message": "Pairing code"
+  },
+  "popupPairButton": {
+    "message": "Pair extension"
+  },
+  "popupContextScopeLabel": {
+    "message": "Scope"
+  },
+  "popupContextScopePage": {
+    "message": "Page"
+  },
+  "popupContextScopeTab": {
+    "message": "This open tab"
+  },
+  "popupContextKindLabel": {
+    "message": "Kind"
+  },
+  "popupContextVisibilityLabel": {
+    "message": "Visibility"
+  },
+  "popupContextLocalOnly": {
+    "message": "Local only"
+  },
+  "popupContextShareAi": {
+    "message": "May be used by AI"
+  },
+  "popupContextBodyLabel": {
+    "message": "Why is this open?"
+  },
+  "popupContextSave": {
+    "message": "Save context"
+  },
+  "popupIntentPromote": {
+    "message": "Promote to page context"
+  },
+  "popupIntentArchive": {
+    "message": "Archive this intent"
+  },
+  "popupIntentHistory": {
+    "message": "Intent history"
+  },
+  "popupContextPaired": {
+    "message": "Extension paired."
+  },
+  "popupContextSaved": {
+    "message": "Context saved."
+  },
+  "popupContextQueued": {
+    "message": "Saved locally and queued for retry."
+  },
+  "popupPairingRequired": {
+    "message": "Pairing required."
+  },
+  "popupContextUnavailable": {
+    "message": "Personal context is unavailable."
+  },
+  "popupContextNoActiveTab": {
+    "message": "No eligible active HTTP(S) tab."
+  },
+  "popupContextPurpose": {
+    "message": "Purpose"
+  },
+  "popupContextInterest": {
+    "message": "Interest"
+  },
+  "popupContextQuestion": {
+    "message": "Question"
+  },
+  "popupContextProject": {
+    "message": "Project"
+  },
+  "popupContextNextAction": {
+    "message": "Next action"
+  },
+  "popupContextNote": {
+    "message": "Note"
+  },
+  "popupContextStaleQueued": {
+    "message": "The tab changed. This queued context needs review before retrying."
+  },
+  "popupContextDiscardStale": {
+    "message": "Discard stale queued context"
+  },
+  "popupContextDiscardStaleConfirm": {
+    "message": "Discard this context for the previous page? Later queued context will then resume."
+  },
+  "popupContextStaleDiscarded": {
+    "message": "Stale context discarded. Later queued context resumed."
+  },
+  "popupIntentStateActive": {
+    "message": "Active"
+  },
+  "popupIntentStateArchived": {
+    "message": "Archived"
+  },
+  "popupIntentStatePromoted": {
+    "message": "Promoted"
+  },
+  "popupIntentStateExpired": {
+    "message": "Expired"
   }
 }

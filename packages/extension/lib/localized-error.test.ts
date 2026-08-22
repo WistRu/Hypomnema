@@ -25,6 +25,17 @@ describe("localizedExtensionError", () => {
     expect(
       localizedExtensionError("TabHub's offline queue is full (2000 operations)."),
     ).toEqual({ messageName: "extensionErrorOfflineQueueFull" });
+    expect(
+      localizedExtensionError(
+        "Personal-context queue is corrupted; no later mutations were sent",
+      ),
+    ).toEqual({ messageName: "extensionErrorContextQueueCorrupted" });
+    expect(
+      localizedExtensionError("The queued context changed; review it again"),
+    ).toEqual({ messageName: "extensionErrorContextQueueChanged" });
+    expect(
+      localizedExtensionError("Page changed; review required"),
+    ).toEqual({ messageName: "popupContextStaleQueued" });
   });
 
   it("uses a localized generic fallback for unknown controlled errors", () => {

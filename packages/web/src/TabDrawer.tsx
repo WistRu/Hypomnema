@@ -1,7 +1,6 @@
 import {
   type CustomFields,
   type TabDetailResponse,
-  type TabImportance,
   type TabInstance,
   type TabLink,
   type TabStatus,
@@ -21,19 +20,29 @@ import {
   createLink,
   deleteLink,
   fetchCanonicalTabInstances,
+  fetchFeatureFlags,
   fetchLinks,
+  fetchLogicalPageResourceResolution,
+  fetchResourceOpenTabs,
   fetchTabDetail,
   patchLink,
   patchTabDetails,
   unassignTag,
 } from "./api";
 import { ActivityMetrics, OpenCopyCount } from "./ActivityMetrics";
+import { FeatureAwareImportanceEditor } from "./FeatureAwareImportanceEditor";
 import { useI18n } from "./i18n";
+import { PageSummaryCaptureControl } from "./PageSummaryCaptureControl";
 import { PageRetentionActions } from "./PageRetentionActions";
+import { PriorityShadowDetails } from "./PriorityShadow";
+import { ResearchHistoryDrawer } from "./ResearchHistoryDrawer";
+import { ResearchPanel } from "./ResearchPanel";
+import { PersonalContextPanel } from "./PersonalContextPanel";
 import { defaultTopicPath } from "./system-topics";
 import { TabBrowserAction } from "./TabBrowserAction";
 import { TopicPathInput } from "./TopicPathInput";
 import type { CanonicalTabBrowserActionRequest } from "./open-tab-activation";
+import { activateModalDialog } from "./modal-dialog";
 
 const STATUS_OPTIONS: Array<{ labelKey: string; value: TabStatus }> = [
   { labelKey: "Inbox", value: "inbox" },
@@ -57,6 +66,7 @@ interface TabDrawerProps {
   onBrowserAction: (request: CanonicalTabBrowserActionRequest) => void;
   onClose: () => void;
   onMiddleClose?: ((canonicalTabId: number) => void) | undefined;
+  onReviewResourceResolution?: ((logicalPageId: number) => void) | undefined;
 }
 
 function displayTitle(tab: TabDetailResponse) {
@@ -257,11 +267,13 @@ export function TabDrawer({
   onBrowserAction,
   onClose,
   onMiddleClose,
+  onReviewResourceResolution,
 }: TabDrawerProps) {
   const queryClient = useQueryClient();
   const { formatDate, formatNumber, t } = useI18n();
   const headingId = useId();
   const closeButton = useRef<HTMLButtonElement>(null);
+  const drawer = useRef<HTMLElement>(null);
   const [tagPath, setTagPath] = useState("");
   const [fieldKey, setFieldKey] = useState("");
   const [fieldValue, setFieldValue] = useState("");
@@ -271,6 +283,10 @@ export function TabDrawer({
   const [relatedTabId, setRelatedTabId] = useState("");
   const [linkKind, setLinkKind] = useState("related");
   const [linkNote, setLinkNote] = useState("");
+  const [contextScopeRequest, setContextScopeRequest] = useState<{
+    instanceId: number;
+    nonce: number;
+  } | null>(null);
 
   const detailQuery = useQuery({
     queryKey: ["tab", tabId],
@@ -283,6 +299,48 @@ export function TabDrawer({
   const instancesQuery = useQuery({
     queryKey: ["tab-instances", { canonicalTabId: tabId }],
     queryFn: ({ signal }) => fetchCanonicalTabInstances(tabId, signal),
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: "always",
+  });
+  const featuresQuery = useQuery({
+    queryKey: ["features"],
+    queryFn: ({ signal }) => fetchFeatureFlags(signal),
+    staleTime: 30_000,
+  });
+  const contextEnabled = featuresQuery.data?.context === true;
+  const pageSummaryCaptureEnabled =
+    featuresQuery.isSuccess && featuresQuery.data?.pageSummaryCapture === true;
+  const priorityShadowEnabled =
+    featuresQuery.isSuccess &&
+    featuresQuery.data?.priorityReaders === true &&
+    (featuresQuery.data?.priorityShadow === true ||
+      featuresQuery.data?.priorityPersonalization === true);
+  const researchEnabled = featuresQuery.isSuccess && featuresQuery.data?.research === true;
+  const researchLogicalPageId = detailQuery.data?.logicalPageId;
+  const resourceResolutionQuery = useQuery({
+    enabled: researchEnabled && Number.isSafeInteger(researchLogicalPageId) &&
+      (researchLogicalPageId ?? 0) > 0,
+    queryKey: ["resource-resolution", researchLogicalPageId],
+    queryFn: ({ signal }) => fetchLogicalPageResourceResolution(researchLogicalPageId!, signal),
+  });
+  const resolvedResearchResource = resourceResolutionQuery.data?.state === "resolved" &&
+      resourceResolutionQuery.data.researchEligible
+    ? resourceResolutionQuery.data.resource
+    : null;
+  const resourceResearchUnavailableKey = resourceResolutionQuery.data?.state === "unmatched"
+    ? "Resource research unavailable: this page is not assigned to a Resource."
+    : resourceResolutionQuery.data?.state === "ambiguous"
+      ? "Resource research unavailable: this page matches multiple Resources."
+      : resourceResolutionQuery.data?.state === "excluded"
+        ? "Resource research unavailable: this page is excluded from Resources."
+        : resourceResolutionQuery.data?.state === "resolved" &&
+            !resourceResolutionQuery.data.researchEligible
+          ? "Resource research unavailable: this Resource is not eligible."
+          : null;
+  const resourceResearchInstancesQuery = useQuery({
+    enabled: resolvedResearchResource !== null,
+    queryKey: ["tab-instances", "resource-research", resolvedResearchResource?.id],
+    queryFn: ({ signal }) => fetchResourceOpenTabs(resolvedResearchResource!.id, signal),
     refetchInterval: 15_000,
     refetchOnWindowFocus: "always",
   });
@@ -347,19 +405,23 @@ export function TabDrawer({
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    closeButton.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKeyDown);
+    const deactivate = drawer.current
+      ? activateModalDialog(drawer.current, previouslyFocused, onClose)
+      : () => undefined;
     return () => {
-      window.removeEventListener("keydown", onKeyDown);
       document.body.style.overflow = previousOverflow;
-      previouslyFocused?.focus();
+      deactivate();
     };
   }, [onClose, tabId]);
 
   const tab = detailQuery.data;
+  const priorityLogicalPageId = tab === undefined
+    ? null
+    : tab.logicalPageId;
+  const prioritySubject =
+    Number.isSafeInteger(priorityLogicalPageId) && (priorityLogicalPageId ?? 0) > 0
+      ? { type: "page" as const, logicalPageId: priorityLogicalPageId! }
+      : null;
   const openCopyCount = instancesQuery.data?.length ?? tab?.openInstanceCount ?? 0;
   const openForegroundTimeMs =
     instancesQuery.data?.reduce(
@@ -412,25 +474,8 @@ export function TabDrawer({
         aria-labelledby={headingId}
         aria-modal="true"
         className="tab-drawer"
+        ref={drawer}
         role="dialog"
-        onKeyDown={(event) => {
-          if (event.key !== "Tab") return;
-          const focusable = Array.from(
-            event.currentTarget.querySelectorAll<HTMLElement>(
-              'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
-            ),
-          );
-          const first = focusable[0];
-          const last = focusable.at(-1);
-          if (!first || !last) return;
-          if (event.shiftKey && document.activeElement === first) {
-            event.preventDefault();
-            last.focus();
-          } else if (!event.shiftKey && document.activeElement === last) {
-            event.preventDefault();
-            first.focus();
-          }
-        }}
       >
         <header className="drawer-header">
           <div>
@@ -481,6 +526,13 @@ export function TabDrawer({
               <p className="drawer-url" title={tab.url}>
                 {tab.url}
               </p>
+              <PersonalContextPanel
+                exactScopeRequest={contextScopeRequest}
+                instances={instancesQuery.data ?? []}
+                instancesError={instancesQuery.error}
+                instancesPending={instancesQuery.isPending}
+                tabId={tabId}
+              />
               <div className="editor-grid">
                 <label>
                   <span>{t("Status")}</span>
@@ -498,23 +550,91 @@ export function TabDrawer({
                     ))}
                   </select>
                 </label>
-                <fieldset className="importance-editor">
-                  <legend>{t("Importance")}</legend>
-                  <div>
-                    {([0, 1, 2, 3] as TabImportance[]).map((level) => (
-                      <button
-                        aria-pressed={tab.importance === level}
-                        disabled={patchMutation.isPending}
-                        key={level}
-                        type="button"
-                        onClick={() => patchMutation.mutate({ importance: level })}
-                      >
-                        {level}
-                      </button>
-                    ))}
-                  </div>
-                </fieldset>
+                <FeatureAwareImportanceEditor
+                  headingId={headingId}
+                  legacyBusy={patchMutation.isPending}
+                  legacyImportance={tab.importance}
+                  tabId={tabId}
+                  onCanonicalChanged={() => void refreshTab()}
+                  onLegacySelect={(importance) =>
+                    patchMutation.mutate({ importance })
+                  }
+                />
               </div>
+              <PriorityShadowDetails
+                enabled={priorityShadowEnabled}
+                subject={prioritySubject}
+                userImportance={tab.importance}
+              />
+              {prioritySubject ? (
+                <ResearchHistoryDrawer
+                  captureInstances={instancesQuery.data ?? []}
+                  captureInstancesState={instancesQuery.isPending ? "pending" : instancesQuery.isError ? "error" : "ready"}
+                  onRetryCaptureInstances={() => void instancesQuery.refetch()}
+                  researchEnabled={researchEnabled}
+                  target={prioritySubject}
+                  onRefresh={async () => {
+                    await Promise.all([detailQuery.refetch(), instancesQuery.refetch()]);
+                  }}
+                />
+              ) : null}
+              {researchEnabled && prioritySubject ? (
+                <ResearchPanel
+                  captureInstances={instancesQuery.data ?? []}
+                  captureInstancesState={instancesQuery.isPending ? "pending" : instancesQuery.isError ? "error" : "ready"}
+                  entryLabel="Research this page"
+                  onRetryCaptureInstances={() => void instancesQuery.refetch()}
+                  target={prioritySubject}
+                  onRefresh={async () => {
+                    await Promise.all([detailQuery.refetch(), instancesQuery.refetch()]);
+                  }}
+                />
+              ) : null}
+              {resolvedResearchResource ? (
+                <>
+                  <ResearchHistoryDrawer
+                    captureInstances={resourceResearchInstancesQuery.data ?? []}
+                    captureInstancesState={resourceResearchInstancesQuery.isPending ? "pending" : resourceResearchInstancesQuery.isError ? "error" : "ready"}
+                    onRetryCaptureInstances={() => void resourceResearchInstancesQuery.refetch()}
+                    researchEnabled={researchEnabled}
+                    target={{ type: "resource", resourceId: resolvedResearchResource.id }}
+                    onRefresh={async () => {
+                      await Promise.all([
+                        resourceResolutionQuery.refetch(),
+                        resourceResearchInstancesQuery.refetch(),
+                      ]);
+                    }}
+                  />
+                  {researchEnabled ? (
+                    <ResearchPanel
+                      captureInstances={resourceResearchInstancesQuery.data ?? []}
+                      captureInstancesState={resourceResearchInstancesQuery.isPending ? "pending" : resourceResearchInstancesQuery.isError ? "error" : "ready"}
+                      entryLabel="Research this resource"
+                      onRetryCaptureInstances={() => void resourceResearchInstancesQuery.refetch()}
+                      target={{ type: "resource", resourceId: resolvedResearchResource.id }}
+                      onRefresh={async () => {
+                        await Promise.all([
+                          resourceResolutionQuery.refetch(),
+                          resourceResearchInstancesQuery.refetch(),
+                        ]);
+                      }}
+                    />
+                  ) : null}
+                </>
+              ) : null}
+              {researchEnabled && resourceResearchUnavailableKey ? (
+                <div className="muted-copy" role="status">
+                  <p>{t(resourceResearchUnavailableKey)}</p>
+                  {(resourceResolutionQuery.data?.state === "unmatched" ||
+                    resourceResolutionQuery.data?.state === "ambiguous") &&
+                    onReviewResourceResolution && priorityLogicalPageId ? (
+                    <button type="button" onClick={() =>
+                      onReviewResourceResolution(priorityLogicalPageId)}>
+                      {t("Review Resource assignment")}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
               {mutationError ? <SectionError error={mutationError} /> : null}
             </section>
 
@@ -602,6 +722,35 @@ export function TabDrawer({
                             </span>
                           </span>
                           <span>{instanceLocation(instance, formatNumber, t)}</span>
+                          {contextEnabled &&
+                          instance.browserSessionId !== null &&
+                          instance.browserTabId !== null ? (
+                            <button
+                              aria-label={t(
+                                "Use exact context for {title} in {browser}, window {windowId}, tab {tabId}",
+                                {
+                                  browser:
+                                    BROWSER_LABELS[instance.browser.toLowerCase()] ??
+                                    (instance.browser.toLowerCase() === "other"
+                                      ? t("Other")
+                                      : instance.browser),
+                                  tabId: formatNumber(instance.browserTabId),
+                                  title: instance.title?.trim() || displayTitle(tab),
+                                  windowId: formatNumber(instance.windowId),
+                                },
+                              )}
+                              className="context-open-copy-action"
+                              type="button"
+                              onClick={() =>
+                                setContextScopeRequest({
+                                  instanceId: instance.instanceId,
+                                  nonce: Date.now(),
+                                })
+                              }
+                            >
+                              {t("Only this open tab")}
+                            </button>
+                          ) : null}
                         </div>
                         <ActivityMetrics
                           engagedTimeMs={instance.engagedTimeMs}
@@ -624,6 +773,17 @@ export function TabDrawer({
                   tab.summary?.trim() ||
                   t("No summary yet.")}
               </p>
+              {pageSummaryCaptureEnabled ? (
+                <PageSummaryCaptureControl
+                  canonicalTabId={tabId}
+                  detail={tab}
+                  instances={instancesQuery.data ?? []}
+                  instancesPending={instancesQuery.isPending}
+                  key={tabId}
+                  refetchInstances={() => instancesQuery.refetch()}
+                  refetchTabDetail={() => detailQuery.refetch()}
+                />
+              ) : null}
             </section>
 
             <section className="drawer-section" aria-labelledby={`${headingId}-tags`}>

@@ -1,6 +1,9 @@
 import {
   tabCommandRelayProtocolVersion,
   tabCommandRelayResultSchema,
+  type ExactTabScope,
+  type ExpectedTabPage,
+  type SessionIntentBundle,
   type TabCommandRelayCommand,
   type TabCommandRelayResult,
   type TabCommandScope,
@@ -36,6 +39,7 @@ import {
 } from "../lib/browser-state";
 import {
   ACTIVITY_CONTENT_SCRIPT_FILE,
+  EXACT_INSTANCE_CONTENT_ENDPOINT,
   EXTRACT_CONTENT_SCRIPT_FILE,
   ACTIVITY_ALARM_NAME,
   ACTIVITY_INTERVAL_MINUTES,
@@ -50,6 +54,25 @@ import {
   captureEligibleTabs,
   type CaptureBatchResult,
 } from "../lib/content-capture";
+import { createExactInstanceCaptureExecutor } from "../lib/exact-instance-capture";
+import {
+  createPendingContextMutation,
+  deliverPendingContextMutation,
+  discardStalePendingContextMutationHead,
+  drainPendingContextMutations,
+  fetchSessionIntentBundle,
+  readPendingContextMutations,
+  resolveContextFeatures,
+  StaleContextMutationError,
+  writePendingContextMutations,
+  type PendingContextMutation,
+} from "../lib/context-intent";
+import {
+  consumePairingChallenge,
+  PairingRequiredError,
+  readLocalCapability,
+  restrictLocalStorageToTrustedContexts,
+} from "../lib/local-capability";
 import {
   directAppTabCommandContext,
   isAllowedAppMessageSender,
@@ -94,6 +117,7 @@ import { registerTabEventSnapshots } from "../lib/tab-event-snapshots";
 import {
   createBrowserTabCommandRelaySocket,
   createTabCommandRelayAgent,
+  type TabCommandRelayExecutionMetadata,
 } from "../lib/tab-command-relay-agent";
 import {
   buildIdentityTransitionSnapshots,
@@ -181,7 +205,16 @@ const browserStateSource: BrowserStateSource = {
     physicalTabCommandExecutor.listPendingUndos(scope),
   listWindows: () => physicalTabCommandExecutor.listWindows(),
 };
+const exactInstanceCaptureExecutor = createExactInstanceCaptureExecutor({
+  endpoint: EXACT_INSTANCE_CONTENT_ENDPOINT,
+  extensionOrigin,
+  extract: extractTabContent,
+  fetch: (input, init) => fetch(input, init),
+  getCurrentScope: currentTabCommandScope,
+  getTab: (tabId) => browser.tabs.get(tabId),
+});
 const tabCommandRelayAgent = createTabCommandRelayAgent({
+  canConnect: isServerReachable,
   createSocket: createBrowserTabCommandRelaySocket,
   execute: executeRelayedTabCommand,
   getScope: currentTabCommandScope,
@@ -194,13 +227,344 @@ const tabCommandRelayAgent = createTabCommandRelayAgent({
   onError: (error) => console.error("TabHub command relay failed", error),
 });
 
-function serializeSync<T>(operation: () => Promise<T>): Promise<T> {
+export function serializeSync<T>(operation: () => Promise<T>): Promise<T> {
   const result = syncTail.then(operation, operation);
   syncTail = result.then(
     () => undefined,
     () => undefined,
   );
   return result;
+}
+
+export function serializeContextMutation<T>(operation: () => Promise<T>): Promise<T> {
+  return serializeSync(operation);
+}
+
+function extensionOrigin(): string {
+  return `chrome-extension://${browser.runtime.id}`;
+}
+
+function sameExactTabScope(left: ExactTabScope, right: ExactTabScope): boolean {
+  return (
+    left.installationId === right.installationId &&
+    left.browserSessionId === right.browserSessionId &&
+    left.browserTabId === right.browserTabId
+  );
+}
+
+function sameExpectedPage(
+  left: ExpectedTabPage,
+  right: ExpectedTabPage,
+): boolean {
+  return (
+    left.logicalPageId === right.logicalPageId &&
+    left.url === right.url &&
+    left.urlNormalized === right.urlNormalized &&
+    left.instanceRevision === right.instanceRevision
+  );
+}
+
+function bundleMatchesExactTarget(
+  bundle: SessionIntentBundle,
+  scope: ExactTabScope,
+  expectedUrl: string,
+): boolean {
+  return (
+    sameExactTabScope(bundle.scope, scope) &&
+    (bundle.current === null ||
+      (sameExactTabScope(bundle.current.scope, scope) &&
+        bundle.current.expectedPage.url === expectedUrl))
+  );
+}
+
+async function exactActiveTabStillMatches(
+  tabId: number,
+  expectedUrl: string,
+): Promise<boolean> {
+  try {
+    const exact = await browser.tabs.get(tabId);
+    const active = (
+      await browser.tabs.query({ active: true, currentWindow: true })
+    )[0];
+    const exactUrl = exact.pendingUrl?.trim() || exact.url?.trim();
+    const activeUrl = active?.pendingUrl?.trim() || active?.url?.trim();
+    return (
+      exact.active !== false &&
+      active?.id === tabId &&
+      active.windowId === exact.windowId &&
+      exactUrl === expectedUrl &&
+      activeUrl === expectedUrl
+    );
+  } catch {
+    return false;
+  }
+}
+
+export async function currentContextPopupData() {
+  const [features, installationId, browserSessionId, capability, pending, tabs] =
+    await Promise.all([
+      resolveContextFeatures(),
+      getOrCreateInstallationId(),
+      getOrCreateBrowserSessionId(),
+      readLocalCapability(),
+      readPendingContextMutations(),
+      browser.tabs.query({ active: true, currentWindow: true }),
+    ]);
+  const tab = tabs[0];
+  const url = tab?.pendingUrl?.trim() || tab?.url?.trim();
+  let activeTab =
+    tab?.id === undefined || !url || !isContextEligibleUrl(url)
+      ? null
+      : { id: tab.id, title: tab.title?.trim() || url, url };
+  let pairingRequired = capability === undefined;
+  let sessionIntent;
+  let mutationTarget:
+    | { expectedUrl: string; scope: ExactTabScope }
+    | undefined;
+  if (features.context && !pairingRequired && activeTab !== null) {
+    try {
+      const synchronized = await snapshotAndExactActiveTab();
+      await postSnapshot(synchronized.snapshot);
+      activeTab = {
+        id: synchronized.active.id,
+        title: synchronized.active.title,
+        url: synchronized.active.expectedUrl,
+      };
+      const scope = {
+        browserSessionId: synchronized.browserSessionId,
+        browserTabId: synchronized.active.id,
+        installationId: synchronized.installationId,
+      };
+      mutationTarget = {
+        expectedUrl: synchronized.active.expectedUrl,
+        scope,
+      };
+      const bundle = await fetchSessionIntentBundle(scope);
+      if (
+        bundleMatchesExactTarget(
+          bundle,
+          scope,
+          synchronized.active.expectedUrl,
+        ) &&
+        (await exactActiveTabStillMatches(
+          synchronized.active.id,
+          synchronized.active.expectedUrl,
+        ))
+      ) {
+        sessionIntent = bundle;
+      } else {
+        activeTab = null;
+        mutationTarget = undefined;
+      }
+    } catch (error) {
+      if (error instanceof PairingRequiredError) pairingRequired = true;
+      // Network/read failures leave the form and durable queue usable. The
+      // next successful refresh restores current/history from the ledger.
+    }
+  }
+  return {
+    activeTab,
+    browserSessionId,
+    contextEnabled: features.context,
+    installationId,
+    ...(mutationTarget === undefined ? {} : { mutationTarget }),
+    pairingRequired,
+    pendingMutationCount: pending.length,
+    ...(pending[0]?.lastError === undefined
+      ? {}
+      : { pendingMutationError: pending[0].lastError }),
+    ...(pending[0]?.lastError === "Page changed; review required"
+      ? { pendingMutationHeadId: pending[0].id }
+      : {}),
+    ...(sessionIntent === undefined ? {} : { sessionIntent }),
+  };
+}
+
+async function flushContextMutationsUnlocked() {
+  const pending = await readPendingContextMutations();
+  if (pending.length === 0) {
+    return { pairingRequired: false, remaining: pending, sent: 0 };
+  }
+  try {
+    if (!(await resolveContextFeatures()).context) {
+      return { pairingRequired: false, remaining: pending, sent: 0 };
+    }
+  } catch {
+    // Feature discovery shares the server's availability boundary. Preserve the
+    // durable queue without blocking unrelated background initialization.
+    return { pairingRequired: false, remaining: pending, sent: 0 };
+  }
+  return drainPendingContextMutations(
+    pending,
+    writePendingContextMutations,
+    deliverPendingContextMutationWithFreshSnapshot,
+  );
+}
+
+export function flushContextMutations() {
+  return serializeContextMutation(flushContextMutationsUnlocked);
+}
+
+async function requireContextFeature(): Promise<void> {
+  if (!(await resolveContextFeatures()).context) {
+    throw new Error("Personal context is unavailable.");
+  }
+}
+
+function isContextEligibleUrl(value: string): boolean {
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export async function snapshotAndExactActiveTab() {
+  const [browserIdentifier, installationId, browserSessionId] =
+    await Promise.all([
+      getBrowserIdentifier(),
+      getOrCreateInstallationId(),
+      getOrCreateBrowserSessionId(),
+    ]);
+  if (browserIdentifier === undefined) throw new Error(IDENTITY_REQUIRED_ERROR);
+  const activeTabs = await browser.tabs.query({ active: true, currentWindow: true });
+  const selected = activeTabs[0];
+  if (selected?.id === undefined) {
+    throw new Error("The current tab cannot store personal context.");
+  }
+  const tabs = await browser.tabs.query({});
+  // Re-read the exact native tab after collecting the snapshot. If navigation
+  // won the race, the final URL is used in both the snapshot and command.
+  const active = await browser.tabs.get(selected.id);
+  const expectedUrl = active?.pendingUrl?.trim() || active?.url?.trim();
+  const finalActiveTabs = await browser.tabs.query({
+    active: true,
+    currentWindow: true,
+  });
+  const finalActive = finalActiveTabs[0];
+  const finalUrl = finalActive?.pendingUrl?.trim() || finalActive?.url?.trim();
+  if (
+    active.id === undefined ||
+    active.active === false ||
+    finalActive?.id !== active.id ||
+    finalActive.windowId !== active.windowId ||
+    finalUrl !== expectedUrl ||
+    !expectedUrl ||
+    !isContextEligibleUrl(expectedUrl)
+  ) {
+    throw new Error("The current tab cannot store personal context.");
+  }
+  const snapshotTabs = tabs.map((tab) => (tab.id === active.id ? active : tab));
+  return {
+    active: {
+      id: active.id,
+      expectedUrl,
+      title: active.title?.trim() || expectedUrl,
+    },
+    browserSessionId,
+    installationId,
+    snapshot: buildSnapshot(
+      browserIdentifier,
+      installationId,
+      browserSessionId,
+      snapshotTabs,
+    ),
+  };
+}
+
+function contextMutationScope(item: PendingContextMutation) {
+  if (item.kind === "page-context") return item.command.scope;
+  return item.command.scope;
+}
+
+function lifecycleTargetMatchesSnapshot(item: PendingContextMutation): boolean {
+  if (item.kind !== "session-intent" || item.command.kind === "set") return true;
+  const exact = item.snapshot.tabs.find(
+    ({ tabId }) => tabId === item.command.scope.browserTabId,
+  );
+  return exact?.url === item.command.expectedPage.url;
+}
+
+async function lifecycleTargetStillMatches(
+  item: PendingContextMutation,
+): Promise<void> {
+  if (item.kind !== "session-intent" || item.command.kind === "set") return;
+  if (!lifecycleTargetMatchesSnapshot(item)) {
+    throw new StaleContextMutationError();
+  }
+  try {
+    const exact = await browser.tabs.get(item.command.scope.browserTabId);
+    const url = exact.pendingUrl?.trim() || exact.url?.trim();
+    if (url === item.command.expectedPage.url) return;
+  } catch {
+    // A closed exact tab is stale in the same way as a navigated one.
+  }
+  throw new StaleContextMutationError();
+}
+
+export async function refreshPendingContextMutationSnapshot(
+  item: PendingContextMutation,
+): Promise<PendingContextMutation> {
+  const [browserIdentifier, installationId, browserSessionId, listedTabs] =
+    await Promise.all([
+      getBrowserIdentifier(),
+      getOrCreateInstallationId(),
+      getOrCreateBrowserSessionId(),
+      browser.tabs.query({}),
+    ]);
+  if (browserIdentifier === undefined) throw new Error(IDENTITY_REQUIRED_ERROR);
+  const scope = contextMutationScope(item);
+  if (
+    item.snapshot.installationId !== installationId ||
+    item.snapshot.browserSessionId !== browserSessionId ||
+    (scope !== undefined &&
+      (scope.installationId !== installationId ||
+        scope.browserSessionId !== browserSessionId))
+  ) {
+    throw new Error("That context mutation belongs to an expired browser session.");
+  }
+  let tabs = listedTabs;
+  if (scope !== undefined) {
+    try {
+      const exact = await browser.tabs.get(scope.browserTabId);
+      tabs = listedTabs.some(({ id }) => id === scope.browserTabId)
+        ? listedTabs.map((tab) =>
+            tab.id === scope.browserTabId ? exact : tab,
+          )
+        : [...listedTabs, exact];
+    } catch {
+      tabs = listedTabs.filter(({ id }) => id !== scope.browserTabId);
+    }
+  }
+  return {
+    ...item,
+    snapshot: buildSnapshot(
+      browserIdentifier,
+      installationId,
+      browserSessionId,
+      tabs,
+    ),
+  };
+}
+
+async function deliverPendingContextMutationWithFreshSnapshot(
+  item: PendingContextMutation,
+): Promise<void> {
+  const refreshed = await refreshPendingContextMutationSnapshot(item);
+  await deliverPendingContextMutation(refreshed, {
+    verifyBeforeCommand: lifecycleTargetStillMatches,
+  });
+}
+
+async function enqueueContextMutation(
+  item: PendingContextMutation,
+): Promise<void> {
+  await serializeContextMutation(async () => {
+    const pending = await readPendingContextMutations();
+    await writePendingContextMutations([...pending, item]);
+    await flushContextMutationsUnlocked();
+  });
 }
 
 const activityRecorder = createActivityRecorder({
@@ -432,7 +796,16 @@ function currentBrowserState(scope: TabCommandScope | undefined) {
 async function executeRelayedTabCommand(
   requestedScope: TabCommandScope,
   relayCommand: TabCommandRelayCommand,
+  metadata: TabCommandRelayExecutionMetadata,
 ): Promise<TabCommandRelayResult> {
+  if (relayCommand.kind === "capture-tab-content") {
+    return exactInstanceCaptureExecutor({
+      ...metadata,
+      requestedScope,
+      target: relayCommand.target,
+    });
+  }
+
   if (relayCommand.kind === "get-browser-state") {
     const currentScope = await currentTabCommandScope();
     if (currentScope === undefined) {
@@ -836,6 +1209,7 @@ async function handleAppRequest(
           browserSessionId,
           commandProtocolVersion: tabCommandRelayProtocolVersion,
           controlWindowId: controlWindowId as number,
+          extensionOrigin: extensionOrigin(),
           installationId,
           pendingUndos,
           windows,
@@ -1015,6 +1389,167 @@ export async function handleMessage(
         return captureContent("current");
       case "tabhub:capture-all":
         return captureContent("all");
+      case "tabhub:context-features":
+      case "tabhub:context-current":
+        return {
+          context: await currentContextPopupData(),
+          ok: true,
+          status: await getStatus(),
+        };
+      case "tabhub:context-pair": {
+        await requireContextFeature();
+        const installationId = await getOrCreateInstallationId();
+        await consumePairingChallenge({
+          challengeId: message.challengeId,
+          code: message.code,
+          installationId,
+        });
+        await flushContextMutations();
+        return {
+          context: await currentContextPopupData(),
+          ok: true,
+          status: await getStatus(),
+        };
+      }
+      case "tabhub:context-discard-stale": {
+        await requireContextFeature();
+        await serializeContextMutation(() =>
+          discardStalePendingContextMutationHead(message.queueHeadId, {
+            send: deliverPendingContextMutationWithFreshSnapshot,
+          }),
+        );
+        return {
+          context: await currentContextPopupData(),
+          ok: true,
+          status: await getStatus(),
+        };
+      }
+      case "tabhub:context-save": {
+        await requireContextFeature();
+        const current = await snapshotAndExactActiveTab();
+        const currentScope = {
+          browserSessionId: current.browserSessionId,
+          browserTabId: current.active.id,
+          installationId: current.installationId,
+        };
+        if (
+          !sameExactTabScope(message.targetScope, currentScope) ||
+          message.expectedUrl !== current.active.expectedUrl ||
+          !(await exactActiveTabStillMatches(
+            current.active.id,
+            current.active.expectedUrl,
+          ))
+        ) {
+          throw new StaleContextMutationError();
+        }
+        const common = {
+          body: message.body,
+          expectedUrl: message.expectedUrl,
+          idempotencyKey: message.idempotencyKey,
+          kind: "append" as const,
+          visibility: message.visibility,
+        };
+        const item =
+          message.scope === "page"
+            ? createPendingContextMutation({
+                command: {
+                  ...common,
+                  entryKind: message.entryKind,
+                  scope: {
+                    ...message.targetScope,
+                  },
+                },
+                kind: "page-context",
+                snapshot: current.snapshot,
+              })
+            : createPendingContextMutation({
+                command: {
+                  body: message.body,
+                  expectedUrl: current.active.expectedUrl,
+                  idempotencyKey: message.idempotencyKey,
+                  kind: "set",
+                  scope: {
+                    ...message.targetScope,
+                  },
+                  visibility: message.visibility,
+                },
+                kind: "session-intent",
+                snapshot: current.snapshot,
+              });
+        await enqueueContextMutation(item);
+        return {
+          context: await currentContextPopupData(),
+          ok: true,
+          status: await getStatus(),
+        };
+      }
+      case "tabhub:context-intent-action": {
+        await requireContextFeature();
+        const current = await snapshotAndExactActiveTab();
+        const scope = {
+          browserSessionId: current.browserSessionId,
+          browserTabId: current.active.id,
+          installationId: current.installationId,
+        };
+        if (
+          !sameExactTabScope(message.scope, scope) ||
+          message.expectedPage.url !== current.active.expectedUrl
+        ) {
+          throw new StaleContextMutationError();
+        }
+        await postSnapshot(current.snapshot);
+        const bundle = await fetchSessionIntentBundle(scope);
+        const intent = bundle.current;
+        if (
+          !bundleMatchesExactTarget(
+            bundle,
+            scope,
+            current.active.expectedUrl,
+          ) ||
+          intent === null ||
+          intent.id !== message.intentId ||
+          !sameExpectedPage(intent.expectedPage, message.expectedPage)
+        ) {
+          throw new StaleContextMutationError();
+        }
+        if (
+          !(await exactActiveTabStillMatches(
+            current.active.id,
+            current.active.expectedUrl,
+          ))
+        ) {
+          throw new StaleContextMutationError();
+        }
+        const command =
+          message.kind === "archive"
+            ? {
+                expectedPage: message.expectedPage,
+                idempotencyKey: message.idempotencyKey,
+                intentId: message.intentId,
+                kind: "archive" as const,
+                scope: message.scope,
+              }
+            : {
+                contextKind: message.contextKind,
+                expectedPage: message.expectedPage,
+                idempotencyKey: message.idempotencyKey,
+                intentId: message.intentId,
+                kind: "promote" as const,
+                scope: message.scope,
+              };
+        await enqueueContextMutation(
+          createPendingContextMutation({
+            command,
+            kind: "session-intent",
+            snapshot: current.snapshot,
+          }),
+        );
+        return {
+          context: await currentContextPopupData(),
+          ok: true,
+          status: await getStatus(),
+        };
+      }
       case "tabhub:browser-changed": {
         try {
           await changeBrowserIdentity(message.browser);
@@ -1085,11 +1620,15 @@ async function ensureActivityScriptsForOpenTabs(): Promise<void> {
 }
 
 async function initializeWorker(): Promise<void> {
+  // Credentials and queued local-only context must not be readable by content
+  // scripts, including the bridge that runs alongside arbitrary page code.
+  await restrictLocalStorageToTrustedContexts();
   // Resolve the conservative activity gate before WebSocket/HTTP startup.
   await initializeMachineActivity();
   tabCommandRelayAgent.start();
   await ensureAlarms();
   await flushPending();
+  await flushContextMutations();
   await captureAndSync();
   await observeBrowserActivity();
 }
@@ -1134,9 +1673,11 @@ export default defineBackground(() => {
         console.error("TabHub periodic snapshot failed", error);
       });
     } else if (alarm.name === RETRY_ALARM_NAME) {
-      void flushPending().catch((error: unknown) => {
-        console.error("TabHub pending item retry failed", error);
-      });
+      void Promise.all([flushPending(), flushContextMutations()]).catch(
+        (error: unknown) => {
+          console.error("TabHub pending item retry failed", error);
+        },
+      );
     }
   });
 

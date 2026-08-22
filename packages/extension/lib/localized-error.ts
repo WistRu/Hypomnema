@@ -1,10 +1,13 @@
 export type LocalizedExtensionError = {
   messageName:
     | "extensionErrorContentUpload"
+    | "extensionErrorContextQueueChanged"
+    | "extensionErrorContextQueueCorrupted"
     | "extensionErrorOfflineQueueFull"
     | "extensionErrorSnapshotUpload"
     | "popupActionFailed"
-    | "popupChooseBrowserIdentity";
+    | "popupChooseBrowserIdentity"
+    | "popupContextStaleQueued";
   substitutions?: string[];
 };
 
@@ -33,6 +36,21 @@ export function localizedExtensionError(
 
   if (message.startsWith("TabHub's offline queue is full")) {
     return { messageName: "extensionErrorOfflineQueueFull" };
+  }
+
+  if (
+    message ===
+    "Personal-context queue is corrupted; no later mutations were sent"
+  ) {
+    return { messageName: "extensionErrorContextQueueCorrupted" };
+  }
+
+  if (message === "The queued context changed; review it again") {
+    return { messageName: "extensionErrorContextQueueChanged" };
+  }
+
+  if (message === "Page changed; review required") {
+    return { messageName: "popupContextStaleQueued" };
   }
 
   return { messageName: "popupActionFailed" };

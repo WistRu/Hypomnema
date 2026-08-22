@@ -1,13 +1,22 @@
 import type Database from "better-sqlite3";
 
 import type {
+  ShareableContextBundle,
+  ShareableContextEntry,
   SummaryDepth,
   SummaryEnqueueResponse,
   SummaryJob,
   SummaryJobResult,
 } from "@tabhub/shared";
 
+import {
+  normalizeAiJobClaimBoundary,
+  prepareAiJobRuntimeClaimBoundary,
+  type AiJobClaimBoundary,
+} from "./ai-job-runtime-state.js";
+
 export interface QueueSummaryOptions {
+  expectedContentRevision?: number;
   maxAttempts: number;
   requestedBy: "user" | "agent";
   requestedModel: string;
@@ -20,11 +29,17 @@ export interface ClaimedSummaryJob {
   attempts: number;
   maxAttempts: number;
   attemptId: number;
+  requestedBy: "user" | "agent";
   requestedModel: string;
   sourceContentRevision: number;
   title: string | null;
   url: string;
   text: string | null;
+  context?: readonly ShareableContextEntry[];
+}
+
+export interface SummaryCatalogOptions {
+  readShareableContext?: (logicalPageId: number) => ShareableContextBundle;
 }
 
 export interface SummaryCatalog {
@@ -35,7 +50,10 @@ export interface SummaryCatalog {
   ): SummaryEnqueueResponse;
   getJob(id: number): SummaryJob | undefined;
   recoverInterrupted(): number;
-  claimNext(dailyLimit: number): ClaimedSummaryJob | undefined;
+  claimNext(
+    dailyLimit: number,
+    claimBoundary?: AiJobClaimBoundary,
+  ): ClaimedSummaryJob | undefined;
   complete(job: ClaimedSummaryJob, result: SummaryJobResult): boolean;
   fail(
     job: ClaimedSummaryJob,
@@ -53,12 +71,38 @@ export class SummaryTabNotFoundError extends Error {
   }
 }
 
+function contextForProvider(
+  bundle: ShareableContextBundle,
+): readonly ShareableContextEntry[] {
+  return bundle.currentEntries.filter(
+    (entry) =>
+      entry.state === "active" &&
+      (entry.provenance.actor !== "agent" ||
+        entry.reviewVerdict === "accepted"),
+  );
+}
+
 export class SummaryContentMissingError extends Error {
   readonly code = "TAB_CONTENT_MISSING";
 
   constructor(readonly tabId: number) {
     super(`Tab ${tabId} has no captured text to summarize`);
     this.name = "SummaryContentMissingError";
+  }
+}
+
+export class SummaryContentRevisionMismatchError extends Error {
+  readonly code = "TAB_CONTENT_REVISION_MISMATCH";
+
+  constructor(
+    readonly tabId: number,
+    readonly expectedContentRevision: number,
+    readonly currentContentRevision: number | null,
+  ) {
+    super(
+      `Tab ${tabId} content revision ${String(currentContentRevision)} does not match expected revision ${expectedContentRevision}`,
+    );
+    this.name = "SummaryContentRevisionMismatchError";
   }
 }
 
@@ -83,6 +127,8 @@ interface CountRow {
 interface SummaryJobRow {
   id: number;
   tab_id: number;
+  source_content_revision: number;
+  current_content_revision: number | null;
   depth: SummaryDepth;
   status: SummaryJob["status"];
   attempts: number;
@@ -109,9 +155,11 @@ interface ClaimedSummaryJobRow {
   url: string;
   text: string | null;
   extracted_at: string | null;
+  requested_by: "user" | "agent";
   requested_model: string;
   source_content_revision: number;
   current_content_revision: number | null;
+  logical_page_id: number;
 }
 
 function mapJob(row: SummaryJobRow): SummaryJob {
@@ -125,6 +173,10 @@ function mapJob(row: SummaryJobRow): SummaryJob {
   return {
     id: row.id,
     tabId: row.tab_id,
+    sourceContentRevision: row.source_content_revision,
+    currentContentRevision: row.current_content_revision,
+    contentRevisionMatches:
+      row.current_content_revision === row.source_content_revision,
     depth: row.depth,
     status: row.status,
     attempts: row.attempts,
@@ -159,7 +211,9 @@ function utcDayBounds(now: Date): { start: string; end: string } {
 export function createSummaryCatalog(
   connection: Database.Database,
   clock: () => Date = () => new Date(),
+  options: SummaryCatalogOptions = {},
 ): SummaryCatalog {
+  const runtimeClaimBoundary = prepareAiJobRuntimeClaimBoundary(connection);
   const selectTabContent = connection.prepare(`
     SELECT tabs.id, contents.text, contents.content_revision
     FROM tabs
@@ -189,11 +243,15 @@ export function createSummaryCatalog(
   `);
   const selectJob = connection.prepare(`
     SELECT
-      id, tab_id, depth, status, attempts, max_attempts, available_at,
-      created_at, started_at, completed_at, last_error, result_summary,
-      result_model, input_tokens, output_tokens, cost_usd
+      jobs.id, jobs.tab_id, jobs.source_content_revision,
+      contents.content_revision AS current_content_revision,
+      jobs.depth, jobs.status, jobs.attempts, jobs.max_attempts,
+      jobs.available_at, jobs.created_at, jobs.started_at, jobs.completed_at,
+      jobs.last_error, jobs.result_summary, jobs.result_model,
+      jobs.input_tokens, jobs.output_tokens, jobs.cost_usd
     FROM jobs
-    WHERE id = ? AND kind = 'summary'
+    LEFT JOIN contents ON contents.tab_id = jobs.tab_id
+    WHERE jobs.id = ? AND jobs.kind = 'summary'
   `);
   const selectNextJob = connection.prepare(`
     SELECT
@@ -206,9 +264,11 @@ export function createSummaryCatalog(
       tabs.url,
       contents.text,
       contents.extracted_at,
+      jobs.requested_by,
       jobs.requested_model,
       jobs.source_content_revision,
       contents.content_revision AS current_content_revision
+      , tabs.logical_page_id
     FROM jobs
     JOIN tabs ON tabs.id = jobs.tab_id
     LEFT JOIN contents ON contents.tab_id = jobs.tab_id
@@ -365,6 +425,16 @@ export function createSummaryCatalog(
       if (tab.content_revision === null) {
         throw new SummaryContentMissingError(tabId);
       }
+      if (
+        options.expectedContentRevision !== undefined &&
+        options.expectedContentRevision !== tab.content_revision
+      ) {
+        throw new SummaryContentRevisionMismatchError(
+          tabId,
+          options.expectedContentRevision,
+          tab.content_revision,
+        );
+      }
 
       const active = selectActiveJob.get(tabId) as ActiveJobRow | undefined;
       if (
@@ -373,7 +443,11 @@ export function createSummaryCatalog(
         active.requested_model === options.requestedModel &&
         active.source_content_revision === tab.content_revision
       ) {
-        return { jobId: active.id, status: active.status };
+        return {
+          jobId: active.id,
+          sourceContentRevision: active.source_content_revision,
+          status: active.status,
+        };
       }
 
       const timestamp = clock().toISOString();
@@ -403,13 +477,18 @@ export function createSummaryCatalog(
       );
       return {
         jobId: Number(result.lastInsertRowid),
+        sourceContentRevision: tab.content_revision,
         status: "queued",
       };
     },
   );
 
   const claimTransaction = connection.transaction(
-    (dailyLimit: number): ClaimedSummaryJob | undefined => {
+    (
+      dailyLimit: number,
+      claimBoundary?: AiJobClaimBoundary,
+    ): ClaimedSummaryJob | undefined => {
+      const normalizedClaimBoundary = normalizeAiJobClaimBoundary(claimBoundary);
       const nowDate = clock();
       const now = nowDate.toISOString();
       const bounds = utcDayBounds(nowDate);
@@ -452,6 +531,7 @@ export function createSummaryCatalog(
           now,
           row.requested_model,
         );
+        runtimeClaimBoundary.advance(normalizedClaimBoundary, now);
 
         return {
           id: row.id,
@@ -460,11 +540,19 @@ export function createSummaryCatalog(
           attempts: attemptNo,
           maxAttempts: row.max_attempts,
           attemptId: Number(attempt.lastInsertRowid),
+          requestedBy: row.requested_by,
           requestedModel: row.requested_model,
           sourceContentRevision: row.source_content_revision,
           title: row.title,
           url: row.url,
           text: row.text,
+          ...(options.readShareableContext === undefined
+            ? {}
+              : {
+                context: contextForProvider(
+                  options.readShareableContext(row.logical_page_id),
+                ),
+              }),
         };
       }
     },
@@ -531,8 +619,8 @@ export function createSummaryCatalog(
       return recoverTransaction();
     },
 
-    claimNext(dailyLimit) {
-      return claimTransaction(dailyLimit);
+    claimNext(dailyLimit, claimBoundary) {
+      return claimTransaction(dailyLimit, claimBoundary);
     },
 
     complete(job, result) {

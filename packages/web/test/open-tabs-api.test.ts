@@ -22,7 +22,9 @@ function instance(instanceId: number, active = false) {
     instanceId,
     canonicalTabId: 7,
     installationId: "chrome-main",
+    browserSessionId: relayScope.browserSessionId,
     browserTabId: instanceId,
+    instanceRevision: 1,
     url: "https://example.com/exact",
     urlNormalized: "https://example.com/exact",
     title: "Exact copy",
@@ -78,6 +80,20 @@ describe("open-tab API", () => {
     );
   });
 
+  it("rejects physical copies bound to a different canonical Library tab", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        items: [{ ...instance(101), canonicalTabId: 8 }],
+        total: 1,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchCanonicalTabInstances(7)).rejects.toThrow(
+      "different Library page",
+    );
+  });
+
   it("lists extension sessions that can receive addressed tab commands", async () => {
     const fetchMock = vi.fn(async () =>
       Response.json({
@@ -100,6 +116,132 @@ describe("open-tab API", () => {
       "/api/tab-command-relay/scopes",
       expect.objectContaining({ headers: { Accept: "application/json" } }),
     );
+  });
+
+  it("accepts a correlated typed exact-capture failure without retrying", async () => {
+    const target = {
+      expectedFirstSeenAt: "2026-08-09T00:00:00.000Z",
+      expectedInstanceRevision: 3,
+      expectedUrl: "https://example.com/exact",
+      instanceId: 11,
+      tabId: 41,
+    };
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        ok: true,
+        requestId: "523e4567-e89b-42d3-a456-426614174000",
+        scope: relayScope,
+        result: {
+          kind: "capture-tab-content",
+          outcome: {
+            failure: {
+              code: "CAPTURE_TAB_NAVIGATED",
+              message: "The selected tab navigated.",
+              recoverable: true,
+            },
+            status: "failed",
+          },
+          target,
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      executeRelayedTabCommand({
+        ...relayScope,
+        command: { kind: "capture-tab-content", target },
+      }),
+    ).resolves.toMatchObject({
+      kind: "capture-tab-content",
+      outcome: { failure: { code: "CAPTURE_TAB_NAVIGATED" }, status: "failed" },
+      target,
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a capture failure for a different exact target as outcome unknown", async () => {
+    const target = {
+      expectedFirstSeenAt: "2026-08-09T00:00:00.000Z",
+      expectedInstanceRevision: 3,
+      expectedUrl: "https://example.com/exact",
+      instanceId: 11,
+      tabId: 41,
+    };
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        ok: true,
+        requestId: "523e4567-e89b-42d3-a456-426614174000",
+        scope: relayScope,
+        result: {
+          kind: "capture-tab-content",
+          outcome: {
+            failure: {
+              code: "CAPTURE_INSTANCE_STALE",
+              message: "The selected tab changed.",
+              recoverable: true,
+            },
+            status: "failed",
+          },
+          target: { ...target, expectedInstanceRevision: 4 },
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await executeRelayedTabCommand({
+      ...relayScope,
+      command: { kind: "capture-tab-content", target },
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(TabCommandRelayClientError);
+    expect(error).toMatchObject({ outcome: "unknown" });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("rejects captured receipt drift as outcome unknown without retrying", async () => {
+    const target = {
+      expectedFirstSeenAt: "2026-08-09T00:00:00.000Z",
+      expectedInstanceRevision: 3,
+      expectedUrl: "https://example.com/exact",
+      instanceId: 11,
+      tabId: 41,
+    };
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        ok: true,
+        requestId: "523e4567-e89b-42d3-a456-426614174000",
+        scope: relayScope,
+        result: {
+          kind: "capture-tab-content",
+          outcome: {
+            receipt: {
+              browserTabId: 99,
+              canonicalTabId: 7,
+              capturedUrl: target.expectedUrl,
+              contentRevision: 2,
+              extractedAt: "2026-08-09T00:02:00.000Z",
+              firstSeenAt: target.expectedFirstSeenAt,
+              instanceId: target.instanceId,
+              instanceRevision: target.expectedInstanceRevision,
+              logicalPageId: 17,
+            },
+            status: "captured",
+          },
+          target,
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const error = await executeRelayedTabCommand({
+      ...relayScope,
+      command: { kind: "capture-tab-content", target },
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(TabCommandRelayClientError);
+    expect(error).toMatchObject({ outcome: "unknown" });
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
   it("routes a duplicate close preview to its owning extension session", async () => {
@@ -461,7 +603,9 @@ describe("open-tab API", () => {
             instanceId: 101,
             canonicalTabId: 7,
             installationId: "chrome-main",
+            browserSessionId: relayScope.browserSessionId,
             browserTabId: 55,
+            instanceRevision: 1,
             url: "https://example.com/exact",
             urlNormalized: "https://example.com/exact",
             title: "Exact copy",

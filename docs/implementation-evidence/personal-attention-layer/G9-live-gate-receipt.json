@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "recordedAt": "2026-08-21T18:14:00+03:00",
+  "status": "BLOCKED_BEFORE_J3_START",
+  "repositoryHead": "40f5297250cfd214d7fbac2639c013228044e56d",
+  "workingTreeCandidate": "dirty_uncommitted_candidate_bound_by_build_and_evidence_hashes",
+  "isolatedRuntime": {
+    "database": ".tmp/personal-attention-layer/g9-isolated-20260821/live-j3-candidate.sqlite",
+    "port": 7797,
+    "pid": 1002236,
+    "health": {
+      "status": "ok",
+      "database": "ok",
+      "schemaVersion": 26
+    },
+    "requestedFeatures": {
+      "resources": true,
+      "research": true,
+      "liveAcquisition": true,
+      "privacyPurge": true
+    },
+    "effectiveFeatures": {
+      "resources": true,
+      "research": true,
+      "liveAcquisition": false,
+      "privacyPurge": true
+    },
+    "pidStopped": true,
+    "portClosedAfterStop": true
+  },
+  "providerReadiness": {
+    "anthropicApiKeyPresentInRepoEnv": false,
+    "anthropicApiKeyPresentInProcessEnv": false,
+    "researchModelPresentInRepoEnv": false,
+    "researchInputPricePresentInRepoEnv": false,
+    "researchOutputPricePresentInRepoEnv": false,
+    "secretValuesRecorded": false
+  },
+  "candidateInventory": {
+    "eligibleByStoredCounts": [
+      {
+        "resourceId": 1,
+        "resourceKey": "platform:youtube",
+        "logicalPageCount": 256,
+        "capturedCount": 1,
+        "missingCount": 255,
+        "usablePublicContentSuccessGuaranteed": false
+      }
+    ],
+    "deterministicFixturePrepared": false,
+    "reason": "R-UAT12-v1 is not yet materialized and the only stored-count candidate is a challenge/SPA-prone platform"
+  },
+  "j3": {
+    "started": false,
+    "publicHttpsAcquisition": "not_run",
+    "immutableHandoff": "not_run",
+    "finalDossier": "not_run",
+    "tabWindowMutationProof": "not_run"
+  },
+  "liveRuntimeTouched": false,
+  "liveDatabaseTouched": false,
+  "browserTouched": false,
+  "verdict": "PENDING_PROVIDER_AND_PUBLIC_FIXTURE"
+}

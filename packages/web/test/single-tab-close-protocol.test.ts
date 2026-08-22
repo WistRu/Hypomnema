@@ -1,4 +1,5 @@
 import {
+  tabCommandRelayPreviousProtocolVersion,
   tabCommandRelayProtocolVersion,
   type TabCommandRelayConnectedScope,
   type TabInstance,
@@ -42,7 +43,10 @@ const legacyDirectProbe: ExtensionProbe = {
 };
 
 function connectedScope(
-  protocolVersion: 3 | typeof tabCommandRelayProtocolVersion,
+  protocolVersion:
+    | 3
+    | typeof tabCommandRelayPreviousProtocolVersion
+    | typeof tabCommandRelayProtocolVersion,
   overrides: Partial<TabCommandRelayConnectedScope> = {},
 ): TabCommandRelayConnectedScope {
   return {
@@ -183,7 +187,7 @@ describe("single-tab close relay protocol", () => {
       executeSingleTabCloseForConnectedScopes(
         plan,
         legacyDirectProbe,
-        [connectedScope(tabCommandRelayProtocolVersion)],
+        [connectedScope(tabCommandRelayPreviousProtocolVersion)],
         execute,
       ),
     ).resolves.toMatchObject({ kind: "close", succeededTabIds: [41] });
@@ -195,7 +199,7 @@ describe("single-tab close relay protocol", () => {
       browserSessionId: LEGACY_SESSION,
       installationId: LEGACY_INSTALLATION,
     });
-    const currentScope = connectedScope(tabCommandRelayProtocolVersion);
+    const currentScope = connectedScope(tabCommandRelayPreviousProtocolVersion);
 
     const selection = canonicalSingleTabCloseSelection(
       [
@@ -227,7 +231,7 @@ describe("single-tab close relay protocol", () => {
   });
 
   it("prefers a v4 relay over a matching legacy direct probe", () => {
-    const currentScope = connectedScope(tabCommandRelayProtocolVersion, {
+    const currentScope = connectedScope(tabCommandRelayPreviousProtocolVersion, {
       browserSessionId: LEGACY_SESSION,
       installationId: LEGACY_INSTALLATION,
     });

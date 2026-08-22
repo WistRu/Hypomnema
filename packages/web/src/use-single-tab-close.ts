@@ -1,6 +1,6 @@
 import {
+  supportsExactSingleClose,
   tabCommandRelayLegacyProtocolVersion,
-  tabCommandRelayProtocolVersion,
   tabCommandScopeSchema,
   type TabCommandRelayConnectedScope,
   type TabInstance,
@@ -121,12 +121,13 @@ function directProbeSupportsSingleClose(
     installationId: probe.installationId,
   };
   return (
-    (probe.commandProtocolVersion ?? tabCommandRelayLegacyProtocolVersion) ===
-      tabCommandRelayProtocolVersion ||
+    supportsExactSingleClose(
+      probe.commandProtocolVersion ?? tabCommandRelayLegacyProtocolVersion,
+    ) ||
     connectedScopes.some(
       (scope) =>
         sameScope(scope, probeScope) &&
-        scope.protocolVersion === tabCommandRelayProtocolVersion,
+        supportsExactSingleClose(scope.protocolVersion),
     )
   );
 }
@@ -152,8 +153,7 @@ export function canonicalSingleTabCloseSelection(
     directProbe,
     translate,
     connectedScopes.filter(
-      ({ protocolVersion }) =>
-        protocolVersion === tabCommandRelayProtocolVersion,
+      ({ protocolVersion }) => supportsExactSingleClose(protocolVersion),
     ),
   );
   return capableSelection.kind === "ready"
@@ -195,7 +195,7 @@ export async function executeSingleTabCloseForConnectedScopes(
     (selectedDirect !== undefined &&
       !directProbeSupportsSingleClose(selectedDirect, connectedScopes)) ||
     (selectedRelay !== undefined &&
-      selectedRelay.protocolVersion !== tabCommandRelayProtocolVersion)
+      !supportsExactSingleClose(selectedRelay.protocolVersion))
   ) {
     throw new Error(translate(LEGACY_SINGLE_CLOSE_MESSAGE));
   }

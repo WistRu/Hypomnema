@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "recordedAt": "2026-08-21T18:10:00+03:00",
+  "scope": "isolated_schema26_migration_and_feature_off_rollback_smoke",
+  "repositoryHead": "40f5297250cfd214d7fbac2639c013228044e56d",
+  "workingTreeCandidate": "dirty_uncommitted_candidate_bound_by_artifact_hashes",
+  "liveRuntimeTouched": false,
+  "liveDatabaseTouched": false,
+  "browserTouched": false,
+  "migration": {
+    "sourceArtifact": ".tmp/personal-attention-layer/g9-isolated-20260821/schema24-source-copy.sqlite",
+    "sourceSchemaVersion": 24,
+    "sourceSha256": "c7752633c8186a0d3ce75700bc4eb469fb3054e61469081488ad48fd6e1dd601",
+    "migratedArtifact": ".tmp/personal-attention-layer/g9-isolated-20260821/schema26-migrated.sqlite",
+    "migratedSchemaVersion": 26,
+    "migratedSha256": "92edc71be6bfc0967b5d47f3e7bd910d5189f0b1f340741ea18b97f31588e900",
+    "freshArtifact": ".tmp/personal-attention-layer/g9-isolated-20260821/schema26-fresh.sqlite",
+    "freshSchemaVersion": 26,
+    "freshSha256": "e70751eba3b929249d30aca150135d2d5953c7d49baac77bb4a124c618a74167",
+    "sourceTableCount": 122,
+    "schema26TableCount": 166,
+    "existingTableCountChanges": [],
+    "sourceIntegrityCheck": "ok",
+    "migratedIntegrityCheck": "ok",
+    "freshIntegrityCheck": "ok",
+    "sourceForeignKeyViolations": 0,
+    "migratedForeignKeyViolations": 0,
+    "freshForeignKeyViolations": 0
+  },
+  "featureOffRollbackSmoke": {
+    "databaseArtifact": ".tmp/personal-attention-layer/g9-isolated-20260821/rollback-smoke.sqlite",
+    "port": 7796,
+    "pid": 1160972,
+    "pidStopped": true,
+    "portClosedAfterStop": true,
+    "health": {
+      "status": "ok",
+      "database": "ok",
+      "schemaVersion": 26
+    },
+    "featureProjection": {
+      "liveAcquisition": false,
+      "privacyPurge": false,
+      "research": false,
+      "resources": false
+    },
+    "libraryRead": {
+      "route": "GET /api/tabs?limit=1",
+      "statusCode": 200,
+      "total": 1375
+    },
+    "trackedRowsBefore": {
+      "ai_jobs": 0,
+      "live_acquisition_actions": 0,
+      "privacy_purge_intents": 0,
+      "privacy_purge_commands": 0,
+      "research_runs": 0
+    },
+    "trackedRowsAfter": {
+      "ai_jobs": 0,
+      "live_acquisition_actions": 0,
+      "privacy_purge_intents": 0,
+      "privacy_purge_commands": 0,
+      "research_runs": 0
+    },
+    "databaseSha256Before": "92edc71be6bfc0967b5d47f3e7bd910d5189f0b1f340741ea18b97f31588e900",
+    "databaseSha256After": "92edc71be6bfc0967b5d47f3e7bd910d5189f0b1f340741ea18b97f31588e900",
+    "integrityCheckAfter": "ok",
+    "foreignKeyViolationsAfter": 0
+  },
+  "buildArtifacts": {
+    "serverDistSha256": "3ec97b23144fdf2fd1e64a1826ab7c2db23618d4aabca2d527699cc199b5eb71",
+    "foregroundHelperSha256": "16905978a879d89b58291645b163e8ce00b9edbe82523008e21244464e1010a0",
+    "webIndexSha256": "b9b7be767a9c2721ae1a4ebefa18027c3be11ea8314eb40bd16f77ed4341a511",
+    "extensionManifestSha256": "ddc44f832e7c2a6919954a41500ec1fab45cf8fc45a2c108683453cea7be3942"
+  },
+  "verdict": "PASS"
+}

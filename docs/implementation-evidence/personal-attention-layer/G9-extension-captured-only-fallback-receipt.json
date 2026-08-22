@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "recordedAt": "2026-08-21T19:05:00+03:00",
+  "status": "PASS_CAPTURE_AND_PREFLIGHT",
+  "repositoryHead": "40f5297250cfd214d7fbac2639c013228044e56d",
+  "purpose": "prove a typed public-HTTP limitation followed by exact physical-tab capture and a production captured-only preflight without using authenticated user content",
+  "target": {
+    "resourceId": 168,
+    "resourceKey": "domain:compound.finance",
+    "accessClass": "public",
+    "rootUrl": "https://app.compound.finance/",
+    "capturedUrl": "https://app.compound.finance/?market=usdc-mainnet",
+    "logicalPageCount": 2,
+    "capturedPageCount": 1,
+    "missingPageCount": 1,
+    "userAuthenticationUsed": false,
+    "walletConnected": false
+  },
+  "typedLimitation": {
+    "client": "production SafePublicHttpClient",
+    "probePath": ".tmp/personal-attention-layer/g9-isolated-20260821/probe-compound-fallback-http.ts",
+    "probeSha256": "94f5a41fc518d94df39bb20cb20ade372091a4352720a4e4634f60379ee3f103",
+    "results": [
+      {
+        "url": "https://app.compound.finance/",
+        "kind": "blocked",
+        "code": "INSUFFICIENT_PUBLIC_TEXT",
+        "dnsCalls": 1,
+        "connectAttempts": 1,
+        "httpApplicationBytes": 44
+      },
+      {
+        "url": "https://app.compound.finance/?market=usdc-mainnet",
+        "kind": "blocked",
+        "code": "INSUFFICIENT_PUBLIC_TEXT",
+        "dnsCalls": 1,
+        "connectAttempts": 1,
+        "httpApplicationBytes": 64
+      }
+    ]
+  },
+  "navigationFence": {
+    "requestId": "035f8cb2-f681-4f50-b6d6-eae85c655761",
+    "requestedUrl": "https://app.compound.finance/",
+    "observedUrl": "https://app.compound.finance/?market=usdc-mainnet",
+    "outcome": "failed",
+    "code": "CAPTURE_TAB_NAVIGATED",
+    "recoverable": true,
+    "wrongUrlContentPersisted": false
+  },
+  "exactCapture": {
+    "requestId": "bb885dc8-377e-4d78-8eba-f72a56da7218",
+    "browser": "chrome",
+    "browserSessionId": "9d5e465a-bd07-4dbf-a51a-16d123d11ee6",
+    "installationId": "9004c57e-e85e-4982-a296-6f4381845e2b",
+    "protocolVersion": 5,
+    "instanceId": 531,
+    "browserTabId": 492498268,
+    "canonicalTabId": 512,
+    "logicalPageId": 513,
+    "instanceRevision": 2,
+    "firstSeenAt": "2026-08-21T16:02:14.058Z",
+    "capturedUrl": "https://app.compound.finance/?market=usdc-mainnet",
+    "contentRevision": 1,
+    "textCharacters": 2044,
+    "extractedAt": "2026-08-21T16:03:12.137Z",
+    "outcome": "captured"
+  },
+  "capturedOnlyPreflight": {
+    "probePath": ".tmp/personal-attention-layer/g9-isolated-20260821/probe-captured-only-fallback.ts",
+    "probeSha256": "edfbd93fe3228b02083ab10f0e59bb04b76a146944e2f5aef411b868590f6fbc",
+    "selectedTabIds": [512],
+    "coverage": {
+      "discovered": 2,
+      "captured": 1,
+      "eligible": 1,
+      "used": 0,
+      "missing": 1,
+      "failed": 0
+    },
+    "manifestStates": ["captured", "missing"],
+    "approvalFingerprint": "dd09c37ac976c0be8f174e92e916c1353dfdbfa4b469651e1aff4751ccbd06e4",
+    "corpusFingerprint": "bc3516c3c14cf227a4496e40414d6358e25998073522fd6abb967dd75f982b2d",
+    "approvable": true
+  },
+  "tabWindowInvariance": {
+    "baselineWindowCount": 22,
+    "baselineTabCount": 475,
+    "temporaryAgentCreatedTabCount": 2,
+    "temporaryTabsClosedDuringBrowserFinalize": true,
+    "finalWindowCount": 22,
+    "finalTabCount": 475,
+    "netTabMutation": 0,
+    "pendingUndoCount": 0,
+    "finalStateRequestId": "64a521bb-ba9c-4976-af66-98580e9c6dbe"
+  },
+  "runtime": {
+    "isolatedPort": 7718,
+    "isolatedPid": 692804,
+    "workingPort": 7717,
+    "workingPid": 581820,
+    "workingRuntimeTouched": false
+  },
+  "remainingBoundary": {
+    "providerReady": false,
+    "capturedOnlyDossierRun": "not_run",
+    "technicalJ3": "not_run",
+    "userUat": "not_run",
+    "reason": "Anthropic research provider/model/pricing configuration is absent"
+  },
+  "verdict": "EXACT_CAPTURE_AND_CAPTURED_ONLY_PREFLIGHT_PASS_PROVIDER_DOSSIER_PENDING"
+}

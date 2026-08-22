@@ -1,15 +1,20 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import {
   tabCommandRelayClientEnvelopeSchema,
   tabCommandRelayConnectedScopesResponseSchema,
   tabCommandRelayHttpRequestSchema,
   tabCommandRelayHttpResponseSchema,
+  supportsExactCapture,
+  supportsExactSingleClose,
   tabCommandRelayLegacyProtocolVersion,
+  tabCommandRelayPreviousProtocolVersion,
   tabCommandRelayProtocolVersion,
   type TabCommandRelayClientEnvelope,
   type TabCommandRelayCompatibleProtocolVersion,
   type TabCommandRelayConnectedScopesResponse,
+  type ExactInstanceContentIngest,
+  type ExactInstanceContentIngestResponse,
   type TabCommandRelayHttpRequest,
   type TabCommandRelayHttpResponse,
   type TabCommandScope,
@@ -62,10 +67,15 @@ interface ParsedClientEnvelope {
 interface PendingCommand {
   command: TabCommandRelayHttpRequest["command"];
   connection: RelayConnection;
+  executionDeadlineAt: number;
   requestId: string;
   resolve: (response: TabCommandRelayHttpResponse) => void;
   scope: TabCommandScope;
   timer: ReturnType<typeof setTimeout>;
+  exactCapture?: {
+    payloadFingerprint?: string;
+    receipt?: ExactInstanceContentIngestResponse;
+  };
 }
 
 export interface TabCommandRelayOptions {
@@ -82,11 +92,28 @@ export interface TabCommandRelay {
   close(): void;
   dispatch(command: TabCommandRelayHttpRequest): Promise<TabCommandRelayHttpResponse>;
   listConnectedScopes(): TabCommandRelayConnectedScopesResponse;
+  consumeExactInstanceCaptureGrant(
+    input: ExactInstanceContentIngest,
+    write: () => ExactInstanceContentIngestResponse,
+  ): ExactInstanceContentIngestResponse;
+}
+
+export class ExactInstanceCaptureGrantError extends Error {
+  readonly recoverable = true as const;
+
+  constructor(
+    readonly code: "CAPTURE_COMMAND_NOT_ACTIVE" | "CAPTURE_COMMAND_MISMATCH",
+    message: string,
+  ) {
+    super(message);
+    this.name = "ExactInstanceCaptureGrantError";
+  }
 }
 
 export interface TabCommandRelayRouteOptions {
   appOrigins?: readonly string[];
   browserForegroundHandoff?: BrowserForegroundHandoff | undefined;
+  pageSummaryCaptureEnabled?: boolean;
 }
 
 function defaultCommandTimeoutMs(
@@ -131,6 +158,54 @@ function sameScope(left: TabCommandScope, right: TabCommandScope): boolean {
   );
 }
 
+function sameCaptureTarget(
+  left: Extract<TabCommandRelayHttpRequest["command"], {
+    kind: "capture-tab-content";
+  }>["target"],
+  right: Extract<TabCommandRelayHttpRequest["command"], {
+    kind: "capture-tab-content";
+  }>["target"],
+): boolean {
+  return (
+    left.instanceId === right.instanceId &&
+    left.tabId === right.tabId &&
+    left.expectedUrl === right.expectedUrl &&
+    left.expectedInstanceRevision === right.expectedInstanceRevision &&
+    left.expectedFirstSeenAt === right.expectedFirstSeenAt
+  );
+}
+
+function capturePayloadFingerprint(input: ExactInstanceContentIngest): string {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      browser: input.browser,
+      browserSessionId: input.browserSessionId,
+      installationId: input.installationId,
+      target: input.target,
+      observedUrl: input.observedUrl,
+      text: input.text,
+      htmlExcerpt: input.htmlExcerpt,
+    }))
+    .digest("hex");
+}
+
+function sameCaptureReceipt(
+  left: ExactInstanceContentIngestResponse,
+  right: ExactInstanceContentIngestResponse,
+): boolean {
+  return (
+    left.instanceId === right.instanceId &&
+    left.browserTabId === right.browserTabId &&
+    left.canonicalTabId === right.canonicalTabId &&
+    left.logicalPageId === right.logicalPageId &&
+    left.capturedUrl === right.capturedUrl &&
+    left.instanceRevision === right.instanceRevision &&
+    left.firstSeenAt === right.firstSeenAt &&
+    left.contentRevision === right.contentRevision &&
+    left.extractedAt === right.extractedAt
+  );
+}
+
 function parseClientEnvelope(json: unknown): ParsedClientEnvelope | undefined {
   if (typeof json !== "object" || json === null || Array.isArray(json)) {
     return undefined;
@@ -138,6 +213,7 @@ function parseClientEnvelope(json: unknown): ParsedClientEnvelope | undefined {
   const rawVersion = (json as { version?: unknown }).version;
   if (
     rawVersion !== tabCommandRelayLegacyProtocolVersion &&
+    rawVersion !== tabCommandRelayPreviousProtocolVersion &&
     rawVersion !== tabCommandRelayProtocolVersion
   ) {
     return undefined;
@@ -186,10 +262,29 @@ function hasExactTargetPartition(
 function isCorrelatedSuccessfulResult(
   command: TabCommandRelayHttpRequest["command"],
   result: SuccessfulRelayResult,
+  pending?: PendingCommand,
 ): boolean {
   switch (command.kind) {
     case "get-browser-state":
       return result.kind === "get-browser-state";
+    case "capture-tab-content": {
+      if (result.kind !== "capture-tab-content") return false;
+      const targetMatches = sameCaptureTarget(result.target, command.target);
+      if (!targetMatches) return false;
+      if (result.outcome.status === "failed") {
+        return pending?.exactCapture?.receipt === undefined;
+      }
+      const receipt = result.outcome.receipt;
+      return pending?.exactCapture?.receipt !== undefined &&
+        sameCaptureReceipt(pending.exactCapture.receipt, receipt) &&
+        (
+        receipt.instanceId === command.target.instanceId &&
+        receipt.browserTabId === command.target.tabId &&
+        receipt.capturedUrl === command.target.expectedUrl &&
+        receipt.instanceRevision ===
+          command.target.expectedInstanceRevision
+        );
+    }
     case "activate-tab":
       return result.kind === "activate-tab" && result.tabId === command.tabId;
     case "close-preview":
@@ -464,8 +559,15 @@ export function createTabCommandRelay(
     if (
       !sameScope(connection.scope, envelope.scope) ||
       !sameScope(pending.scope, envelope.scope) ||
+      (!envelope.ok &&
+        pending.command.kind === "capture-tab-content" &&
+        pending.exactCapture?.receipt !== undefined) ||
       (envelope.ok &&
-        !isCorrelatedSuccessfulResult(pending.command, envelope.result))
+        !isCorrelatedSuccessfulResult(
+          pending.command,
+          envelope.result,
+          pending,
+        ))
     ) {
       protocolViolation(connection, pending);
       return;
@@ -613,15 +715,22 @@ export function createTabCommandRelay(
           ),
         );
       }
+      const protocolVersion =
+        connection.protocolVersion ?? tabCommandRelayProtocolVersion;
       if (
-        connection.protocolVersion === tabCommandRelayLegacyProtocolVersion &&
-        command.command.kind === "close-preview" &&
-        command.command.intent === "explicit-single"
+        (command.command.kind === "capture-tab-content" &&
+          !supportsExactCapture(protocolVersion)) ||
+        (command.command.kind === "close-preview" &&
+          command.command.intent === "explicit-single" &&
+          !supportsExactSingleClose(protocolVersion))
       ) {
+        const capture = command.command.kind === "capture-tab-content";
         return Promise.resolve(
           relayFailure(
             "EXTENSION_PROTOCOL_UNSUPPORTED",
-            "Reload the updated TabHub extension in that browser before closing tabs with the middle mouse button.",
+            capture
+              ? "Reload the updated TabHub extension in that browser before capturing page content."
+              : "Reload the updated TabHub extension in that browser before closing tabs with the middle mouse button.",
             "not-sent",
           ),
         );
@@ -635,6 +744,10 @@ export function createTabCommandRelay(
         const pending: PendingCommand = {
           command: command.command,
           connection,
+          executionDeadlineAt,
+          ...(command.command.kind === "capture-tab-content"
+            ? { exactCapture: {} }
+            : {}),
           requestId,
           resolve,
           scope,
@@ -655,7 +768,9 @@ export function createTabCommandRelay(
         if (
           !send(connection, {
             command: command.command,
-            executionDeadlineAt,
+            ...(supportsExactCapture(protocolVersion)
+              ? { executionDeadlineAt }
+              : {}),
             requestId,
             scope,
             type: "command",
@@ -675,6 +790,82 @@ export function createTabCommandRelay(
           disconnect(connection, true, 1011, "command send failed");
         }
       });
+    },
+
+    consumeExactInstanceCaptureGrant(input, write) {
+      const pending = pendingCommands.get(input.commandRequestId);
+      if (
+        pending === undefined ||
+        pending.command.kind !== "capture-tab-content" ||
+        pending.exactCapture === undefined
+      ) {
+        throw new ExactInstanceCaptureGrantError(
+          "CAPTURE_COMMAND_NOT_ACTIVE",
+          "The exact-instance capture command is no longer active.",
+        );
+      }
+      if (
+        pending.connection.closed ||
+        pending.connection.socket.readyState !== SOCKET_OPEN
+      ) {
+        finishPending(
+          pending,
+          relayFailure(
+            "EXTENSION_DISCONNECTED",
+            "The browser extension disconnected before returning a receipt.",
+            "unknown",
+            pending.requestId,
+          ),
+        );
+        throw new ExactInstanceCaptureGrantError(
+          "CAPTURE_COMMAND_NOT_ACTIVE",
+          "The exact-instance capture command is no longer active.",
+        );
+      }
+      if (clock().getTime() >= pending.executionDeadlineAt) {
+        finishPending(
+          pending,
+          relayFailure(
+            "COMMAND_TIMEOUT",
+            "The browser command timed out. Its outcome is unknown.",
+            "unknown",
+            pending.requestId,
+          ),
+        );
+        throw new ExactInstanceCaptureGrantError(
+          "CAPTURE_COMMAND_NOT_ACTIVE",
+          "The exact-instance capture command is no longer active.",
+        );
+      }
+      const inputScope: TabCommandScope = {
+        browser: input.browser,
+        browserSessionId: input.browserSessionId,
+        installationId: input.installationId,
+      };
+      if (
+        !sameScope(pending.scope, inputScope) ||
+        !sameCaptureTarget(pending.command.target, input.target)
+      ) {
+        throw new ExactInstanceCaptureGrantError(
+          "CAPTURE_COMMAND_MISMATCH",
+          "The ingest request does not match its exact-instance capture command.",
+        );
+      }
+      const fingerprint = capturePayloadFingerprint(input);
+      if (pending.exactCapture.receipt !== undefined) {
+        if (pending.exactCapture.payloadFingerprint !== fingerprint) {
+          throw new ExactInstanceCaptureGrantError(
+            "CAPTURE_COMMAND_MISMATCH",
+            "A different payload was already ingested for this capture command.",
+          );
+        }
+        return pending.exactCapture.receipt;
+      }
+
+      const receipt = write();
+      pending.exactCapture.payloadFingerprint = fingerprint;
+      pending.exactCapture.receipt = receipt;
+      return receipt;
     },
 
     listConnectedScopes() {
@@ -708,6 +899,7 @@ function statusForRelayResponse(response: TabCommandRelayHttpResponse): number {
     case "SCOPE_OFFLINE":
       return 503;
     case "EXTENSION_PROTOCOL_UNSUPPORTED":
+    case "PAGE_SUMMARY_CAPTURE_UNAVAILABLE":
       return 409;
     case "COMMAND_TIMEOUT":
       return 504;
@@ -765,6 +957,18 @@ export function registerTabCommandRelayRoutes(
           error: "VALIDATION_ERROR",
           issues: parsed.error.issues,
         });
+      }
+
+      if (
+        parsed.data.command.kind === "capture-tab-content" &&
+        options.pageSummaryCaptureEnabled !== true
+      ) {
+        const failure = relayFailure(
+          "PAGE_SUMMARY_CAPTURE_UNAVAILABLE",
+          "Page-summary capture is disabled on this TabHub server.",
+          "not-sent",
+        );
+        return reply.code(statusForRelayResponse(failure)).send(failure);
       }
 
       const response = await relay.dispatch(parsed.data);

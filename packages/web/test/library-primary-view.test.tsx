@@ -14,26 +14,38 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../src/App";
 import { I18nProvider } from "../src/i18n";
 
 const mocks = vi.hoisted(() => ({
   closePhysical: vi.fn(),
+  fetchAllLibraryTabIds: vi.fn(),
+  fetchFeatureFlags: vi.fn(),
   fetchLibraryOpenTabs: vi.fn(),
   fetchRetentionReview: vi.fn(),
+  fetchLocalResourceContext: vi.fn(),
+  fetchResourceDetail: vi.fn(),
+  fetchResources: vi.fn(),
   fetchTabs: vi.fn(),
   fetchTagTree: vi.fn(),
   runPhysical: vi.fn(),
+  setUserImportance: vi.fn(),
 }));
 
 vi.mock("../src/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/api")>()),
+  fetchFeatureFlags: mocks.fetchFeatureFlags,
+  fetchAllLibraryTabIds: mocks.fetchAllLibraryTabIds,
   fetchLibraryOpenTabs: mocks.fetchLibraryOpenTabs,
   fetchRetentionReview: mocks.fetchRetentionReview,
+  fetchLocalResourceContext: mocks.fetchLocalResourceContext,
+  fetchResourceDetail: mocks.fetchResourceDetail,
+  fetchResources: mocks.fetchResources,
   fetchTabs: mocks.fetchTabs,
   fetchTagTree: mocks.fetchTagTree,
+  setUserImportance: mocks.setUserImportance,
 }));
 
 vi.mock("@tanstack/react-virtual", () => ({
@@ -187,12 +199,131 @@ const openTabs: TabListResponse = {
   total: 2,
 };
 
+beforeEach(() => {
+  window.history.replaceState({}, "", "/app/");
+  mocks.fetchFeatureFlags.mockResolvedValue({
+    context: false,
+    logicalImportance: false,
+  });
+  mocks.fetchResources.mockResolvedValue({ items: [], page: 1, pageSize: 100, total: 0 });
+  mocks.fetchAllLibraryTabIds.mockResolvedValue(
+    Object.assign([17, 18], { logicalPageCount: 2 }),
+  );
+  mocks.setUserImportance.mockResolvedValue({});
+});
+
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
 
 describe("Library as the primary workspace", () => {
+  it("shows the protected one-line context preview only when context is enabled", async () => {
+    const contextTabs = {
+      ...openTabs,
+      items: openTabs.items.map((tab, index) => ({
+        ...tab,
+        contextPreview:
+          index === 0
+            ? {
+                actor: "user" as const,
+                body: "Compare the browser implementations before choosing one",
+                entryId: 41,
+                entryKind: "next_action" as const,
+              }
+            : null,
+      })),
+    };
+    mocks.fetchFeatureFlags.mockResolvedValue({
+      context: true,
+      logicalImportance: false,
+    });
+    mocks.fetchTabs.mockResolvedValue(contextTabs);
+    mocks.fetchTagTree.mockResolvedValue(emptyTopics);
+    mocks.fetchLibraryOpenTabs.mockResolvedValue(physicalTabs);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <I18nProvider initialLocale="en">
+          <App />
+        </I18nProvider>
+      </QueryClientProvider>,
+    );
+
+    const preview = await screen.findByText(
+      "Compare the browser implementations before choosing one",
+    );
+    expect(preview.classList.contains("library-context-preview-copy")).toBe(true);
+    expect(
+      view.container.querySelector(".library-context-indicator"),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("note", {
+        name: "Personal context: Compare the browser implementations before choosing one",
+      }),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(mocks.fetchTabs).toHaveBeenLastCalledWith(
+        expect.any(Object),
+        expect.any(AbortSignal),
+        "local",
+      ),
+    );
+    expect(mocks.fetchLibraryOpenTabs).toHaveBeenLastCalledWith(
+      expect.any(Object),
+      expect.any(AbortSignal),
+      "local",
+    );
+
+    queryClient.clear();
+  });
+
+  it("keeps context previews hidden and uses the public list when context is off", async () => {
+    mocks.fetchTabs.mockResolvedValue({
+      ...openTabs,
+      items: openTabs.items.map((tab) => ({
+        ...tab,
+        contextPreview: {
+          actor: "user" as const,
+          body: "must stay hidden",
+          entryId: 42,
+          entryKind: "purpose" as const,
+        },
+      })),
+    });
+    mocks.fetchTagTree.mockResolvedValue(emptyTopics);
+    mocks.fetchLibraryOpenTabs.mockResolvedValue(physicalTabs);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <I18nProvider initialLocale="en">
+          <App />
+        </I18nProvider>
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("Unique page");
+    expect(view.container.querySelector(".library-context-preview")).toBeNull();
+    expect(screen.queryByText("must stay hidden")).toBeNull();
+    expect(mocks.fetchTabs).toHaveBeenLastCalledWith(
+      expect.any(Object),
+      expect.any(AbortSignal),
+    );
+    expect(mocks.fetchLibraryOpenTabs).toHaveBeenLastCalledWith(
+      expect.any(Object),
+      expect.any(AbortSignal),
+      "public",
+    );
+
+    queryClient.clear();
+  });
+
   it("opens Library by default and exposes Graph as the only alternate view", () => {
     mocks.fetchTabs.mockResolvedValue(emptyTabs);
     mocks.fetchTagTree.mockResolvedValue(emptyTopics);
@@ -399,6 +530,215 @@ describe("Library as the primary workspace", () => {
       );
     });
 
+    queryClient.clear();
+  });
+
+  it("rates cross-browser physical copies of one logical page once without changing browser actions", async () => {
+    const personalizedTabs: TabListResponse = {
+      ...openTabs,
+      items: openTabs.items.map((item) => ({
+        ...item,
+        logicalPageId: item.id === 18 ? 801 : 800,
+      })),
+    };
+    const crossBrowserCopies = [
+      { ...physicalTabs[1]!, browser: "chrome" as const },
+      { ...physicalTabs[2]!, browser: "edge" as const,
+        installationId: "323e4567-e89b-42d3-a456-426614174000" },
+    ];
+    mocks.fetchFeatureFlags.mockResolvedValue({
+      context: false,
+      logicalImportance: true,
+      priorityPersonalization: true,
+      priorityReaders: false,
+      priorityShadow: false,
+    });
+    mocks.fetchTabs.mockResolvedValue(personalizedTabs);
+    mocks.fetchTagTree.mockResolvedValue(emptyTopics);
+    mocks.fetchLibraryOpenTabs.mockResolvedValue(crossBrowserCopies);
+    const queryClient = new QueryClient({
+      defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+    });
+    render(<QueryClientProvider client={queryClient}>
+      <I18nProvider initialLocale="en"><App /></I18nProvider>
+    </QueryClientProvider>);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Manage browser tabs" }));
+    const row = screen.getByText("Duplicated page").closest("tr");
+    if (row === null) throw new Error("Missing duplicated logical row");
+    fireEvent.click(within(row).getByRole("checkbox", {
+      name: "Select browser tabs for Duplicated page",
+    }));
+
+    const rating = await screen.findByRole("group", {
+      name: "Set importance for selected logical pages",
+    });
+    expect(screen.getByText("1 logical pages")).toBeTruthy();
+    fireEvent.click(within(rating).getByRole("button", {
+      name: "Set importance to 3 of 3",
+    }));
+    await waitFor(() => expect(mocks.setUserImportance).toHaveBeenCalledWith([18], 3));
+    expect(mocks.setUserImportance).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("group", {
+      name: "Set importance for selected logical pages",
+    })).toBeNull();
+    expect(mocks.runPhysical).not.toHaveBeenCalled();
+    expect(mocks.closePhysical).not.toHaveBeenCalled();
+    queryClient.clear();
+  });
+
+  it("uses the exact all-filtered logical count for canonical bulk importance", async () => {
+    const personalizedTabs: TabListResponse = {
+      ...openTabs,
+      items: openTabs.items.map((item) => ({
+        ...item,
+        logicalPageId: 900,
+      })),
+    };
+    mocks.fetchFeatureFlags.mockResolvedValue({
+      context: false,
+      logicalImportance: true,
+      priorityPersonalization: true,
+      priorityReaders: false,
+      priorityShadow: false,
+    });
+    mocks.fetchTabs.mockResolvedValue(personalizedTabs);
+    mocks.fetchTagTree.mockResolvedValue(emptyTopics);
+    mocks.fetchLibraryOpenTabs.mockResolvedValue(physicalTabs);
+    mocks.fetchAllLibraryTabIds.mockResolvedValue(
+      Object.assign([17, 18], { logicalPageCount: 1 }),
+    );
+    const queryClient = new QueryClient({ defaultOptions: {
+      mutations: { retry: false }, queries: { retry: false },
+    } });
+    render(<QueryClientProvider client={queryClient}>
+      <I18nProvider initialLocale="en"><App /></I18nProvider>
+    </QueryClientProvider>);
+
+    fireEvent.click(await screen.findByRole("radio", { name: "Needs review" }));
+    await waitFor(() => expect(mocks.fetchTabs).toHaveBeenLastCalledWith(
+      expect.objectContaining({ needsReview: true }),
+      expect.any(AbortSignal),
+    ));
+    const allFiltered = screen.getByRole<HTMLButtonElement>("button", {
+      name: "All filtered results",
+    });
+    await waitFor(() => expect(allFiltered.disabled).toBe(false));
+    fireEvent.click(allFiltered);
+    await waitFor(() => expect(mocks.fetchAllLibraryTabIds).toHaveBeenCalled());
+    expect(await screen.findByText("1 logical pages")).toBeTruthy();
+    const rating = screen.getByRole("group", {
+      name: "Set importance for selected logical pages",
+    });
+    fireEvent.click(within(rating).getByRole("button", { name: "Clear" }));
+    await waitFor(() => expect(mocks.setUserImportance).toHaveBeenCalledWith([17, 18], 0));
+    expect(mocks.fetchAllLibraryTabIds).toHaveBeenCalledWith(
+      expect.objectContaining({ needsReview: true }),
+      undefined,
+      "public",
+    );
+    expect(mocks.fetchAllLibraryTabIds.mock.calls[0]?.[0])
+      .not.toHaveProperty("priorityMode");
+    queryClient.clear();
+  });
+
+  it("keeps Topic and Resource as orthogonal Library facets with URL-backed resource history", async () => {
+    const resource = {
+      resource: {
+        id: 7,
+        resourceKey: "platform:youtube",
+        name: "YouTube",
+        kind: "platform" as const,
+        accessClass: "public" as const,
+        lifecycleState: "active" as const,
+        mergedIntoResourceId: null,
+        createdAt: "2026-08-12T10:00:00.000Z",
+        updatedAt: "2026-08-12T10:00:00.000Z",
+      },
+      version: 2,
+      preference: { userEvaluation: null, provenance: null, updatedAt: "2026-08-12T10:00:00.000Z" },
+      counts: { logicalPageCount: 4, browserPageCount: 6, physicalOpenCopyCount: 2 },
+      allTimeActivity: { window: "all" as const, onScreenMs: 12_000, activeUseMs: 4_000, coverageStart: null },
+      topicPaths: ["Work"],
+    };
+    mocks.fetchFeatureFlags.mockResolvedValue({
+      context: false,
+      logicalImportance: false,
+      privacyPurge: true,
+      resources: true,
+    });
+    mocks.fetchTabs.mockResolvedValue(emptyTabs);
+    mocks.fetchLibraryOpenTabs.mockResolvedValue([]);
+    mocks.fetchTagTree.mockResolvedValue({
+      items: [{ id: 1, name: "Work", path: "Work", color: null, tabCount: 4, children: [] }],
+    });
+    mocks.fetchResources.mockResolvedValue({ items: [resource], page: 1, pageSize: 100, total: 1 });
+    mocks.fetchResourceDetail.mockResolvedValue({ ...resource, rulesetVersion: 3, aliases: [] });
+    mocks.fetchLocalResourceContext.mockResolvedValue({
+      context: {
+        subject: { type: "resource", resourceId: 7 },
+        entries: [],
+        currentEntries: [],
+        preview: null,
+      },
+      counts: resource.counts,
+    });
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <I18nProvider initialLocale="en"><App /></I18nProvider>
+      </QueryClientProvider>,
+    );
+
+    await screen.findByTitle("Work");
+    fireEvent.click(screen.getByRole("button", { name: "Work4" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Work4" }).getAttribute("aria-current")).toBe("page"));
+    expect(await screen.findByText("Topic: Work")).toBeTruthy();
+    const facets = screen.getByRole("group", { name: "Library grouping" });
+    fireEvent.click(within(facets).getByRole("button", { name: "Resources" }));
+    fireEvent.click(await screen.findByRole("button", { name: /YouTube/ }));
+
+    expect(screen.getByText("Topic: Work")).toBeTruthy();
+    expect(screen.getByText("Resource: YouTube")).toBeTruthy();
+    expect((await screen.findByRole<HTMLButtonElement>("button", {
+      name: "Delete this resource's research history",
+    })).disabled).toBe(false);
+    expect(window.location.search).toBe("?resource=7");
+    await waitFor(() => expect(mocks.fetchTabs).toHaveBeenCalledWith(
+      expect.objectContaining({ resourceId: 7, tag: "Work" }),
+      expect.any(AbortSignal),
+    ));
+
+    fireEvent.click(screen.getByText("Topic: Work").closest("button")!);
+    expect(screen.queryByText("Topic: Work")).toBeNull();
+    expect(screen.getByText("Resource: YouTube")).toBeTruthy();
+    fireEvent.click(within(facets).getByRole("button", { name: "Topics" }));
+    expect(screen.getAllByRole("heading", { name: "YouTube" }).length).toBeGreaterThan(0);
+
+    window.history.replaceState({}, "", "/app/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+    await waitFor(() => expect(screen.queryByText("Resource: YouTube")).toBeNull());
+    await waitFor(() => expect(mocks.fetchTabs).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ resourceId: 7 }),
+      expect.any(AbortSignal),
+    ));
+    queryClient.clear();
+  });
+
+  it("fails closed to the exact legacy Topic sidebar when the resource feature is missing", async () => {
+    mocks.fetchTabs.mockResolvedValue(emptyTabs);
+    mocks.fetchLibraryOpenTabs.mockResolvedValue([]);
+    mocks.fetchTagTree.mockResolvedValue(emptyTopics);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const rendered = render(
+      <QueryClientProvider client={queryClient}>
+        <I18nProvider initialLocale="en"><App /></I18nProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findByRole("heading", { name: "Topics" });
+    expect(screen.queryByRole("group", { name: "Library grouping" })).toBeNull();
+    expect(rendered.container.querySelector(".facet-sidebar-shell")).toBeNull();
+    expect(mocks.fetchResources).not.toHaveBeenCalled();
     queryClient.clear();
   });
 });

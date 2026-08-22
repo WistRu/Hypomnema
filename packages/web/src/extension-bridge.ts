@@ -1,6 +1,6 @@
 import {
+  tabCommandRelayCompatibleProtocolVersionSchema,
   tabCommandRelayLegacyProtocolVersion,
-  tabCommandRelayProtocolVersion,
   type TabCommandRelayCompatibleProtocolVersion,
 } from "@tabhub/shared";
 
@@ -28,6 +28,7 @@ export interface ExtensionProbeAvailable {
   available: true;
   installationId: string;
   browserSessionId: string;
+  extensionOrigin?: string;
   browser: string | null;
   commandProtocolVersion?: TabCommandRelayCompatibleProtocolVersion;
   controlWindowId: number;
@@ -255,11 +256,10 @@ function parseProbe(value: unknown): ExtensionProbeAvailable {
   const commandProtocolVersion =
     isRecord(value) && value.commandProtocolVersion === undefined
       ? tabCommandRelayLegacyProtocolVersion
-      : isRecord(value) &&
-          (value.commandProtocolVersion ===
-            tabCommandRelayLegacyProtocolVersion ||
-            value.commandProtocolVersion === tabCommandRelayProtocolVersion)
-        ? value.commandProtocolVersion
+      : isRecord(value)
+        ? tabCommandRelayCompatibleProtocolVersionSchema.safeParse(
+            value.commandProtocolVersion,
+          ).data
         : undefined;
   if (
     !isRecord(value) ||
@@ -269,6 +269,7 @@ function parseProbe(value: unknown): ExtensionProbeAvailable {
       "browserSessionId",
       "commandProtocolVersion",
       "controlWindowId",
+      "extensionOrigin",
       "installationId",
       "pendingUndos",
       "windows",
@@ -279,6 +280,9 @@ function parseProbe(value: unknown): ExtensionProbeAvailable {
     !uuidPattern.test(value.browserSessionId) ||
     typeof value.installationId !== "string" ||
     !uuidPattern.test(value.installationId) ||
+    (value.extensionOrigin !== undefined &&
+      (typeof value.extensionOrigin !== "string" ||
+        !/^chrome-extension:\/\/[a-z0-9_-]+$/i.test(value.extensionOrigin))) ||
     (value.browser !== null && !isKnownBrowser(value.browser)) ||
     !isNonNegativeInteger(value.controlWindowId) ||
     !Array.isArray(value.pendingUndos) ||
@@ -295,6 +299,9 @@ function parseProbe(value: unknown): ExtensionProbeAvailable {
     browserSessionId: value.browserSessionId,
     commandProtocolVersion,
     installationId: value.installationId,
+    ...(typeof value.extensionOrigin === "string"
+      ? { extensionOrigin: value.extensionOrigin }
+      : {}),
     browser: value.browser as string | null,
     controlWindowId: value.controlWindowId,
     pendingUndos: value.pendingUndos,

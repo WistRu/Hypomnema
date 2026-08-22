@@ -1,5 +1,6 @@
 import {
   knownBrowserOptions,
+  type ContextPreview,
   type SortDirection,
   type TabImportance,
   type TabInstance,
@@ -24,6 +25,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -33,9 +35,12 @@ import {
   assignTag,
   enqueueShortSummary,
   fetchAllLibraryTabIds,
+  fetchFeatureFlags,
   fetchLibraryOpenTabs,
+  fetchPriorityReadBatch,
   fetchSummaryJob,
   fetchTabs,
+  setUserImportance,
   updateTabStatuses,
   type LibraryTabFilters,
   type OpenFilter,
@@ -78,6 +83,30 @@ import {
 import { TabDrawer } from "./TabDrawer";
 import { TopicPathInput } from "./TopicPathInput";
 import { TopicSidebar, type SelectedTopic } from "./TopicSidebar";
+import { ResourceHeader } from "./ResourceHeader";
+import { LibraryPriorityControls } from "./LibraryPriorityControls";
+import { ManualPriorityRating } from "./ManualPriorityRating";
+import { PersonalPriorityRulesDialog } from "./PersonalPriorityRulesDialog";
+import { ResearchSelectionPanel } from "./ResearchPanel";
+import {
+  applyPrioritySelection,
+  derivePriorityCapabilities,
+  type PriorityListSelection,
+} from "./priority-personalization-model";
+import {
+  resolveCanonicalPrioritySelection,
+  resolvePhysicalPrioritySelection,
+} from "./physical-priority-selection";
+import {
+  pagePriorityKey,
+  PriorityReviewQueue,
+  PriorityShadowSummary,
+  priorityReadMap,
+} from "./PriorityShadow";
+import {
+  ResourceSidebar,
+  type SelectedResource,
+} from "./ResourceSidebar";
 import { useCanonicalTabActivation } from "./use-canonical-tab-activation";
 import { useSingleTabClose } from "./use-single-tab-close";
 
@@ -91,6 +120,14 @@ const columnHelper = createColumnHelper<typeof tableFeatureSet, TabListItem>();
 const CurrentTimeContext = createContext(Date.now());
 type LibrarySelectionMode = "canonical" | "physical";
 type LibraryCollection = "all" | RetentionCollection;
+type SidebarFacet = "topics" | "resources";
+
+function initialResourceSelection(): SelectedResource | null {
+  if (typeof window === "undefined") return null;
+  const value = new URLSearchParams(window.location.search).get("resource");
+  if (value === null || !/^\d+$/.test(value) || Number(value) < 1) return null;
+  return { id: Number(value), name: `#${value}` };
+}
 
 const BROWSER_LABELS: Record<string, string> = {
   chrome: "Chrome",
@@ -249,6 +286,38 @@ function SummaryDisclosure({ summary }: { summary: string }) {
       >
         {expanded ? t("Collapse") : t("Expand")}
       </button>
+    </div>
+  );
+}
+
+function contextPreviewFor(tab: TabListItem): ContextPreview | null {
+  return (
+    tab as TabListItem & { contextPreview?: ContextPreview | null }
+  ).contextPreview ?? null;
+}
+
+function logicalPageIdForPriority(tab: TabListItem): number | null {
+  return Number.isSafeInteger(tab.logicalPageId) && tab.logicalPageId > 0
+    ? tab.logicalPageId
+    : null;
+}
+
+function LibraryContextPreview({ preview }: { preview: ContextPreview }) {
+  const { t } = useI18n();
+  return (
+    <div
+      aria-label={t("Personal context: {context}", { context: preview.body })}
+      className="library-context-preview"
+      role="note"
+    >
+      <svg
+        aria-hidden="true"
+        className="library-context-indicator"
+        viewBox="0 0 16 16"
+      >
+        <path d="M4 2.5h8v11l-4-2.4-4 2.4z" />
+      </svg>
+      <span className="library-context-preview-copy">{preview.body}</span>
     </div>
   );
 }
@@ -436,12 +505,27 @@ export function App() {
   const [openState, setOpenState] = useState<OpenFilter>("all");
   const [status, setStatus] = useState<"all" | TabStatus>("all");
   const [importance, setImportance] = useState<"all" | TabImportance>("all");
+  const [prioritySelection, setPrioritySelection] = useState<PriorityListSelection>({
+    mode: "default",
+    review: "all",
+  });
+  const [rulesDialogOpen, setRulesDialogOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<LibrarySort | null>(null);
   const [selectedTopic, setSelectedTopic] = useState<SelectedTopic | null>(null);
+  const [selectedResource, setSelectedResource] = useState<SelectedResource | null>(
+    initialResourceSelection,
+  );
+  const [sidebarFacet, setSidebarFacet] = useState<SidebarFacet>("topics");
+  const [resourceReviewRequest, setResourceReviewRequest] = useState<{
+    logicalPageId: number;
+    nonce: number;
+  } | null>(null);
   const [currentTime, setCurrentTime] = useState(Date.now());
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+  const [selectedAllLogicalPageCount, setSelectedAllLogicalPageCount] =
+    useState<number | null>(null);
   const [selectionMode, setSelectionMode] =
     useState<LibrarySelectionMode>("canonical");
   const [physicalSelection, setPhysicalSelection] =
@@ -456,15 +540,37 @@ export function App() {
     value as TabStatus,
     t(key),
   ] as const);
+  const featuresQuery = useQuery({
+    queryKey: ["features"],
+    queryFn: ({ signal }) => fetchFeatureFlags(signal),
+    staleTime: 30_000,
+  });
+  const priorityCapabilities = derivePriorityCapabilities(
+    featuresQuery.isSuccess ? featuresQuery.data : undefined,
+  );
+  const activePrioritySelection = applyPrioritySelection(
+    prioritySelection,
+    priorityCapabilities,
+  );
+  useEffect(() => {
+    if (priorityCapabilities.personalization) return;
+    setPrioritySelection({ mode: "default", review: "all" });
+    setRulesDialogOpen(false);
+    setPage(1);
+  }, [priorityCapabilities.personalization]);
   const debouncedSearch = useDebouncedValue(search, 300);
   const q = debouncedSearch.trim();
   const tag = selectedTopic?.path ?? "";
+  const resourcesEnabled = featuresQuery.data?.resources === true;
+  const resourceId = resourcesEnabled ? selectedResource?.id : undefined;
   const libraryFilters: LibraryTabFilters = {
     browser,
     duplicatesOnly,
     importance,
     openState,
     q,
+    ...(resourceId === undefined ? {} : { resourceId }),
+    ...activePrioritySelection,
     status,
     tag,
   };
@@ -472,13 +578,41 @@ export function App() {
   const libraryFilterKeyRef = useRef(libraryFilterKey);
   libraryFilterKeyRef.current = libraryFilterKey;
 
+  const selectResource = useCallback((resource: SelectedResource | null) => {
+    if ((resource?.id ?? null) === (selectedResource?.id ?? null)) return;
+    setSelectedResource(resource);
+    setPage(1);
+    const url = new URL(window.location.href);
+    if (resource === null) url.searchParams.delete("resource");
+    else url.searchParams.set("resource", String(resource.id));
+    window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [selectedResource?.id]);
+  const rememberResourceName = useCallback((resource: SelectedResource) => {
+    setSelectedResource((current) =>
+      current?.id === resource.id && current.name !== resource.name ? resource : current,
+    );
+  }, []);
+
+  useEffect(() => {
+    const restoreResourceFromHistory = () => {
+      const value = new URLSearchParams(window.location.search).get("resource");
+      const id = value !== null && /^\d+$/.test(value) ? Number(value) : 0;
+      setSelectedResource(id > 0 ? { id, name: `#${id}` } : null);
+      if (id > 0) setSidebarFacet("resources");
+      setPage(1);
+    };
+    window.addEventListener("popstate", restoreResourceFromHistory);
+    return () => window.removeEventListener("popstate", restoreResourceFromHistory);
+  }, []);
+
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(Date.now()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setSelectedIds(new Set());
+    setSelectedAllLogicalPageCount(null);
   }, [libraryFilterKey, selectionMode]);
 
   useEffect(() => {
@@ -493,7 +627,7 @@ export function App() {
     filterKey: libraryFilterKey,
     mode: selectionMode,
   });
-  useEffect(() => {
+  useLayoutEffect(() => {
     const nextContext: LibraryPhysicalSelectionContext = {
       filterKey: libraryFilterKey,
       mode: selectionMode,
@@ -508,9 +642,12 @@ export function App() {
     previousPhysicalSelectionContext.current = nextContext;
   }, [libraryFilterKey, selectionMode]);
 
+  const contextEnabled = featuresQuery.data?.context === true;
+  const tabListAccess = contextEnabled ? "local" : "public";
   const tabsQuery = useQuery({
     queryKey: [
       "tabs",
+      ...(tabListAccess === "local" ? [tabListAccess] : []),
       {
         browser,
         duplicatesOnly,
@@ -518,33 +655,44 @@ export function App() {
         openState,
         page,
         q,
+        ...(resourceId === undefined ? {} : { resourceId }),
+        ...activePrioritySelection,
         ...(sort ?? {}),
         status,
         tag,
       },
     ],
-    queryFn: ({ signal }) =>
-      fetchTabs(
-        {
+    queryFn: ({ signal }) => {
+      const filters = {
           browser,
           duplicatesOnly,
           importance,
           openState,
           page,
           q,
+          ...(resourceId === undefined ? {} : { resourceId }),
+          ...activePrioritySelection,
           ...(sort ?? {}),
           status,
           tag,
-        },
-        signal,
-      ),
+        };
+      return contextEnabled
+        ? fetchTabs(filters, signal, "local")
+        : fetchTabs(filters, signal);
+    },
     refetchInterval: view === "library" ? 15_000 : false,
     refetchOnWindowFocus: view === "library" ? "always" : false,
   });
   const libraryOpenTabsQuery = useQuery({
     enabled: view === "library",
-    queryKey: ["tab-instances", "library", libraryFilters],
-    queryFn: ({ signal }) => fetchLibraryOpenTabs(libraryFilters, signal),
+    queryKey: [
+      "tab-instances",
+      "library",
+      ...(tabListAccess === "local" ? [tabListAccess] : []),
+      libraryFilters,
+    ],
+    queryFn: ({ signal }) =>
+      fetchLibraryOpenTabs(libraryFilters, signal, tabListAccess),
     refetchInterval: view === "library" ? 15_000 : false,
     refetchOnWindowFocus: view === "library" ? "always" : false,
   });
@@ -561,10 +709,11 @@ export function App() {
   }, [libraryOpenTabsQuery.data, libraryOpenTabsQuery.isError]);
   const selectAllLibraryMutation = useMutation({
     mutationFn: ({ filters }: { filters: LibraryTabFilters; filterKey: string }) =>
-      fetchAllLibraryTabIds(filters),
+      fetchAllLibraryTabIds(filters, undefined, tabListAccess),
     onSuccess: (ids, { filterKey }) => {
       if (filterKey === libraryFilterKeyRef.current) {
         setSelectedIds(new Set(ids));
+        setSelectedAllLogicalPageCount(ids.logicalPageCount);
       }
     },
   });
@@ -601,8 +750,75 @@ export function App() {
       ]);
     },
   });
+  const importanceMutation = useMutation({
+    mutationFn: (input: { readonly ids: readonly number[];
+      readonly value: 1 | 2 | 3 | null;
+      readonly clearSelection: "canonical" | "physical" | null }) =>
+      setUserImportance([...new Set(input.ids)], (input.value ?? 0) as TabImportance),
+    onSuccess: async (_result, input) => {
+      if (input.clearSelection === "canonical") {
+        setSelectedIds(new Set());
+        setSelectedAllLogicalPageCount(null);
+      } else if (input.clearSelection === "physical") {
+        setPhysicalSelection(new Map());
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["tabs"] }),
+        queryClient.invalidateQueries({ queryKey: ["tab-instances", "library"] }),
+        queryClient.invalidateQueries({ queryKey: ["logical-page"] }),
+        queryClient.invalidateQueries({ queryKey: ["graph"] }),
+      ]);
+    },
+  });
 
   const tabs = tabsQuery.data?.items ?? EMPTY_TABS;
+  const knownLogicalPageByTabId = useRef(new Map<number, number>());
+  for (const tab of tabs) {
+    const logicalPageId = logicalPageIdForPriority(tab);
+    if (logicalPageId !== null) knownLogicalPageByTabId.current.set(tab.id, logicalPageId);
+  }
+  const resolvedCanonicalPrioritySelection = resolveCanonicalPrioritySelection(
+    [...selectedIds],
+    knownLogicalPageByTabId.current,
+  );
+  const canonicalPrioritySelection = selectedAllLogicalPageCount === null
+    ? resolvedCanonicalPrioritySelection
+    : { kind: "ready" as const, canonicalTabIds: [...selectedIds],
+        logicalPageCount: selectedAllLogicalPageCount };
+  const priorityShadowEnabled =
+    priorityCapabilities.priorityReadEnabled;
+  const visiblePrioritySubjects = useMemo(() => {
+    const seen = new Set<number>();
+    const subjects: Array<{ type: "page"; logicalPageId: number }> = [];
+    for (const tab of tabs) {
+      const logicalPageId = logicalPageIdForPriority(tab);
+      if (logicalPageId === null || seen.has(logicalPageId)) continue;
+      seen.add(logicalPageId);
+      subjects.push({ type: "page", logicalPageId });
+    }
+    return subjects;
+  }, [tabs]);
+  const priorityReadsQuery = useQuery({
+    enabled:
+      priorityShadowEnabled &&
+      view === "library" &&
+      libraryCollection === "all" &&
+      visiblePrioritySubjects.length > 0,
+    queryKey: [
+      "priority",
+      "shadow",
+      "library-page",
+      visiblePrioritySubjects.map(({ logicalPageId }) => logicalPageId),
+    ],
+    queryFn: ({ signal }) => fetchPriorityReadBatch(visiblePrioritySubjects, signal),
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: "always",
+    retry: false,
+  });
+  const priorityReads = useMemo(
+    () => priorityReadMap(priorityReadsQuery.isSuccess ? priorityReadsQuery.data : []),
+    [priorityReadsQuery.data, priorityReadsQuery.isSuccess],
+  );
   const libraryPhysicalResolutionAvailable =
     libraryOpenTabsQuery.data !== undefined && !libraryOpenTabsQuery.isError;
   const libraryOpenTabs = libraryPhysicalResolutionAvailable
@@ -611,6 +827,29 @@ export function App() {
   const effectivePhysicalSelection = libraryPhysicalResolutionAvailable
     ? physicalSelection
     : EMPTY_PHYSICAL_SELECTION;
+  const resolvedPhysicalPrioritySelection = resolvePhysicalPrioritySelection(
+    effectivePhysicalSelection,
+    knownLogicalPageByTabId.current,
+  );
+  const physicalAllFilteredSelected = libraryOpenTabs.length > 0 &&
+    effectivePhysicalSelection.size === libraryOpenTabs.length &&
+    libraryOpenTabs.every(({ instanceId }) => effectivePhysicalSelection.has(instanceId));
+  const allFilteredPhysicalLogicalPageCount = (
+    libraryOpenTabs as TabInstance[] & { readonly logicalPageCount?: number }
+  ).logicalPageCount;
+  const physicalPrioritySelection =
+    resolvedPhysicalPrioritySelection.kind === "unresolved" &&
+    physicalAllFilteredSelected &&
+    Number.isSafeInteger(allFilteredPhysicalLogicalPageCount) &&
+    (allFilteredPhysicalLogicalPageCount ?? 0) >= 0
+      ? {
+          kind: "ready" as const,
+          canonicalTabIds: [...new Set(
+            libraryOpenTabs.map(({ canonicalTabId }) => canonicalTabId),
+          )],
+          logicalPageCount: allFilteredPhysicalLogicalPageCount!,
+        }
+      : resolvedPhysicalPrioritySelection;
   const instancesByCanonicalTab = useMemo(() => {
     const grouped = new Map<number, TabInstance[]>();
     for (const instance of libraryOpenTabs) {
@@ -638,6 +877,7 @@ export function App() {
     visibleSelectionSize > 0 && visibleSelectionCount === visibleSelectionSize;
   const someVisibleSelected = visibleSelectionCount > 0 && !allVisibleSelected;
   const setTabSelected = (id: number, checked: boolean) => {
+    setSelectedAllLogicalPageCount(null);
     setSelectedIds((current) => {
       const next = new Set(current);
       if (checked) next.add(id);
@@ -652,6 +892,7 @@ export function App() {
       );
       return;
     }
+    setSelectedAllLogicalPageCount(null);
     setSelectedIds((current) => {
       const next = new Set(current);
       for (const id of visibleIds) {
@@ -742,6 +983,9 @@ export function App() {
       ),
       cell: ({ row }) => {
         const tabItem = row.original;
+        const contextPreview = contextEnabled
+          ? contextPreviewFor(tabItem)
+          : null;
         const instances =
           instancesByCanonicalTab.get(tabItem.id) ?? EMPTY_TAB_INSTANCES;
         const openCopyCount = effectiveLibraryOpenCopyCount(
@@ -832,6 +1076,9 @@ export function App() {
             <span className="library-tab-url" dir="ltr" title={tabItem.url}>
               {tabItem.url}
             </span>
+            {contextPreview === null ? null : (
+              <LibraryContextPreview preview={contextPreview} />
+            )}
             <SummaryAction tab={tabItem} />
             {tabItem.summary?.trim() ? (
               <SummaryDisclosure summary={tabItem.summary.trim()} />
@@ -980,15 +1227,38 @@ export function App() {
     }),
     columnHelper.accessor("importance", {
       header: () => (
-        <SortableColumnHeader
-          label={t("Importance")}
-          sort={sort}
-          sortBy="importance"
-          t={t}
-          onSort={changeSort}
-        />
+        activePrioritySelection.priorityMode === undefined ? (
+          <SortableColumnHeader
+            label={t("Importance")}
+            sort={sort}
+            sortBy="importance"
+            t={t}
+            onSort={changeSort}
+          />
+        ) : <span>{t("Importance")}</span>
       ),
-      cell: ({ getValue }) => <Importance level={getValue()} />,
+      cell: ({ getValue, row }) => {
+        const logicalPageId = logicalPageIdForPriority(row.original);
+        const read = logicalPageId === null
+          ? undefined
+          : priorityReads.get(pagePriorityKey(logicalPageId));
+        return <div className="library-priority-cell" onClick={(event) => event.stopPropagation()}>
+          {priorityShadowEnabled && read !== undefined ? (
+            <PriorityShadowSummary read={read} userImportance={getValue()} />
+          ) : (
+            <Importance level={getValue()} />
+          )}
+          {priorityCapabilities.personalization ? <ManualPriorityRating
+            busy={importanceMutation.isPending}
+            labels={{ group: t("My importance"), clear: t("Clear"),
+              level: (value) => t("Set importance to {level} of 3", { level: value }) }}
+            value={getValue() === 0 ? null : getValue() as 1 | 2 | 3}
+            onChange={(value) => importanceMutation.mutate({
+              ids: [row.original.id], value, clearSelection: null,
+            })}
+          /> : null}
+        </div>;
+      },
     }),
     columnHelper.accessor("isOpen", {
       header: () => (
@@ -1039,33 +1309,41 @@ export function App() {
 
   useEffect(() => {
     rowVirtualizer.scrollToOffset(0);
-  }, [browser, duplicatesOnly, importance, openState, page, q, rowVirtualizer, sort, status, tag]);
+  }, [browser, duplicatesOnly, importance, openState, page, q, resourceId, rowVirtualizer, sort, status, tag]);
 
   const hasFilters =
     browser !== "all" ||
     duplicatesOnly ||
     importance !== "all" ||
+    prioritySelection.mode !== "default" ||
+    prioritySelection.review !== "all" ||
     openState !== "all" ||
     search.length > 0 ||
+    resourceId !== undefined ||
     status !== "all" ||
     tag.length > 0;
   const hasAppliedFilters =
     browser !== "all" ||
     duplicatesOnly ||
     importance !== "all" ||
+    prioritySelection.mode !== "default" ||
+    prioritySelection.review !== "all" ||
     openState !== "all" ||
     q.length > 0 ||
+    resourceId !== undefined ||
     status !== "all" ||
     tag.length > 0;
   const clearFilters = () => {
     setBrowser("all");
     setDuplicatesOnly(false);
     setImportance("all");
+    setPrioritySelection({ mode: "default", review: "all" });
     setOpenState("all");
     setPage(1);
     setSearch("");
     setStatus("all");
     setSelectedTopic(null);
+    if (resourceId !== undefined) selectResource(null);
   };
   const totalPages = tabsQuery.data
     ? Math.max(1, Math.ceil(tabsQuery.data.total / tabsQuery.data.pageSize))
@@ -1085,12 +1363,24 @@ export function App() {
       : connectionState === "pending"
         ? t("Connecting")
         : t("Local collection");
-  const bulkError = bulkStatusMutation.error ?? bulkTagMutation.error;
+  const bulkError = bulkStatusMutation.error ?? bulkTagMutation.error ??
+    importanceMutation.error;
   const bulkBusy =
     selectAllLibraryMutation.isPending ||
     bulkStatusMutation.isPending ||
-    bulkTagMutation.isPending;
+    bulkTagMutation.isPending ||
+    importanceMutation.isPending;
   const closeDrawer = useCallback(() => setActiveTabId(null), []);
+  const reviewResourceResolution = useCallback((logicalPageId: number) => {
+    setResourceReviewRequest((current) => ({
+      logicalPageId,
+      nonce: (current?.nonce ?? 0) + 1,
+    }));
+    setSidebarFacet("resources");
+    setView("library");
+    setPage(1);
+    setActiveTabId(null);
+  }, []);
   const openRow = (tabId: number, event: MouseEvent<HTMLTableRowElement>) => {
     const target = event.target as HTMLElement;
     if (target.closest("button, a, input, select")) return;
@@ -1145,7 +1435,9 @@ export function App() {
                 <h2 id="tab-list-title">
                   {view === "graph"
                     ? tag || t("Knowledge graph")
-                    : tag || t("Library")}
+                    : resourcesEnabled && selectedResource
+                      ? selectedResource.name
+                      : tag || t("Library")}
                 </h2>
                 {view === "library" && tabsQuery.data ? (
                   <span>{formatNumber(tabsQuery.data.total)}</span>
@@ -1187,14 +1479,80 @@ export function App() {
             </div>
           </section>
 
+          {view === "library" && resourcesEnabled && (selectedTopic || selectedResource) ? (
+            <div className="active-facet-chips" aria-label={t("Active Library filters")}>
+              {selectedTopic ? (
+                <button type="button" onClick={() => { setSelectedTopic(null); setPage(1); }}>
+                  <span>{t("Topic")}: {selectedTopic.path}</span>
+                  <span aria-hidden="true">×</span>
+                  <span className="sr-only">{t("Remove topic filter")}</span>
+                </button>
+              ) : null}
+              {selectedResource ? (
+                <button type="button" onClick={() => selectResource(null)}>
+                  <span>{t("Resource")}: {selectedResource.name}</span>
+                  <span aria-hidden="true">×</span>
+                  <span className="sr-only">{t("Remove resource filter")}</span>
+                </button>
+              ) : null}
+              {selectedTopic && selectedResource ? (
+                <button className="active-facet-clear" type="button" onClick={() => {
+                  setSelectedTopic(null);
+                  selectResource(null);
+                }}>
+                  {t("Clear all")}
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="workspace-layout">
-            <TopicSidebar
-              selectedTopic={selectedTopic}
-              onSelectTopic={(topic) => {
-                setSelectedTopic(topic);
-                setPage(1);
-              }}
-            />
+              {resourcesEnabled && view === "library" ? (
+              <div className="facet-sidebar-shell">
+                <div className="facet-switch" aria-label={t("Library grouping")} role="group">
+                  <button
+                    aria-pressed={sidebarFacet === "topics"}
+                    type="button"
+                    onClick={() => setSidebarFacet("topics")}
+                  >
+                    {t("Topics")}
+                  </button>
+                  <button
+                    aria-pressed={sidebarFacet === "resources"}
+                    type="button"
+                    onClick={() => setSidebarFacet("resources")}
+                  >
+                    {t("Resources")}
+                  </button>
+                </div>
+              {sidebarFacet === "topics" ? (
+                <TopicSidebar
+                  selectedTopic={selectedTopic}
+                  onSelectTopic={(topic) => {
+                    setSelectedTopic(topic);
+                    setPage(1);
+                  }}
+                />
+              ) : (
+                <ResourceSidebar
+                  filters={{ browser, importance, q, status, tag,
+                    ...activePrioritySelection }}
+                  manualPriorityEnabled={priorityCapabilities.personalization}
+                  selectedResource={selectedResource}
+                  onSelectResource={selectResource}
+                  reviewRequest={resourceReviewRequest}
+                />
+              )}
+              </div>
+            ) : (
+              <TopicSidebar
+                selectedTopic={selectedTopic}
+                onSelectTopic={(topic) => {
+                  setSelectedTopic(topic);
+                  setPage(1);
+                }}
+              />
+            )}
 
             {view === "library" ? (
               <section className="table-panel" aria-label={t("Library pages")}>
@@ -1251,16 +1609,58 @@ export function App() {
                         )}
                       </p>
                     ) : null}
+                    <PriorityReviewQueue enabled={priorityShadowEnabled} />
                   </>
                 ) : null}
               </div>
               {libraryCollection === "all" ? (
               <div className="library-default-collection">
+              {resourcesEnabled && selectedResource ? (
+                <ResourceHeader
+                  activityWindowsEnabled={featuresQuery.data?.activityWindows === true}
+                  key={selectedResource.id}
+                  manualPriorityEnabled={priorityCapabilities.personalization}
+                  liveAcquisitionEnabled={featuresQuery.data?.liveAcquisition === true}
+                  priorityShadowEnabled={priorityShadowEnabled}
+                  privacyPurgeEnabled={featuresQuery.data?.privacyPurge === true}
+                  researchEnabled={featuresQuery.data?.research === true}
+                  resourceId={selectedResource.id}
+                  onLoaded={rememberResourceName}
+                />
+              ) : null}
               <div className="filter-bar">
                 <div className="filter-label">
                   <FilterIcon />
                   <span>{t("Filters")}</span>
                 </div>
+                {priorityCapabilities.personalization ? (
+                  <div className="priority-personalization-controls">
+                    <LibraryPriorityControls
+                      labels={{
+                        mode: t("Priority order"),
+                        review: t("Review state"),
+                        default: t("Default"),
+                        my: t("My"),
+                        ai: t("AI"),
+                        recommended: t("Recommended"),
+                        all: t("All"),
+                        needsReview: t("Needs review"),
+                        doesNotNeedReview: t("Does not need review"),
+                      }}
+                      selection={prioritySelection}
+                      onChange={(next) => {
+                        setPrioritySelection(next);
+                        if (next.mode !== "default" && sort?.sortBy === "importance") {
+                          setSort(null);
+                        }
+                        setPage(1);
+                      }}
+                    />
+                    <button type="button" onClick={() => setRulesDialogOpen(true)}>
+                      {t("Personal priority rules")}
+                    </button>
+                  </div>
+                ) : null}
                 <label className="search-field">
                   <span>{t("Search tab titles, URLs, and content")}</span>
                   <SearchIcon />
@@ -1418,11 +1818,59 @@ export function App() {
                 }
                 onSelectionChange={setPhysicalSelection}
               />
+              {selectionMode === "physical" && physicalSelection.size > 0 &&
+              priorityCapabilities.personalization ? (
+                <div className="bulk-toolbar physical-priority-toolbar"
+                  aria-label={t("Set importance for selected browser tabs")}>
+                  {physicalPrioritySelection.kind === "ready" ? <>
+                    <span>{t("{count} logical pages", {
+                      count: formatNumber(physicalPrioritySelection.logicalPageCount),
+                    })}</span>
+                    <ManualPriorityRating
+                      busy={importanceMutation.isPending}
+                      labels={{ group: t("Set importance for selected logical pages"),
+                        clear: t("Clear"),
+                        level: (value) => t("Set importance to {level} of 3", { level: value }) }}
+                      value={null}
+                      onChange={(value) => importanceMutation.mutate({
+                        ids: physicalPrioritySelection.canonicalTabIds,
+                        value,
+                        clearSelection: "physical",
+                      })}
+                    />
+                  </> : <span className="bulk-error" role="alert">
+                    {t("Logical-page mapping unavailable; refresh before setting importance.")}
+                  </span>}
+                  {importanceMutation.error ? (
+                    <span className="bulk-error" role="alert">
+                      {localizeError(importanceMutation.error)}
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
               {selectionMode === "canonical" && selectedIds.size > 0 ? (
                 <div className="bulk-toolbar" aria-label={t("Bulk tab actions")}>
                   <strong>
                     {t("{count} selected", { count: formatNumber(selectedIds.size) })}
                   </strong>
+                  {priorityCapabilities.personalization ? <>
+                    {canonicalPrioritySelection.kind === "ready" ? <>
+                    <span>{t("{count} logical pages", { count:
+                      formatNumber(canonicalPrioritySelection.logicalPageCount) })}</span>
+                    <ManualPriorityRating
+                      busy={bulkBusy}
+                      labels={{ group: t("Set importance for selected logical pages"),
+                        clear: t("Clear"),
+                        level: (value) => t("Set importance to {level} of 3", { level: value }) }}
+                      value={null}
+                      onChange={(value) => importanceMutation.mutate({
+                        ids: canonicalPrioritySelection.canonicalTabIds,
+                        value, clearSelection: "canonical",
+                      })}
+                    /></> : <span className="bulk-error" role="alert">
+                      {t("Logical-page mapping unavailable; refresh before setting importance.")}
+                    </span>}
+                  </> : null}
                   <label>
                     <span>{t("Status")}</span>
                     <select
@@ -1444,6 +1892,16 @@ export function App() {
                   >
                     {t("Apply status")}
                   </button>
+                  {featuresQuery.data?.research === true ? (
+                    <ResearchSelectionPanel
+                      canonicalTabIds={[...selectedIds]}
+                      captureInstances={libraryOpenTabs}
+                      captureInstancesState={libraryOpenTabsQuery.isPending
+                        ? "pending"
+                        : libraryOpenTabsQuery.isError ? "error" : "ready"}
+                      onRetryCaptureInstances={() => void libraryOpenTabsQuery.refetch()}
+                    />
+                  ) : null}
                   <form
                     onSubmit={(event) => {
                       event.preventDefault();
@@ -1468,7 +1926,10 @@ export function App() {
                     className="bulk-clear"
                     disabled={bulkBusy}
                     type="button"
-                    onClick={() => setSelectedIds(new Set())}
+                    onClick={() => {
+                      setSelectedIds(new Set());
+                      setSelectedAllLogicalPageCount(null);
+                    }}
                   >
                     {t("Clear")}
                   </button>
@@ -1705,6 +2166,13 @@ export function App() {
           onBrowserAction={canonicalTabActivation.run}
           onClose={closeDrawer}
           onMiddleClose={singleTabClose.closeCanonical}
+          onReviewResourceResolution={reviewResourceResolution}
+        />
+      ) : null}
+      {rulesDialogOpen && priorityCapabilities.personalization ? (
+        <PersonalPriorityRulesDialog
+          canMutateAndRecompute={priorityCapabilities.canMutateAndRecompute}
+          onDismiss={() => setRulesDialogOpen(false)}
         />
       ) : null}
     </CurrentTimeContext.Provider>

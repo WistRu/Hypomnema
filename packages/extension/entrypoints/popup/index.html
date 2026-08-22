@@ -33,6 +33,74 @@
 
       <p id="detail" class="detail" role="status" aria-live="polite"></p>
 
+      <section id="context-section" class="context-card" hidden>
+        <h2 id="context-heading">Personal context</h2>
+        <p id="context-page" class="context-page"></p>
+        <div id="pairing-panel" hidden>
+          <p id="pairing-help" class="detail"></p>
+          <label>
+            <span id="pairing-challenge-label">Challenge ID</span>
+            <input id="pairing-challenge" autocomplete="off" spellcheck="false" />
+          </label>
+          <label>
+            <span id="pairing-code-label">Pairing code</span>
+            <input id="pairing-code" autocomplete="off" spellcheck="false" type="password" />
+          </label>
+          <button id="pair-button" class="secondary" type="button">Pair</button>
+        </div>
+        <form id="context-form" hidden>
+          <label>
+            <span id="context-scope-label">Scope</span>
+            <select id="context-scope">
+              <option id="context-scope-page" value="page">Page</option>
+              <option id="context-scope-tab" value="this_tab">This open tab</option>
+            </select>
+          </label>
+          <label>
+            <span id="context-kind-label">Kind</span>
+            <select id="context-kind">
+              <option value="purpose">Purpose</option>
+              <option value="interest">Interest</option>
+              <option value="question">Question</option>
+              <option value="project">Project</option>
+              <option value="next_action">Next action</option>
+              <option value="note">Note</option>
+            </select>
+          </label>
+          <label>
+            <span id="context-visibility-label">Visibility</span>
+            <select id="context-visibility">
+              <option id="context-local-option" value="local_only">Local only</option>
+              <option id="context-share-option" value="share_with_ai">May be used by AI</option>
+            </select>
+          </label>
+          <label>
+            <span id="context-body-label">Why is this open?</span>
+            <textarea id="context-body" maxlength="100000" required></textarea>
+          </label>
+          <button id="context-save" class="primary" type="submit">Save context</button>
+        </form>
+        <div id="intent-panel" hidden>
+          <p id="intent-current"></p>
+          <button id="intent-promote" class="secondary" type="button">Promote to page context</button>
+          <button id="intent-archive" class="secondary" type="button">Archive this intent</button>
+          <details>
+            <summary id="intent-history-label">Intent history</summary>
+            <ul id="intent-history"></ul>
+          </details>
+        </div>
+        <p id="context-feedback" class="detail" role="status" aria-live="polite"></p>
+        <button
+          id="context-discard-stale"
+          class="secondary danger"
+          type="button"
+          aria-describedby="context-feedback"
+          hidden
+        >
+          Discard stale queued context
+        </button>
+      </section>
+
       <button id="capture-current-button" class="primary" type="button" disabled>
         Capture current tab
       </button>

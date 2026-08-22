@@ -3,10 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createApp, type TabHubApp } from "../src/app.js";
 import { EmbeddingProviderError } from "../src/embedding-provider.js";
+
+vi.setConfig({ testTimeout: 15_000 });
 
 const temporaryDirectories: string[] = [];
 const apps: TabHubApp[] = [];
@@ -192,7 +194,7 @@ describe("semantic tab search", () => {
     ]);
 
     const health = await app.inject({ method: "GET", url: "/api/health" });
-    expect(health.json().schemaVersion).toBe(17);
+    expect(health.json().schemaVersion).toBe(26);
   });
 
   it("maps embedding provider failures without hiding their retry metadata", async () => {

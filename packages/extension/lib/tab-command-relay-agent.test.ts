@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { tabCommandRelayProtocolVersion } from "@tabhub/shared";
 
 import {
-  createTabCommandRelayAgent,
+  createTabCommandRelayAgent as createRelayAgent,
+  type TabCommandRelayAgentOptions,
   type TabCommandRelaySessionStorage,
   type TabCommandRelaySocket,
   type TabCommandRelaySocketHandlers,
@@ -193,6 +194,51 @@ function activationResult() {
   };
 }
 
+function captureCommandEnvelope(
+  requestId: string,
+  executionDeadlineAt = EXECUTION_DEADLINE_AT,
+) {
+  return {
+    command: {
+      kind: "capture-tab-content" as const,
+      target: {
+        instanceId: 73,
+        tabId: 42,
+        expectedUrl: "https://example.com/exact",
+        expectedInstanceRevision: 4,
+        expectedFirstSeenAt: "2026-08-13T11:00:00.000Z",
+      },
+    },
+    executionDeadlineAt,
+    requestId,
+    scope: SCOPE,
+    type: "command",
+    version: tabCommandRelayProtocolVersion,
+  } as const;
+}
+
+function captureResult(requestId: string) {
+  const target = captureCommandEnvelope(requestId).command.target;
+  return {
+    kind: "capture-tab-content" as const,
+    target,
+    outcome: {
+      status: "captured" as const,
+      receipt: {
+        instanceId: target.instanceId,
+        browserTabId: target.tabId,
+        canonicalTabId: 123,
+        logicalPageId: 456,
+        capturedUrl: target.expectedUrl,
+        instanceRevision: target.expectedInstanceRevision,
+        firstSeenAt: target.expectedFirstSeenAt,
+        contentRevision: 8,
+        extractedAt: "2026-08-13T11:01:00.000Z",
+      },
+    },
+  };
+}
+
 async function settle(): Promise<void> {
   for (let index = 0; index < 30; index += 1) {
     await Promise.resolve();
@@ -209,6 +255,16 @@ function createLiveCommandSequencer() {
     );
     return result;
   };
+}
+
+function createTabCommandRelayAgent(
+  options: Omit<TabCommandRelayAgentOptions, "canConnect"> &
+    Partial<Pick<TabCommandRelayAgentOptions, "canConnect">>,
+) {
+  return createRelayAgent({
+    canConnect: async () => true,
+    ...options,
+  });
 }
 
 afterEach(() => {
@@ -277,7 +333,10 @@ describe("tab command relay agent", () => {
     socket.receive(commandEnvelope());
     await settle();
 
-    expect(execute).toHaveBeenCalledWith(SCOPE, commandEnvelope().command);
+    expect(execute).toHaveBeenCalledWith(SCOPE, commandEnvelope().command, {
+      executionDeadlineAt: EXECUTION_DEADLINE_AT,
+      requestId: REQUEST_ID,
+    });
     expect(socket.sent.at(-1)).toEqual({
       ok: true,
       requestId: REQUEST_ID,
@@ -324,6 +383,10 @@ describe("tab command relay agent", () => {
     expect(execute).toHaveBeenCalledWith(
       SCOPE,
       mutationCommandEnvelope().command,
+      {
+        executionDeadlineAt: EXECUTION_DEADLINE_AT,
+        requestId: REQUEST_ID,
+      },
     );
     expect(
       socket.sent.filter(
@@ -635,6 +698,63 @@ describe("tab command relay agent", () => {
     agent.stop();
   });
 
+  it("serializes exact capture with live mutations and propagates relay metadata", async () => {
+    vi.useFakeTimers();
+    let resolveMutation:
+      | ((value: ReturnType<typeof mutationResult>) => void)
+      | undefined;
+    const mutation = new Promise<ReturnType<typeof mutationResult>>(
+      (resolve) => {
+        resolveMutation = resolve;
+      },
+    );
+    const captureRequestId = "b23e4567-e89b-42d3-a456-426614174000";
+    const execute = vi.fn(async (_scope, command) =>
+      command.kind === "set-muted"
+        ? mutation
+        : captureResult(captureRequestId),
+    );
+    const socket = new FakeSocket();
+    const agent = createTabCommandRelayAgent({
+      createSocket: () => socket,
+      execute,
+      getScope: async () => SCOPE,
+      relayUrl: RELAY_URL,
+      sequenceLiveCommand: createLiveCommandSequencer(),
+      storage: sessionStorage(),
+    });
+
+    agent.start();
+    await settle();
+    socket.open();
+    socket.receive(readyEnvelope());
+    socket.receive(mutationCommandEnvelope());
+    await settle();
+    socket.receive(captureCommandEnvelope(captureRequestId));
+    await settle();
+    expect(execute).toHaveBeenCalledOnce();
+
+    resolveMutation?.(mutationResult());
+    await settle();
+    await settle();
+
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenLastCalledWith(
+      SCOPE,
+      captureCommandEnvelope(captureRequestId).command,
+      {
+        executionDeadlineAt: EXECUTION_DEADLINE_AT,
+        requestId: captureRequestId,
+      },
+    );
+    expect(socket.sent.at(-1)).toMatchObject({
+      ok: true,
+      requestId: captureRequestId,
+      result: captureResult(captureRequestId),
+    });
+    agent.stop();
+  });
+
   it("never sends a completed command receipt through a replacement socket", async () => {
     vi.useFakeTimers();
     let resolveExecution:
@@ -712,6 +832,72 @@ describe("tab command relay agent", () => {
     await vi.advanceTimersByTimeAsync(1);
     await settle();
     expect(createSocket).toHaveBeenCalledTimes(2);
+    agent.stop();
+  });
+
+  it("waits for the local server before opening a relay socket", async () => {
+    vi.useFakeTimers();
+    let serverReachable = false;
+    const canConnect = vi.fn(async () => serverReachable);
+    const createSocket = vi.fn(() => new FakeSocket());
+    const onError = vi.fn();
+    const agent = createTabCommandRelayAgent({
+      canConnect,
+      createSocket,
+      execute: vi.fn(async () => previewResult()),
+      getScope: async () => SCOPE,
+      onError,
+      relayUrl: RELAY_URL,
+      sequenceLiveCommand: createLiveCommandSequencer(),
+      storage: sessionStorage(),
+    });
+
+    agent.start();
+    await settle();
+    expect(canConnect).toHaveBeenCalledOnce();
+    expect(createSocket).not.toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalled();
+
+    serverReachable = true;
+    await vi.advanceTimersByTimeAsync(499);
+    expect(createSocket).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await settle();
+    expect(canConnect).toHaveBeenCalledTimes(2);
+    expect(createSocket).toHaveBeenCalledOnce();
+    agent.stop();
+  });
+
+  it("rechecks the newest generation after a pending reachability probe", async () => {
+    vi.useFakeTimers();
+    let resolveFirstProbe: ((reachable: boolean) => void) | undefined;
+    const firstProbe = new Promise<boolean>((resolve) => {
+      resolveFirstProbe = resolve;
+    });
+    const canConnect = vi
+      .fn<() => Promise<boolean>>()
+      .mockImplementationOnce(async () => firstProbe)
+      .mockResolvedValue(true);
+    const createSocket = vi.fn(() => new FakeSocket());
+    const agent = createTabCommandRelayAgent({
+      canConnect,
+      createSocket,
+      execute: vi.fn(async () => previewResult()),
+      getScope: async () => SCOPE,
+      relayUrl: RELAY_URL,
+      sequenceLiveCommand: createLiveCommandSequencer(),
+      storage: sessionStorage(),
+    });
+
+    agent.start();
+    await settle();
+    expect(canConnect).toHaveBeenCalledOnce();
+
+    agent.restart();
+    resolveFirstProbe?.(true);
+    await settle();
+    expect(canConnect).toHaveBeenCalledTimes(2);
+    expect(createSocket).toHaveBeenCalledOnce();
     agent.stop();
   });
 

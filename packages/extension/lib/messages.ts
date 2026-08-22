@@ -1,5 +1,10 @@
 import {
+  contextEntryKindSchema,
+  contextVisibilitySchema,
+  exactTabScopeSchema,
+  expectedTabPageSchema,
   knownBrowserOptions,
+  tabUrlSchema,
   tabCommandRelayProtocolVersion,
 } from "@tabhub/shared";
 import {
@@ -23,6 +28,38 @@ export type ExtensionRequest =
   | { type: "tabhub:snapshot-now" }
   | { type: "tabhub:capture-current" }
   | { type: "tabhub:capture-all" }
+  | { type: "tabhub:context-features" }
+  | { challengeId: string; code: string; type: "tabhub:context-pair" }
+  | { type: "tabhub:context-current" }
+  | { queueHeadId: string; type: "tabhub:context-discard-stale" }
+  | {
+      body: string;
+      entryKind: import("@tabhub/shared").ContextEntryKind;
+      expectedUrl: string;
+      idempotencyKey: string;
+      scope: "page" | "this_tab";
+      targetScope: import("@tabhub/shared").ExactTabScope;
+      type: "tabhub:context-save";
+      visibility: import("@tabhub/shared").ContextVisibility;
+    }
+  | {
+      contextKind: import("@tabhub/shared").ContextEntryKind;
+      idempotencyKey: string;
+      intentId: number;
+      kind: "archive";
+      expectedPage: import("@tabhub/shared").ExpectedTabPage;
+      scope: import("@tabhub/shared").ExactTabScope;
+      type: "tabhub:context-intent-action";
+    }
+  | {
+      contextKind: import("@tabhub/shared").ContextEntryKind;
+      expectedPage: import("@tabhub/shared").ExpectedTabPage;
+      idempotencyKey: string;
+      intentId: number;
+      kind: "promote";
+      scope: import("@tabhub/shared").ExactTabScope;
+      type: "tabhub:context-intent-action";
+    }
   | { type: "tabhub:browser-changed"; browser: KnownBrowser }
   | { type: "tabhub:app-probe" }
   | {
@@ -51,6 +88,7 @@ export interface AppProbeData {
   browserSessionId: string;
   commandProtocolVersion?: typeof tabCommandRelayProtocolVersion;
   controlWindowId: number;
+  extensionOrigin?: string;
   installationId: string;
   pendingUndos: PhysicalTabCloseUndoSummary[];
   windows: PhysicalWindowSummary[];
@@ -93,17 +131,38 @@ export interface ExtensionStatus {
   serverReachable: boolean;
 }
 
+export interface ContextPopupData {
+  activeTab: { id: number; title: string; url: string } | null;
+  browserSessionId: string;
+  contextEnabled: boolean;
+  installationId: string;
+  mutationTarget?: {
+    expectedUrl: string;
+    scope: import("@tabhub/shared").ExactTabScope;
+  };
+  pairingRequired: boolean;
+  pendingMutationError?:
+    | "Pairing required"
+    | "Retry required"
+    | "Page changed; review required";
+  pendingMutationHeadId?: string;
+  pendingMutationCount: number;
+  sessionIntent?: import("@tabhub/shared").SessionIntentBundle;
+}
+
 export type ExtensionResponse =
   | {
       ok: true;
       status: ExtensionStatus;
       capture?: CaptureSummary;
+      context?: ContextPopupData;
     }
   | {
       error: string;
       ok: false;
       status: ExtensionStatus;
       capture?: CaptureSummary;
+      context?: ContextPopupData;
     };
 
 interface AppMessageSenderLike {
@@ -203,12 +262,86 @@ export function isExtensionRequest(value: unknown): value is ExtensionRequest {
     const requestedBrowser = (value as { browser?: unknown }).browser;
     return (
       typeof requestedBrowser === "string" &&
-      (knownBrowserOptions as readonly string[]).includes(requestedBrowser)
+      (knownBrowserOptions as readonly string[]).includes(requestedBrowser) &&
+      hasOnlyKeys(value, ["browser", "type"])
     );
   }
 
   if (type === "tabhub:app-probe") {
     return hasOnlyKeys(value, ["type"]);
+  }
+
+  if (type === "tabhub:context-pair") {
+    return (
+      typeof value.challengeId === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        value.challengeId,
+      ) &&
+      typeof value.code === "string" &&
+      value.code.length >= 40 &&
+      value.code.length <= 128 &&
+      hasOnlyKeys(value, ["challengeId", "code", "type"])
+    );
+  }
+
+  if (type === "tabhub:context-save") {
+    return (
+      (value.scope === "page" || value.scope === "this_tab") &&
+      contextEntryKindSchema.safeParse(value.entryKind).success &&
+      contextVisibilitySchema.safeParse(value.visibility).success &&
+      exactTabScopeSchema.safeParse(value.targetScope).success &&
+      tabUrlSchema.safeParse(value.expectedUrl).success &&
+      typeof value.body === "string" &&
+      value.body.trim().length > 0 &&
+      value.body.length <= 100_000 &&
+      typeof value.idempotencyKey === "string" &&
+      value.idempotencyKey.trim().length > 0 &&
+      value.idempotencyKey.length <= 256 &&
+      hasOnlyKeys(value, [
+        "body",
+        "entryKind",
+        "expectedUrl",
+        "idempotencyKey",
+        "scope",
+        "targetScope",
+        "type",
+        "visibility",
+      ])
+    );
+  }
+
+  if (type === "tabhub:context-discard-stale") {
+    return (
+      typeof value.queueHeadId === "string" &&
+      value.queueHeadId.trim().length > 0 &&
+      value.queueHeadId.length <= 128 &&
+      hasOnlyKeys(value, ["queueHeadId", "type"])
+    );
+  }
+
+  if (type === "tabhub:context-intent-action") {
+    const commonValid =
+      (value.kind === "archive" || value.kind === "promote") &&
+      Number.isInteger(value.intentId) &&
+      (value.intentId as number) > 0 &&
+      contextEntryKindSchema.safeParse(value.contextKind).success &&
+      typeof value.idempotencyKey === "string" &&
+      value.idempotencyKey.trim().length > 0 &&
+      value.idempotencyKey.length <= 256;
+    if (!commonValid) return false;
+    return (
+      exactTabScopeSchema.safeParse(value.scope).success &&
+      expectedTabPageSchema.safeParse(value.expectedPage).success &&
+      hasOnlyKeys(value, [
+        "contextKind",
+        "expectedPage",
+        "idempotencyKey",
+        "intentId",
+        "kind",
+        "scope",
+        "type",
+      ])
+    );
   }
 
   if (type === "tabhub:app-activate-tab") {
@@ -245,9 +378,12 @@ export function isExtensionRequest(value: unknown): value is ExtensionRequest {
   }
 
   return (
-    type === "tabhub:get-status" ||
-    type === "tabhub:snapshot-now" ||
-    type === "tabhub:capture-current" ||
-    type === "tabhub:capture-all"
+    (type === "tabhub:get-status" ||
+      type === "tabhub:snapshot-now" ||
+      type === "tabhub:capture-current" ||
+      type === "tabhub:capture-all" ||
+      type === "tabhub:context-features" ||
+      type === "tabhub:context-current") &&
+    hasOnlyKeys(value, ["type"])
   );
 }

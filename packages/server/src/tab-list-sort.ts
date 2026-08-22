@@ -5,6 +5,7 @@ import { stableBrowserOrderSql } from "./stable-tab-order.js";
 export interface TabListSortSql {
   joinClause: string;
   orderClause: string;
+  secondaryOrderClause: string;
   withClause: string;
 }
 
@@ -20,6 +21,7 @@ export function tabListSortSql(
   const defaultResult: TabListSortSql = {
     joinClause: "",
     orderClause: defaultOrderClause,
+    secondaryOrderClause: defaultOrderClause,
     withClause: "",
   };
 
@@ -29,6 +31,10 @@ export function tabListSortSql(
     case "title":
       return {
         ...defaultResult,
+        secondaryOrderClause: `
+          tabhub_sort_key(tabhub_display_title(tabs.title, tabs.url)) ${direction},
+          tabhub_display_title(tabs.title, tabs.url) ${direction}
+        `,
         orderClause: `
           tabhub_sort_key(tabhub_display_title(tabs.title, tabs.url)) ${direction},
           tabhub_display_title(tabs.title, tabs.url) ${direction},
@@ -58,6 +64,10 @@ export function tabListSortSql(
             GROUP BY tab_tags.tab_id
           ) AS tab_sort_topics ON tab_sort_topics.tab_id = tabs.id
         `,
+        secondaryOrderClause: `
+          CASE WHEN tab_sort_topics.first_path_key IS NULL THEN 1 ELSE 0 END,
+          tab_sort_topics.first_path_key ${direction}
+        `,
         orderClause: `
           CASE WHEN tab_sort_topics.first_path_key IS NULL THEN 1 ELSE 0 END,
           tab_sort_topics.first_path_key ${direction},
@@ -67,6 +77,11 @@ export function tabListSortSql(
     case "browser":
       return {
         ...defaultResult,
+        secondaryOrderClause: `
+          CASE WHEN tabs.browser = 'other' THEN 1 ELSE 0 END,
+          tabhub_sort_key(tabs.browser) ${direction},
+          tabs.browser ${direction}
+        `,
         orderClause: `
           CASE WHEN tabs.browser = 'other' THEN 1 ELSE 0 END,
           tabhub_sort_key(tabs.browser) ${direction},
@@ -89,6 +104,10 @@ export function tabListSortSql(
             ON tab_sort_activity.activity_browser = tabs.browser
            AND tab_sort_activity.activity_url_normalized = tabs.url_normalized
         `,
+        secondaryOrderClause: `
+          COALESCE(tab_sort_activity.foreground_ms, 0) ${direction},
+          COALESCE(tab_sort_activity.engaged_ms, 0) ${direction}
+        `,
         orderClause: `
           COALESCE(tab_sort_activity.foreground_ms, 0) ${direction},
           COALESCE(tab_sort_activity.engaged_ms, 0) ${direction},
@@ -98,6 +117,15 @@ export function tabListSortSql(
     case "status":
       return {
         ...defaultResult,
+        secondaryOrderClause: `
+          CASE tabs.status
+            WHEN 'inbox' THEN 0
+            WHEN 'in_progress' THEN 1
+            WHEN 'done' THEN 2
+            WHEN 'archived' THEN 3
+            ELSE 4
+          END ${direction}
+        `,
         orderClause: `
           CASE tabs.status
             WHEN 'inbox' THEN 0
@@ -112,16 +140,19 @@ export function tabListSortSql(
     case "importance":
       return {
         ...defaultResult,
+        secondaryOrderClause: `tabs.importance ${direction}`,
         orderClause: `tabs.importance ${direction}, ${defaultOrderClause}`,
       };
     case "state":
       return {
         ...defaultResult,
+        secondaryOrderClause: `tabs.is_open ${direction}`,
         orderClause: `tabs.is_open ${direction}, ${defaultOrderClause}`,
       };
     case "age":
       return {
         ...defaultResult,
+        secondaryOrderClause: `tabs.first_seen_at ${ageTimestampDirection}`,
         orderClause: `tabs.first_seen_at ${ageTimestampDirection}, ${defaultOrderClause}`,
       };
   }

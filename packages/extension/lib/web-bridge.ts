@@ -1,3 +1,5 @@
+import { tabCommandRelayCompatibleProtocolVersionSchema } from "@tabhub/shared";
+
 import {
   type AppExtensionResponse,
   type BridgeRequestType,
@@ -68,6 +70,59 @@ function hasValidEnvelope(value: Record<string, unknown>): boolean {
     value.channel === BRIDGE_CHANNEL &&
     value.version === BRIDGE_VERSION &&
     isValidBridgeRequestId(value.requestId)
+  );
+}
+
+function isValidProbeData(value: unknown): boolean {
+  if (!isRecord(value) || !hasOnlyKeys(value, [
+    "available",
+    "browser",
+    "browserSessionId",
+    "commandProtocolVersion",
+    "controlWindowId",
+    "extensionOrigin",
+    "installationId",
+    "pendingUndos",
+    "windows",
+  ])) {
+    return false;
+  }
+  if (
+    value.available !== true ||
+    !(value.browser === null || isKnownBrowser(value.browser)) ||
+    !isBrowserSessionId(value.browserSessionId) ||
+    !isInstallationId(value.installationId) ||
+    !Number.isInteger(value.controlWindowId) ||
+    (value.controlWindowId as number) < 0 ||
+    (value.commandProtocolVersion !== undefined &&
+      !tabCommandRelayCompatibleProtocolVersionSchema.safeParse(
+        value.commandProtocolVersion,
+      ).success) ||
+    (value.extensionOrigin !== undefined &&
+      (typeof value.extensionOrigin !== "string" ||
+        !/^chrome-extension:\/\/[a-p]{16,64}$/.test(value.extensionOrigin))) ||
+    !Array.isArray(value.pendingUndos) ||
+    !Array.isArray(value.windows)
+  ) {
+    return false;
+  }
+  return value.pendingUndos.every(
+    (item) =>
+      isRecord(item) &&
+      hasOnlyKeys(item, ["count", "expiresAt", "undoId"]) &&
+      Number.isInteger(item.count) &&
+      (item.count as number) >= 0 &&
+      typeof item.expiresAt === "number" &&
+      isInstallationId(item.undoId),
+  ) && value.windows.every(
+    (item) =>
+      isRecord(item) &&
+      hasOnlyKeys(item, ["focused", "tabCount", "windowId"]) &&
+      typeof item.focused === "boolean" &&
+      Number.isInteger(item.tabCount) &&
+      (item.tabCount as number) >= 0 &&
+      Number.isInteger(item.windowId) &&
+      (item.windowId as number) >= 0,
   );
 }
 
@@ -194,8 +249,13 @@ export function createBridgeResponse(
   const validResponse =
     isRecord(response) &&
     response.type === request.type &&
-    ((response.ok === false && typeof response.error === "string") ||
-      (response.ok === true && isRecord(response.data)));
+    ((response.ok === false &&
+      typeof response.error === "string" &&
+      hasOnlyKeys(response, ["error", "ok", "type"])) ||
+      (response.ok === true &&
+        hasOnlyKeys(response, ["data", "ok", "type"]) &&
+        (request.type !== "probe" || isValidProbeData(response.data)) &&
+        isRecord(response.data)));
   const correlatedResponse: AppExtensionResponse = validResponse
     ? (response as AppExtensionResponse)
     : {

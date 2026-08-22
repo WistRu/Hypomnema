@@ -1,5 +1,6 @@
 import type {
   ClusterInboxResponse,
+  ExactTabScope,
   RetentionDecisionResponse,
   RetentionForgetResponse,
   RetentionReviewResponse,
@@ -7,6 +8,9 @@ import type {
   SummaryEnqueueResponse,
   SummaryJob,
   StatsResponse,
+  ShareableContextBundle,
+  ShareableContextEntry,
+  ShareableSessionIntentBundle,
   TabDetailResponse,
   TabLink,
   TabListResponse,
@@ -15,7 +19,11 @@ import type {
 import { tabListItemSchema } from "@tabhub/shared";
 import { describe, expect, it, vi } from "vitest";
 
-import { createTabHubApi } from "../src/tabhub-api.js";
+import {
+  createTabHubApi,
+  type AgentContextMutationReceipt,
+  type AgentSessionIntentMutationReceipt,
+} from "../src/tabhub-api.js";
 
 const listResponse: TabListResponse = {
   items: [],
@@ -26,6 +34,7 @@ const listResponse: TabListResponse = {
 
 const detailResponse: TabDetailResponse = {
   id: 3,
+  logicalPageId: 3,
   url: "https://example.com",
   urlNormalized: "https://example.com/",
   title: "Example",
@@ -165,6 +174,61 @@ const clusterResponse: ClusterInboxResponse = {
   unclustered: 5,
 };
 
+const exactScope: ExactTabScope = {
+  installationId: "122e4567-e89b-42d3-a456-426614174000",
+  browserSessionId: "222e4567-e89b-42d3-a456-426614174000",
+  browserTabId: 7,
+};
+const shareableContextEntry: ShareableContextEntry = {
+  entryKind: "purpose",
+  body: "Compare agent frameworks",
+  provenance: { actor: "agent", method: "on_behalf_of_user" },
+  visibility: "share_with_ai",
+  staleAt: null,
+  state: "active",
+  createdAt: "2026-08-12T10:00:00.000Z",
+  reviewVerdict: null,
+};
+const shareableContextBundle: ShareableContextBundle = {
+  subject: { type: "page", logicalPageId: 42 },
+  entries: [shareableContextEntry],
+  currentEntries: [shareableContextEntry],
+  preview: {
+    entryKind: "purpose",
+    body: "Compare agent frameworks",
+    actor: "agent",
+  },
+};
+const shareableSessionIntentBundle: ShareableSessionIntentBundle = {
+  scope: exactScope,
+  current: {
+    scope: exactScope,
+    subject: { type: "page", logicalPageId: 42 },
+    expectedPage: {
+      logicalPageId: 42,
+      url: "https://example.com/research",
+      urlNormalized: "https://example.com/research",
+      instanceRevision: 3,
+    },
+    body: "Compare this exact open copy",
+    provenance: { actor: "agent", method: "on_behalf_of_user" },
+    visibility: "share_with_ai",
+    staleAt: null,
+    state: "active",
+    createdAt: "2026-08-12T10:01:00.000Z",
+    updatedAt: "2026-08-12T10:01:00.000Z",
+  },
+  history: [],
+};
+const contextMutationReceipt: AgentContextMutationReceipt = {
+  kind: "appended",
+  entry: shareableContextEntry,
+};
+const sessionIntentMutationReceipt: AgentSessionIntentMutationReceipt = {
+  kind: "set",
+  intent: shareableSessionIntentBundle.current!,
+};
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -173,6 +237,148 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("TabHub REST adapter", () => {
+  it("discovers the complete feature contract and treats only exact 404 as schema-17", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl
+      .mockResolvedValueOnce(
+        jsonResponse({
+          context: true,
+          logicalImportance: false,
+          agentUserImportance: true,
+        }),
+      )
+      .mockResolvedValueOnce(new Response("Not Found", { status: 404 }));
+    const api = createTabHubApi({ fetchImpl });
+
+    await expect(api.getFeatures()).resolves.toEqual({
+      context: true,
+      logicalImportance: false,
+      agentUserImportance: true,
+    });
+    await expect(api.getFeatures()).resolves.toEqual({
+      context: false,
+      logicalImportance: false,
+    });
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:7717/api/features",
+      { method: "GET" },
+    );
+  });
+
+  it("reads only strict shareable context from page-scoped agent routes", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl
+      .mockResolvedValueOnce(jsonResponse(shareableContextBundle))
+      .mockResolvedValueOnce(jsonResponse([shareableContextEntry]))
+      .mockResolvedValueOnce(jsonResponse(shareableSessionIntentBundle));
+    const api = createTabHubApi({ fetchImpl });
+
+    await expect(api.getPageContext(42)).resolves.toEqual(shareableContextBundle);
+    await expect(
+      api.searchPageContext({
+        logicalPageId: 42,
+        query: "agent frameworks",
+        limit: 12,
+      }),
+    ).resolves.toEqual([shareableContextEntry]);
+    await expect(api.getTabSessionIntent(exactScope)).resolves.toEqual(
+      shareableSessionIntentBundle,
+    );
+
+    expect(fetchImpl.mock.calls.map(([url, init]) => [String(url), init?.method])).toEqual([
+      ["http://127.0.0.1:7717/api/agent/pages/42/context", "GET"],
+      [
+        "http://127.0.0.1:7717/api/agent/context/search?q=agent+frameworks&logicalPageId=42&limit=12",
+        "GET",
+      ],
+      [
+        `http://127.0.0.1:7717/api/agent/session-intents?installationId=${exactScope.installationId}&browserSessionId=${exactScope.browserSessionId}&browserTabId=7`,
+        "GET",
+      ],
+    ]);
+  });
+
+  it("writes idempotent shareable context through strict agent-only payloads", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl
+      .mockResolvedValueOnce(jsonResponse(contextMutationReceipt))
+      .mockResolvedValueOnce(jsonResponse(contextMutationReceipt))
+      .mockResolvedValueOnce(jsonResponse(sessionIntentMutationReceipt));
+    const api = createTabHubApi({ fetchImpl });
+    const pageCommand = {
+      kind: "append" as const,
+      entryKind: "purpose" as const,
+      body: "Compare agent frameworks",
+      provenance: { method: "on_behalf_of_user" as const },
+      idempotencyKey: "user-instruction-42",
+    };
+
+    await expect(
+      api.setPageContext({ logicalPageId: 42, command: pageCommand }),
+    ).resolves.toEqual(contextMutationReceipt);
+    await expect(
+      api.setPageContext({ logicalPageId: 42, command: pageCommand }),
+    ).resolves.toEqual(contextMutationReceipt);
+    await expect(
+      api.setTabSessionIntent({
+        kind: "set",
+        scope: exactScope,
+        expectedUrl: "https://example.com/research",
+        body: "Model-proposed exact next action",
+        provenance: {
+          method: "model",
+          sourceFingerprint: "intent-source-v1",
+          model: {
+            provider: "fixture",
+            name: "model-1",
+            promptVersion: "prompt-v2",
+          },
+          confidence: 0.8,
+        },
+        idempotencyKey: "model-intent-7",
+      }),
+    ).resolves.toEqual(sessionIntentMutationReceipt);
+
+    expect(fetchImpl.mock.calls.map(([url, init]) => ({
+      url: String(url),
+      method: init?.method,
+      body: JSON.parse(String(init?.body)),
+    }))).toEqual([
+      {
+        url: "http://127.0.0.1:7717/api/agent/pages/42/context",
+        method: "POST",
+        body: pageCommand,
+      },
+      {
+        url: "http://127.0.0.1:7717/api/agent/pages/42/context",
+        method: "POST",
+        body: pageCommand,
+      },
+      {
+        url: "http://127.0.0.1:7717/api/agent/session-intents",
+        method: "POST",
+        body: {
+          kind: "set",
+          scope: exactScope,
+          expectedUrl: "https://example.com/research",
+          body: "Model-proposed exact next action",
+          provenance: {
+            method: "model",
+            sourceFingerprint: "intent-source-v1",
+            model: {
+              provider: "fixture",
+              name: "model-1",
+              promptVersion: "prompt-v2",
+            },
+            confidence: 0.8,
+          },
+          idempotencyKey: "model-intent-7",
+        },
+      },
+    ]);
+  });
+
   it("reviews disposable-page candidates through the exact paginated REST endpoint", async () => {
     const fetchImpl: typeof fetch = vi.fn(async () =>
       jsonResponse(retentionReviewResponse),
@@ -503,27 +709,137 @@ describe("TabHub REST adapter", () => {
     ]);
   });
 
-  it("sets tab importance through the exact REST mutation contract", async () => {
-    const fetchImpl: typeof fetch = vi.fn(async () =>
-      jsonResponse({ updated: 2, importance: 3 }),
-    );
+  it("sets user-commanded importance through the trusted agent REST contract", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl
+      .mockResolvedValueOnce(
+        jsonResponse({ context: false, logicalImportance: true }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ updated: 2, importance: 3 }));
+    const api = createTabHubApi({
+      baseUrl: "http://127.0.0.1:7717",
+      fetchImpl,
+    });
+
+    const runtimeInput = {
+      ids: [3, 4],
+      importance: 3 as const,
+      recordedBy: "user",
+      recordMethod: "manual",
+    };
+    await expect(api.setImportance(runtimeInput)).resolves.toEqual({
+      updated: 2,
+      importance: 3,
+    });
+
+    expect(
+      fetchImpl.mock.calls.map(([url, init]) => ({
+        url: String(url),
+        method: init?.method,
+        body: init?.body,
+      })),
+    ).toEqual([
+      {
+        url: "http://127.0.0.1:7717/api/features",
+        method: "GET",
+        body: undefined,
+      },
+      {
+        url: "http://127.0.0.1:7717/api/agent/tabs/importance",
+        method: "PATCH",
+        body: JSON.stringify({ ids: [3, 4], importance: 3 }),
+      },
+    ]);
+    expect(fetchImpl.mock.calls[1]![1]?.headers).toEqual({
+      "content-type": "application/json",
+    });
+  });
+
+  it("uses the exact legacy importance route when the feature is disabled", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl
+      .mockResolvedValueOnce(
+        jsonResponse({ context: false, logicalImportance: false }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ updated: 1, importance: 2 }));
     const api = createTabHubApi({
       baseUrl: "http://127.0.0.1:7717",
       fetchImpl,
     });
 
     await expect(
-      api.setImportance({ ids: [3, 4], importance: 3 }),
-    ).resolves.toEqual({ updated: 2, importance: 3 });
+      api.setImportance({ ids: [3], importance: 2 }),
+    ).resolves.toEqual({ updated: 1, importance: 2 });
 
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      "http://127.0.0.1:7717/api/features",
+      { method: "GET" },
+    );
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      "http://127.0.0.1:7717/api/tabs/importance",
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ids: [3], importance: 2 }),
+      },
+    );
+  });
+
+  it("falls back to the legacy route only when schema 17 returns feature 404", async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    fetchImpl
+      .mockResolvedValueOnce(new Response("Not Found", { status: 404 }))
+      .mockResolvedValueOnce(jsonResponse({ updated: 1, importance: 1 }));
+    const api = createTabHubApi({ fetchImpl });
+
+    await expect(
+      api.setImportance({ ids: [3], importance: 1 }),
+    ).resolves.toEqual({ updated: 1, importance: 1 });
+    expect(String(fetchImpl.mock.calls[1]![0])).toBe(
+      "http://127.0.0.1:7717/api/tabs/importance",
+    );
+  });
+
+  it("fails closed before importance mutation on malformed feature state", async () => {
+    const fetchImpl: typeof fetch = vi.fn(async () =>
+      jsonResponse({ logicalImportance: "yes" }),
+    );
+    const api = createTabHubApi({ fetchImpl });
+
+    await expect(
+      api.setImportance({ ids: [3], importance: 3 }),
+    ).rejects.toThrow(
+      "TabHub API GET /api/features returned an invalid response",
+    );
     expect(fetchImpl).toHaveBeenCalledOnce();
-    const [url, init] = vi.mocked(fetchImpl).mock.calls[0]!;
-    expect(String(url)).toBe("http://127.0.0.1:7717/api/tabs/importance");
-    expect(init).toMatchObject({
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ids: [3, 4], importance: 3 }),
+  });
+
+  it("fails closed before importance mutation on non-404 feature errors", async () => {
+    const fetchImpl: typeof fetch = vi.fn(async () =>
+      jsonResponse({ message: "Feature state unavailable" }, 503),
+    );
+    const api = createTabHubApi({ fetchImpl });
+
+    await expect(
+      api.setImportance({ ids: [3], importance: 3 }),
+    ).rejects.toThrow(
+      "TabHub API GET /api/features returned HTTP 503: Feature state unavailable",
+    );
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed before importance mutation when feature discovery is unreachable", async () => {
+    const fetchImpl: typeof fetch = vi.fn(async () => {
+      throw new TypeError("feature discovery connection failed");
     });
+    const api = createTabHubApi({ fetchImpl });
+
+    await expect(
+      api.setImportance({ ids: [3], importance: 3 }),
+    ).rejects.toThrow("feature discovery connection failed");
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it("creates links with explicit agent provenance", async () => {
@@ -563,6 +879,9 @@ describe("TabHub REST adapter", () => {
   it("rejects malformed importance and link mutation responses", async () => {
     const fetchImpl = vi.fn<typeof fetch>();
     fetchImpl
+      .mockResolvedValueOnce(
+        jsonResponse({ context: false, logicalImportance: true }),
+      )
       .mockResolvedValueOnce(jsonResponse({ updated: -1, importance: 3 }))
       .mockResolvedValueOnce(
         jsonResponse({ ...createdLink, createdBy: "system" }),
@@ -572,7 +891,7 @@ describe("TabHub REST adapter", () => {
     await expect(
       api.setImportance({ ids: [3], importance: 3 }),
     ).rejects.toThrow(
-      "TabHub API PATCH /api/tabs/importance returned an invalid response",
+      "TabHub API PATCH /api/agent/tabs/importance returned an invalid response",
     );
     await expect(
       api.linkTabs({ from: 3, to: 4, kind: "related" }),

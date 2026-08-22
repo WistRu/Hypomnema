@@ -29,8 +29,9 @@ class FakeElement {
 
   dispatchKey(key: string, shiftKey = false) {
     const preventDefault = vi.fn();
-    this.keydown?.({ key, preventDefault, shiftKey } as unknown as KeyboardEvent);
-    return preventDefault;
+    const stopPropagation = vi.fn();
+    this.keydown?.({ key, preventDefault, shiftKey, stopPropagation } as unknown as KeyboardEvent);
+    return { preventDefault, stopPropagation };
   }
 
   focus() {
@@ -71,14 +72,16 @@ describe("modal dialog focus", () => {
     expect(document.activeElement).toBe(cancel);
 
     confirm.focus();
-    expect(dialog.dispatchKey("Tab")).toHaveBeenCalledOnce();
+    expect(dialog.dispatchKey("Tab").preventDefault).toHaveBeenCalledOnce();
     expect(document.activeElement).toBe(cancel);
 
     cancel.focus();
-    expect(dialog.dispatchKey("Tab", true)).toHaveBeenCalledOnce();
+    expect(dialog.dispatchKey("Tab", true).preventDefault).toHaveBeenCalledOnce();
     expect(document.activeElement).toBe(confirm);
 
-    expect(dialog.dispatchKey("Escape")).toHaveBeenCalledOnce();
+    const escape = dialog.dispatchKey("Escape");
+    expect(escape.preventDefault).toHaveBeenCalledOnce();
+    expect(escape.stopPropagation).toHaveBeenCalledOnce();
     expect(dismiss).toHaveBeenCalledOnce();
 
     deactivate();

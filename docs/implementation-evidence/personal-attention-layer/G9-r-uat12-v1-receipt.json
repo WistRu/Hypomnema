@@ -1,0 +1,87 @@
+{
+  "version": 2,
+  "recordedAt": "2026-08-21T19:00:00+03:00",
+  "status": "PASS",
+  "repositoryHead": "40f5297250cfd214d7fbac2639c013228044e56d",
+  "fixture": {
+    "id": "R-UAT12-v1",
+    "construction": "fresh_schema26_via_production_catalogs",
+    "databasePath": ".tmp/personal-attention-layer/g9-isolated-20260821/r-uat12-v1-catalog.sqlite",
+    "databaseSha256": "4d2d5273ea54b3ed9eab715a4a75b18f67045bfb6a44821ac3b10ccaa72c24d2",
+    "runtimeCopyPath": ".tmp/personal-attention-layer/g9-isolated-20260821/r-uat12-v1-runtime-20260821.sqlite",
+    "runtimeCopySha256AtLaunch": "4d2d5273ea54b3ed9eab715a4a75b18f67045bfb6a44821ac3b10ccaa72c24d2",
+    "runtimeCopyMayReceiveExtensionSnapshots": true,
+    "materializerPath": ".tmp/personal-attention-layer/g9-isolated-20260821/materialize-r-uat12-v1.ts",
+    "materializerSha256": "6c190b4e85a6c4de132c21c503d9b48b091ce9e47e954a862264abccc695bb38",
+    "materializationOutputPath": ".tmp/personal-attention-layer/g9-isolated-20260821/r-uat12-v1-materialization-output.json",
+    "probePath": ".tmp/personal-attention-layer/g9-isolated-20260821/probe-r-uat12-v1.ts",
+    "probeSha256": "259fe6d560763d287c4b25ee6c022851d2491525236f0920512f3be42a1b978c",
+    "probeOutputPath": ".tmp/personal-attention-layer/g9-isolated-20260821/r-uat12-v1-safe-http-output.json",
+    "probeOutputSha256": "bd54b057ef399a46f214a5a60cae66a04217f9e711f732bc52cbbb3c4947d309",
+    "urlSetSha256": "ae5c5f78fa675a35d66b7ca5f02d5d260fc70fec638ccef095b251b109c99aa6",
+    "resourceId": 2,
+    "resourceKey": "fixture:r-uat12-v1",
+    "resourceName": "R-UAT12-v1 IANA public fixture",
+    "accessClass": "public",
+    "rulesetVersion": 2,
+    "logicalPageCount": 12,
+    "capturedCount": 6,
+    "missingCount": 6,
+    "schemaVersion": 26,
+    "integrityCheck": "ok",
+    "foreignKeyViolationCount": 0,
+    "preflightCoverage": {
+      "discovered": 12,
+      "captured": 6,
+      "eligible": 6,
+      "used": 0,
+      "missing": 6,
+      "failed": 0
+    },
+    "corpusFingerprint": "1eae07fc109b74780ca51753c83e09d359b43c7d55d4d4b7ed169f244bea669f",
+    "approvalFingerprint": "154f5a8205a24601a95bf715032c3be9da71fbcf0319b357a95d4aa7a94b5265"
+  },
+  "productionInterfaces": [
+    "createResourceCatalog",
+    "createResourceCommandCatalog",
+    "createLogicalPageCatalog",
+    "createTabInstanceCatalog",
+    "createTabCatalog",
+    "buildCurrentResearchProjection",
+    "projectResearchPreflight"
+  ],
+  "productionSafePublicHttpClientProbe": {
+    "allPassed": true,
+    "allStatus200": true,
+    "allUsable": true,
+    "allDnsCalls": 1,
+    "allConnectAttempts": 1,
+    "selectedIpv4": "104.18.24.232",
+    "answerSetDigest": "2b7af3b22cce06ae314802aeba877fd16eb0debafc4e202f016f462e34ba0232",
+    "capturedUrls": [
+      "https://www.iana.org/domains/arpa",
+      "https://www.iana.org/domains/int",
+      "https://www.iana.org/domains/reserved",
+      "https://www.iana.org/domains/root",
+      "https://www.iana.org/help/example-domains",
+      "https://www.iana.org/time-zones"
+    ],
+    "missingUrls": [
+      "https://www.iana.org/",
+      "https://www.iana.org/about",
+      "https://www.iana.org/about/organization",
+      "https://www.iana.org/archive",
+      "https://www.iana.org/contact",
+      "https://www.iana.org/domains"
+    ]
+  },
+  "j3": {
+    "fixtureReady": true,
+    "providerReady": false,
+    "started": false,
+    "reason": "ANTHROPIC_API_KEY and immutable research model/pricing configuration are not configured"
+  },
+  "workingRuntimeTouched": false,
+  "workingDatabaseTouched": false,
+  "verdict": "FIXTURE_READY_PENDING_PROVIDER"
+}

@@ -1,0 +1,127 @@
+.live-run-view {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.live-run-header,
+.live-run-state-grid {
+  align-items: start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.live-run-header h2,
+.live-run-header p,
+.live-run-state-grid p {
+  margin-block: 0.25rem;
+}
+
+.live-run-eyebrow {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.live-run-state-grid > div {
+  border: 1px solid var(--border, #334155);
+  border-radius: 0.75rem;
+  flex: 1 1 18rem;
+  padding: 1rem;
+}
+
+.live-run-callout,
+.live-run-privacy {
+  border: 2px solid currentColor;
+  border-radius: 0.75rem;
+  font-weight: 700;
+  margin: 0;
+  padding: 0.75rem 1rem;
+}
+
+.live-run-details,
+.live-run-counters {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  margin: 0;
+}
+
+.live-run-details > div,
+.live-run-counters > div {
+  background: var(--surface-subtle, rgb(148 163 184 / 10%));
+  border-radius: 0.5rem;
+  padding: 0.65rem;
+}
+
+.live-run-details dd,
+.live-run-counters dd {
+  font-weight: 700;
+  margin: 0.25rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.live-run-origins {
+  display: grid;
+  gap: 0.35rem;
+  padding-inline-start: 1.25rem;
+}
+
+.live-run-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.live-run-table {
+  border-collapse: collapse;
+  min-width: 58rem;
+  width: 100%;
+}
+
+.live-run-table caption {
+  text-align: start;
+  margin-block-end: 0.5rem;
+}
+
+.live-run-table th,
+.live-run-table td {
+  border-block-end: 1px solid var(--border, #334155);
+  padding: 0.7rem;
+  text-align: start;
+  vertical-align: top;
+}
+
+.live-run-table td > span,
+.live-run-table td > small,
+.live-run-table th > span,
+.live-run-table th > small {
+  display: block;
+  margin-block-end: 0.25rem;
+}
+
+.live-run-table code {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.live-run-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.live-run-badge,
+.live-run-redacted {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  display: inline-block;
+  font-size: 0.75rem;
+  padding: 0.12rem 0.4rem;
+}
+
+.live-run-view button:focus-visible {
+  outline: 3px solid currentColor;
+  outline-offset: 2px;
+}

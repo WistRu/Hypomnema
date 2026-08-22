@@ -324,15 +324,18 @@ function relayedTabCommandResult(
       ...(result.retry === undefined ? {} : { retry: result.retry }),
     };
   }
-  return {
-    failed: result.failed,
-    kind: result.kind,
-    openedTabIds: result.openedTabIds,
-    requested: result.requested,
-    ...(result.destinationWindowId === undefined
-      ? {}
-      : { destinationWindowId: result.destinationWindowId }),
-  };
+  if (result.kind === "open-workspace") {
+    return {
+      failed: result.failed,
+      kind: result.kind,
+      openedTabIds: result.openedTabIds,
+      requested: result.requested,
+      ...(result.destinationWindowId === undefined
+        ? {}
+        : { destinationWindowId: result.destinationWindowId }),
+    };
+  }
+  throw new Error("Unexpected capture result in a physical-tab mutation flow.");
 }
 
 function DuplicateRelationship({

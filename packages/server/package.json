@@ -8,8 +8,12 @@
     "start": "node dist/main.js",
     "build": "tsup src/main.ts --format esm --platform node --target node22 --clean && node scripts/build-foreground-helper.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "backup": "tsx src/backup.ts"
+    "test": "vitest run --maxWorkers=2",
+    "backup": "tsx src/backup.ts",
+    "baseline:g0": "tsx src/baseline-cli.ts",
+    "baseline:g3": "tsx src/baseline-g3-cli.ts",
+    "baseline:g6": "tsx src/baseline-g6-cli.ts",
+    "baseline:g8": "tsx src/baseline-g8-cli.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
@@ -19,7 +23,10 @@
     "better-sqlite3": "^13.0.3",
     "dotenv": "^17.4.2",
     "fastify": "^5.11.2",
-    "sqlite-vec": "0.1.9"
+    "ipaddr.js": "2.5.0",
+    "parse5": "8.0.1",
+    "sqlite-vec": "0.1.9",
+    "tldts": "7.4.10"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1"

@@ -1,0 +1,40 @@
+.research-purge-control {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.research-purge-status {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.research-purge-status p {
+  margin: 0;
+}
+
+.research-purge-backdrop {
+  align-items: center;
+  background: rgb(5 8 16 / 72%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  position: fixed;
+  z-index: 1000;
+}
+
+.research-purge-dialog {
+  background: var(--panel, #151923);
+  border: 1px solid var(--border, #394052);
+  border-radius: 0.75rem;
+  box-shadow: 0 1rem 3rem rgb(0 0 0 / 45%);
+  max-width: 32rem;
+  padding: 1.25rem;
+  width: calc(100% - 2rem);
+}
+
+.research-purge-dialog-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+}

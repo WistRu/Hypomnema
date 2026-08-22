@@ -5,8 +5,10 @@ import { fileURLToPath } from "node:url";
 import { config as loadEnvironment } from "dotenv";
 
 import { createApp } from "./app.js";
+import { resolvePersonalAttentionFeatureFlags } from "./attention-feature-flags.js";
 import { createWindowsBrowserForegroundHandoff } from "./browser-foreground.js";
 import { createAnthropicSummaryProvider } from "./summary-provider.js";
+import { createAnthropicResearchProvider } from "./research-provider.js";
 import { createEmbeddingProviderFromEnv } from "./embedding-provider.js";
 import { resolveServerHost } from "./runtime-config.js";
 import { listenWithCleanup } from "./server-lifecycle.js";
@@ -40,6 +42,19 @@ function positiveInteger(name: string, fallback: number): number {
   const value = positiveNumber(name, fallback);
   if (!Number.isSafeInteger(value)) {
     throw new Error(`${name} must be a positive integer`);
+  }
+  return value;
+}
+
+function boundedInteger(
+  name: string,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const value = positiveInteger(name, fallback);
+  if (value < minimum || value > maximum) {
+    throw new Error(`${name} must be between ${minimum} and ${maximum}`);
   }
   return value;
 }
@@ -84,6 +99,38 @@ const summaryProvider =
         ),
         timeoutMs: positiveInteger("TABHUB_SUMMARY_TIMEOUT_MS", 120_000),
       });
+const researchIntroductoryPricing = Date.now() < sonnetStandardPricingStartsAt;
+const researchPricing = Object.freeze({
+  inputUsdPerMillionTokens: positiveNumber(
+    "ANTHROPIC_RESEARCH_INPUT_USD_PER_MTOK",
+    researchIntroductoryPricing ? 2 : 3,
+  ),
+  outputUsdPerMillionTokens: positiveNumber(
+    "ANTHROPIC_RESEARCH_OUTPUT_USD_PER_MTOK",
+    researchIntroductoryPricing ? 10 : 15,
+  ),
+});
+const configuredResearchPricingVersion =
+  process.env.ANTHROPIC_RESEARCH_PRICING_VERSION?.trim();
+const researchProvider =
+  anthropicApiKey === undefined || anthropicApiKey === ""
+    ? undefined
+    : createAnthropicResearchProvider({
+        apiKey: anthropicApiKey,
+        model:
+          process.env.ANTHROPIC_RESEARCH_MODEL ??
+          process.env.ANTHROPIC_DEEP_MODEL ??
+          "claude-sonnet-5",
+        promptVersion: "tabhub-resource-research-v1",
+        pricingVersion: configuredResearchPricingVersion ||
+          `anthropic-usd-mtok-${researchPricing.inputUsdPerMillionTokens}-${researchPricing.outputUsdPerMillionTokens}-v1`,
+        pricing: researchPricing,
+        maxOutputTokens: positiveInteger(
+          "TABHUB_RESEARCH_MAX_OUTPUT_TOKENS",
+          8_192,
+        ),
+        timeoutMs: positiveInteger("TABHUB_RESEARCH_TIMEOUT_MS", 120_000),
+      });
 const embeddingProvider = createEmbeddingProviderFromEnv(process.env);
 const foregroundHelperPath = resolve(
   workspaceRoot,
@@ -101,17 +148,28 @@ const app = createApp({
     ? {}
     : { browserForegroundHandoff }),
   databasePath,
+  featureFlags: resolvePersonalAttentionFeatureFlags(process.env),
   logger: true,
+  ...(process.env.TABHUB_DEV_PROXY_SECRET?.trim()
+    ? { localDevProxySecret: process.env.TABHUB_DEV_PROXY_SECRET.trim() }
+    : {}),
   tabCommandRelayAppOrigins: [
     `http://${host}:${port}`,
     `http://localhost:${port}`,
   ],
   webRoot: existsSync(webRoot) ? webRoot : false,
   ...(summaryProvider === undefined ? {} : { summaryProvider }),
+  ...(researchProvider === undefined ? {} : { researchProvider }),
   ...(embeddingProvider === undefined ? {} : { embeddingProvider }),
   summaryDailyLimit: positiveInteger("TABHUB_DAILY_SUMMARY_LIMIT", 100),
   summaryMaxAttempts: positiveInteger("TABHUB_SUMMARY_MAX_ATTEMPTS", 5),
   summaryWorkerPollMs: positiveInteger("TABHUB_SUMMARY_POLL_MS", 1_000),
+  liveAcquisitionMaxAttemptsPerUtcDay: boundedInteger(
+    "TABHUB_LIVE_ACQUISITION_MAX_ATTEMPTS_PER_UTC_DAY",
+    20,
+    1,
+    100,
+  ),
 });
 
 try {

@@ -25,6 +25,7 @@ export interface EmbeddingSearchFilters {
   status?: TabStatus;
   importance?: TabImportance;
   tag?: string;
+  resourceId?: number;
 }
 
 export interface RankedTabPage {
@@ -431,6 +432,18 @@ export function createEmbeddingCatalog(
         JOIN descendants ON descendants.id = tab_tags.tag_id
       )`);
       parameters.push(filters.tag);
+    }
+    if (filters.resourceId !== undefined) {
+      predicates.push(`EXISTS (
+        SELECT 1
+        FROM logical_page_resource_heads AS resource_heads
+        JOIN logical_page_resource_assignments AS assignments
+          ON assignments.id = resource_heads.assignment_id
+        WHERE resource_heads.logical_page_id = tabs.logical_page_id
+          AND assignments.action = 'assigned'
+          AND assignments.resource_id = ?
+      )`);
+      parameters.push(filters.resourceId);
     }
     if (excludeTabId !== undefined) {
       predicates.push("vec_contents.tab_id != ?");

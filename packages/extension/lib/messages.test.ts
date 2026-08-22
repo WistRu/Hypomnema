@@ -22,6 +22,7 @@ describe("isExtensionRequest", () => {
     { browser: "", type: "tabhub:browser-changed" },
     { browser: "firefox", type: "tabhub:browser-changed" },
     { browser: 7, type: "tabhub:browser-changed" },
+    { browser: "chrome", extra: true, type: "tabhub:browser-changed" },
   ])("rejects an invalid identity-change message: %#", (message) => {
     expect(isExtensionRequest(message)).toBe(false);
   });
@@ -52,6 +53,114 @@ describe("isExtensionRequest", () => {
         type: "tabhub:app-tab-command",
       }),
     ).toBe(true);
+    expect(
+      isExtensionRequest({
+        body: "Compare this source",
+        entryKind: "purpose",
+        idempotencyKey: "intent-1",
+        scope: "this_tab",
+        type: "tabhub:context-save",
+        visibility: "local_only",
+      }),
+    ).toBe(false);
+  });
+
+  it("accepts strict pairing and context mutation messages", () => {
+    expect(
+      isExtensionRequest({
+        challengeId: "323e4567-e89b-42d3-a456-426614174000",
+        code: "x".repeat(40),
+        type: "tabhub:context-pair",
+      }),
+    ).toBe(true);
+    expect(
+      isExtensionRequest({
+        body: "Compare this source",
+        entryKind: "purpose",
+        expectedUrl: "https://example.com/article",
+        idempotencyKey: "intent-1",
+        scope: "this_tab",
+        targetScope: {
+          browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+          browserTabId: 42,
+          installationId: "123e4567-e89b-42d3-a456-426614174000",
+        },
+        type: "tabhub:context-save",
+        visibility: "local_only",
+      }),
+    ).toBe(true);
+    expect(
+      isExtensionRequest({
+        body: "Compare this source",
+        entryKind: "purpose",
+        expectedUrl: "https://example.com/article",
+        idempotencyKey: "intent-1",
+        scope: "this_tab",
+        targetScope: {
+          browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+          browserTabId: 42,
+          installationId: "123e4567-e89b-42d3-a456-426614174000",
+        },
+        type: "tabhub:context-save",
+        visibility: "local_only",
+        credential: "must-not-cross-message-seam",
+      }),
+    ).toBe(false);
+    expect(
+      isExtensionRequest({ type: "tabhub:context-current", extra: true }),
+    ).toBe(false);
+    const promote = {
+      contextKind: "question",
+      expectedPage: {
+        instanceRevision: 3,
+        logicalPageId: 17,
+        url: "https://example.com/article",
+        urlNormalized: "https://example.com/article",
+      },
+      idempotencyKey: "promote-1",
+      intentId: 7,
+      kind: "promote",
+      scope: {
+        browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+        browserTabId: 42,
+        installationId: "123e4567-e89b-42d3-a456-426614174000",
+      },
+      type: "tabhub:context-intent-action",
+    } as const;
+    expect(isExtensionRequest(promote)).toBe(true);
+    const { expectedPage: _expectedPage, ...unboundPromote } = promote;
+    expect(isExtensionRequest(unboundPromote)).toBe(false);
+    expect(
+      isExtensionRequest({
+        ...promote,
+        kind: "archive",
+      }),
+    ).toBe(true);
+    const {
+      expectedPage: _archiveExpectedPage,
+      ...unboundArchive
+    } = { ...promote, kind: "archive" as const };
+    expect(isExtensionRequest(unboundArchive)).toBe(false);
+    expect(
+      isExtensionRequest({
+        queueHeadId: "stale-head-id",
+        type: "tabhub:context-discard-stale",
+      }),
+    ).toBe(true);
+    expect(
+      isExtensionRequest({
+        queueHeadId: "stale-head-id",
+        type: "tabhub:context-discard-stale",
+        confirmed: true,
+      }),
+    ).toBe(false);
+    expect(
+      isExtensionRequest({
+        challengeId: "------------------------------------",
+        code: "x".repeat(40),
+        type: "tabhub:context-pair",
+      }),
+    ).toBe(false);
   });
 
   it.each([

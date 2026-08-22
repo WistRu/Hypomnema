@@ -10,6 +10,7 @@ import { I18nProvider } from "../src/i18n";
 
 const mocks = vi.hoisted(() => ({
   assignTag: vi.fn(),
+  fetchFeatureFlags: vi.fn(),
   fetchLibraryOpenTabs: vi.fn(),
   fetchTabs: vi.fn(),
   fetchTagTree: vi.fn(),
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../src/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/api")>()),
   assignTag: mocks.assignTag,
+  fetchFeatureFlags: mocks.fetchFeatureFlags,
   fetchLibraryOpenTabs: mocks.fetchLibraryOpenTabs,
   fetchTabs: mocks.fetchTabs,
   fetchTagTree: mocks.fetchTagTree,
@@ -139,6 +141,10 @@ describe("Library bulk topic assignment", () => {
     vi.stubGlobal("ResizeObserver", ResizeObserverStub);
 
     mocks.fetchTabs.mockResolvedValue(tabs);
+    mocks.fetchFeatureFlags.mockResolvedValue({
+      context: false,
+      logicalImportance: false,
+    });
     mocks.fetchTagTree.mockResolvedValue(topics);
     mocks.assignTag.mockResolvedValue({ assigned: 1, tagId: 7 });
 

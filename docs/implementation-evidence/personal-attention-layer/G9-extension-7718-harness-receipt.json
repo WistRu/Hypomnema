@@ -1,0 +1,84 @@
+{
+  "version": 2,
+  "recordedAt": "2026-08-21T19:00:00+03:00",
+  "status": "PASS_ISOLATED_SMOKE",
+  "repositoryHead": "40f5297250cfd214d7fbac2639c013228044e56d",
+  "purpose": "isolated G9 exact-tab relay and tab-count invariance smoke without interrupting the working 7717 runtime",
+  "artifact": {
+    "path": ".tmp/personal-attention-layer/g9-isolated-20260821/extension-7718-harness/packages/extension/.output/chrome-mv3",
+    "manifestSha256": "a7b2350eb3557b06ce964ceea3ca4d5ed634e08f439c6da7d95b6cf2c0a258d4",
+    "buildExitCode": 0,
+    "filesContaining7717": 0,
+    "filesContaining7718": 5,
+    "separateUnpackedPath": true,
+    "separateExtensionIdentityObserved": true
+  },
+  "sourceMirror": {
+    "trackedProductionFilesChanged": false,
+    "mechanicalPortChangeFiles": [
+      "packages/extension/lib/constants.ts",
+      "packages/extension/lib/messages.ts",
+      "packages/extension/entrypoints/tabhub-bridge.content.ts",
+      "packages/extension/wxt.config.ts"
+    ],
+    "quarantine": [
+      {
+        "path": "packages/extension/entrypoints/background.ts",
+        "sha256": "1dcb57750d03b5c7a225e0c93597ebc8db61a6f6eb1d28d8c9272ac84d7dc1b7",
+        "matchesAcceptedSource": true
+      },
+      {
+        "path": "packages/extension/lib/tab-command-relay-agent.ts",
+        "sha256": "c17823544a43077914f1bfa8d13db6e550bcfab761fe681b992b22d6dbc4e25c",
+        "matchesAcceptedSource": true
+      },
+      {
+        "path": "packages/extension/lib/tab-command-relay-agent.test.ts",
+        "sha256": "7a2eef5483d7ff7d185738da62110676be5667ac146be83be7a20c1e13f0946f",
+        "matchesAcceptedSource": true
+      }
+    ]
+  },
+  "isolatedRuntime": {
+    "port": 7718,
+    "pid": 692804,
+    "databasePath": ".tmp/personal-attention-layer/g9-isolated-20260821/r-uat12-v1-runtime-20260821.sqlite",
+    "health": "ok",
+    "database": "ok",
+    "schemaVersion": 26,
+    "resources": true,
+    "research": true,
+    "privacyPurge": true,
+    "liveAcquisition": false
+  },
+  "workingRuntime": {
+    "port": 7717,
+    "pid": 581820,
+    "schemaVersion": 17,
+    "touched": false
+  },
+  "browser": {
+    "harnessLoaded": true,
+    "browser": "chrome",
+    "browserSessionId": "9d5e465a-bd07-4dbf-a51a-16d123d11ee6",
+    "installationId": "9004c57e-e85e-4982-a296-6f4381845e2b",
+    "protocolVersion": 5,
+    "windowCountBefore": 22,
+    "tabCountBefore": 475,
+    "pendingUndoCountBefore": 0,
+    "command": {
+      "kind": "activate-tab",
+      "requestId": "ff84df90-9e33-442e-8f48-1ba36bf508eb",
+      "targetTabId": 492497906,
+      "targetUrl": "http://127.0.0.1:7718/app/",
+      "resultWindowId": 492493503,
+      "resultWindowTitle": "TabHub",
+      "ok": true
+    },
+    "tabCountAfter": 475,
+    "exactTargetCountAfter": 1,
+    "tabWindowMutationObserved": false
+  },
+  "qualification": "This proves the isolated 7718 relay/activation path and zero new-tab mutation. It does not replace Final A99 proof on the exact R99-selected production artifact or the still-pending typed captured-only fallback journey.",
+  "verdict": "PASS_ISOLATED_SMOKE"
+}

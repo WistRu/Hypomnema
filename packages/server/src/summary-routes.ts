@@ -1,5 +1,6 @@
 import {
   jobIdParamSchema,
+  summaryContentRevisionMismatchErrorSchema,
   summaryEnqueueResponseSchema,
   summaryJobSchema,
   summarizeTabSchema,
@@ -8,16 +9,19 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 
 import {
   SummaryContentMissingError,
+  SummaryContentRevisionMismatchError,
   SummaryTabNotFoundError,
   type SummaryCatalog,
 } from "./summary-catalog.js";
 import type { SummaryProvider } from "./summary-provider.js";
-import type { SummaryWorker } from "./summary-worker.js";
+export interface SummaryWakeScheduler {
+  wake(): void;
+}
 
 export interface SummaryRouteOptions {
   catalog: SummaryCatalog;
   provider: SummaryProvider | undefined;
-  worker: SummaryWorker | undefined;
+  worker: SummaryWakeScheduler | undefined;
   maxAttempts: number;
 }
 
@@ -50,6 +54,9 @@ export function registerSummaryRoutes(
 
     try {
       const result = options.catalog.enqueue(params.data.id, body.data.depth, {
+        ...(body.data.expectedContentRevision === undefined
+          ? {}
+          : { expectedContentRevision: body.data.expectedContentRevision }),
         maxAttempts: options.maxAttempts,
         requestedBy: body.data.requestedBy,
         requestedModel: options.provider.modelFor(body.data.depth),
@@ -68,6 +75,16 @@ export function registerSummaryRoutes(
           error: error.code,
           message: error.message,
         });
+      }
+      if (error instanceof SummaryContentRevisionMismatchError) {
+        return reply.code(409).send(
+          summaryContentRevisionMismatchErrorSchema.parse({
+            error: error.code,
+            message: error.message,
+            expectedContentRevision: error.expectedContentRevision,
+            currentContentRevision: error.currentContentRevision,
+          }),
+        );
       }
 
       throw error;

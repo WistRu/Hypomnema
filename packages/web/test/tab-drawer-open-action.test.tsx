@@ -45,8 +45,13 @@ function renderDrawer(
   tab: TabDetailResponse,
   activationError?: string,
   instances: TabInstance[] = [],
+  contextEnabled = true,
 ): string {
   const queryClient = new QueryClient();
+  queryClient.setQueryData(["features"], {
+    context: contextEnabled,
+    logicalImportance: false,
+  });
   queryClient.setQueryData(["tab", tab.id], tab);
   queryClient.setQueryData(["links", tab.id], { items: [] });
   queryClient.setQueryData(
@@ -148,6 +153,50 @@ describe("tab drawer browser action", () => {
     expect(markup).toContain("Window 8 | position 5 | tab 202");
     expect(markup).toContain("5m");
     expect(markup).toContain("5s");
+    expect(markup.match(/Only this open tab/g)).toHaveLength(2);
+    expect(markup).toContain(
+      'aria-label="Use exact context for First copy in Chrome, window 7, tab 101"',
+    );
+    expect(markup).toContain(
+      'aria-label="Use exact context for Second copy in Chrome, window 8, tab 202"',
+    );
+  });
+
+  it("hides exact-context copy actions when personal context is disabled", () => {
+    const common = {
+      active: false,
+      audible: false,
+      browser: "chrome",
+      browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+      browserTabId: 101,
+      canonicalTabId: 17,
+      discarded: false,
+      duplicateGroupSize: 1,
+      engagedTimeMs: 0,
+      faviconUrl: null,
+      firstSeenAt: "2026-08-09T00:00:00.000Z",
+      foregroundTimeMs: 0,
+      importance: 0 as const,
+      index: 2,
+      installationId: "123e4567-e89b-42d3-a456-426614174000",
+      instanceId: 1,
+      lastAccessed: null,
+      lastSeenAt: "2026-08-09T00:15:00.000Z",
+      muted: false,
+      pinned: false,
+      status: "inbox" as const,
+      summary: null,
+      tagPaths: [],
+      title: "First copy",
+      url: "https://example.com/existing",
+      urlNormalized: "https://example.com/existing",
+      windowId: 7,
+    } satisfies TabInstance;
+
+    const markup = renderDrawer(tabDetail(true), undefined, [common], false);
+
+    expect(markup).not.toContain("Only this open tab");
+    expect(markup).not.toContain("Use exact context for First copy");
   });
 
   it("shows lifetime page activity even when no physical copy is open", () => {

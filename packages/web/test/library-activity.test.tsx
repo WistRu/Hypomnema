@@ -9,6 +9,7 @@ import { App } from "../src/App";
 import { I18nProvider } from "../src/i18n";
 
 const mocks = vi.hoisted(() => ({
+  fetchFeatureFlags: vi.fn(),
   fetchLibraryOpenTabs: vi.fn(),
   fetchTabs: vi.fn(),
   fetchTagTree: vi.fn(),
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../src/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/api")>()),
+  fetchFeatureFlags: mocks.fetchFeatureFlags,
   fetchLibraryOpenTabs: mocks.fetchLibraryOpenTabs,
   fetchTabs: mocks.fetchTabs,
   fetchTagTree: mocks.fetchTagTree,
@@ -134,6 +136,10 @@ describe("Library activity", () => {
       unobserve() {}
     }
     vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+    mocks.fetchFeatureFlags.mockResolvedValue({
+      context: false,
+      logicalImportance: false,
+    });
     mocks.fetchTabs.mockResolvedValue(tabs);
     mocks.fetchTagTree.mockResolvedValue(topics);
 

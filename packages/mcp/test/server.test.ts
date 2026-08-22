@@ -2,8 +2,12 @@ import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import type {
   ClusterInboxResponse,
+  ExactTabScope,
   RetentionReviewResponse,
   RetentionTrashResponse,
+  ShareableContextBundle,
+  ShareableContextEntry,
+  ShareableSessionIntentBundle,
   SummaryJob,
   TabDetailResponse,
   TabListResponse,
@@ -12,6 +16,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createMcpServer,
+  type AgentContextMutationReceipt,
+  type AgentSessionIntentMutationReceipt,
   type ListTabsInput,
   type McpServerOptions,
   type TabHubApi,
@@ -21,6 +27,7 @@ const tabList: TabListResponse = {
   items: [
     {
       id: 1,
+      logicalPageId: 1,
       url: "https://example.com/agent-notes",
       urlNormalized: "https://example.com/agent-notes",
       title: "Agent notes",
@@ -156,6 +163,61 @@ const retentionTrashResponse: RetentionTrashResponse = {
   pageSize: 10,
 };
 
+const exactScope: ExactTabScope = {
+  installationId: "122e4567-e89b-42d3-a456-426614174000",
+  browserSessionId: "222e4567-e89b-42d3-a456-426614174000",
+  browserTabId: 7,
+};
+const shareableContextEntry: ShareableContextEntry = {
+  entryKind: "purpose",
+  body: "Compare agent frameworks",
+  provenance: { actor: "agent", method: "on_behalf_of_user" },
+  visibility: "share_with_ai",
+  staleAt: null,
+  state: "active",
+  createdAt: "2026-08-12T10:00:00.000Z",
+  reviewVerdict: null,
+};
+const shareableContextBundle: ShareableContextBundle = {
+  subject: { type: "page", logicalPageId: 42 },
+  entries: [shareableContextEntry],
+  currentEntries: [shareableContextEntry],
+  preview: {
+    entryKind: "purpose",
+    body: "Compare agent frameworks",
+    actor: "agent",
+  },
+};
+const shareableSessionIntentBundle: ShareableSessionIntentBundle = {
+  scope: exactScope,
+  current: {
+    scope: exactScope,
+    subject: { type: "page", logicalPageId: 42 },
+    expectedPage: {
+      logicalPageId: 42,
+      url: "https://example.com/research",
+      urlNormalized: "https://example.com/research",
+      instanceRevision: 3,
+    },
+    body: "Compare this exact open copy",
+    provenance: { actor: "agent", method: "on_behalf_of_user" },
+    visibility: "share_with_ai",
+    staleAt: null,
+    state: "active",
+    createdAt: "2026-08-12T10:01:00.000Z",
+    updatedAt: "2026-08-12T10:01:00.000Z",
+  },
+  history: [],
+};
+const contextMutationReceipt: AgentContextMutationReceipt = {
+  kind: "appended",
+  entry: shareableContextEntry,
+};
+const sessionIntentMutationReceipt: AgentSessionIntentMutationReceipt = {
+  kind: "set",
+  intent: shareableSessionIntentBundle.current!,
+};
+
 const toolNames = [
   "cluster_inbox",
   "close_and_forget_page",
@@ -174,9 +236,83 @@ const toolNames = [
   "list_tags",
   "get_stats",
 ];
+const contextToolNames = [
+  "get_page_context",
+  "get_tab_session_intent",
+  "search_page_context",
+  "set_page_context",
+  "set_tab_session_intent",
+];
 
 function createApi(overrides: Partial<TabHubApi> = {}): TabHubApi {
   return {
+    getFeatures: async () => ({ context: false, logicalImportance: false }),
+    listResources: async () => ({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 50,
+    }),
+    getResource: async () => {
+      throw new Error("not implemented in this test");
+    },
+    listResourcePages: async () => ({
+      items: [],
+      total: 0,
+      page: 1,
+      pageSize: 50,
+    }),
+    getResourceActivity: async () => {
+      throw new Error("not implemented in this test");
+    },
+    getResourceContext: async () => {
+      throw new Error("not implemented in this test");
+    },
+    setResourceContext: async () => {
+      throw new Error("not implemented in this test");
+    },
+    setResourceEvaluation: async () => {
+      throw new Error("not implemented in this test");
+    },
+    explainPriority: async () => {
+      throw new Error("not implemented in this test");
+    },
+    recordPriorityFeedback: async () => {
+      throw new Error("not implemented in this test");
+    },
+    recomputePriority: async () => {
+      throw new Error("not implemented in this test");
+    },
+    getJobStatus: async () => {
+      throw new Error("not implemented in this test");
+    },
+    startResearch: async () => {
+      throw new Error("not implemented in this test");
+    },
+    getAiJob: async () => {
+      throw new Error("not implemented in this test");
+    },
+    cancelAiJob: async () => {
+      throw new Error("not implemented in this test");
+    },
+    listResearchReports: async () => {
+      throw new Error("not implemented in this test");
+    },
+    getResearchReport: async () => {
+      throw new Error("not implemented in this test");
+    },
+    setUserImportance: async () => {
+      throw new Error("not implemented in this test");
+    },
+    getPageContext: async () => shareableContextBundle,
+    searchPageContext: async () => [shareableContextEntry],
+    setPageContext: async () => {
+      throw new Error("not implemented in this test");
+    },
+    getTabSessionIntent: async () => shareableSessionIntentBundle,
+    setTabSessionIntent: async () => {
+      throw new Error("not implemented in this test");
+    },
     reviewDisposablePages: async () => ({
       items: [],
       total: 0,
@@ -265,6 +401,232 @@ function textResult(result: Awaited<ReturnType<Client["callTool"]>>): string {
 }
 
 describe("TabHub MCP server", () => {
+  it("keeps the exact baseline surface off and adds context tools/resources only when discovered on", async () => {
+    const disabled = await connectClient(createApi());
+    const enabled = await connectClient(createApi(), {
+      features: { context: true, logicalImportance: false },
+    });
+    try {
+      expect((await disabled.client.listTools()).tools.map(({ name }) => name).sort()).toEqual(
+        [...toolNames].sort(),
+      );
+      expect(
+        (await disabled.client.listResourceTemplates()).resourceTemplates.map(
+          ({ uriTemplate }) => uriTemplate,
+        ),
+      ).toEqual(["tabhub://tab/{id}"]);
+
+      expect((await enabled.client.listTools()).tools.map(({ name }) => name).sort()).toEqual(
+        [...toolNames, ...contextToolNames].sort(),
+      );
+      expect(
+        (await enabled.client.listResourceTemplates()).resourceTemplates.map(
+          ({ uriTemplate }) => uriTemplate,
+        ).sort(),
+      ).toEqual(["tabhub://logical-page/{id}", "tabhub://tab/{id}"]);
+    } finally {
+      await disabled.close();
+      await enabled.close();
+    }
+  });
+
+  it("maps context reads to page-scoped shareable interfaces without adding private metadata", async () => {
+    const getPageContext = vi.fn(async () => shareableContextBundle);
+    const searchPageContext = vi.fn(async () => [shareableContextEntry]);
+    const getTabSessionIntent = vi.fn(async () => shareableSessionIntentBundle);
+    const connection = await connectClient(
+      createApi({ getPageContext, searchPageContext, getTabSessionIntent }),
+      { features: { context: true, logicalImportance: false } },
+    );
+    try {
+      const listed = await connection.client.listTools();
+      for (const name of [
+        "get_page_context",
+        "search_page_context",
+        "get_tab_session_intent",
+      ]) {
+        expect(listed.tools.find((tool) => tool.name === name)?.annotations).toMatchObject({
+          readOnlyHint: true,
+          openWorldHint: false,
+        });
+      }
+
+      const page = await connection.client.callTool({
+        name: "get_page_context",
+        arguments: { logical_page_id: 42 },
+      });
+      const search = await connection.client.callTool({
+        name: "search_page_context",
+        arguments: {
+          logical_page_id: 42,
+          query: "agent frameworks",
+          limit: 12,
+        },
+      });
+      const intent = await connection.client.callTool({
+        name: "get_tab_session_intent",
+        arguments: {
+          installation_id: exactScope.installationId,
+          browser_session_id: exactScope.browserSessionId,
+          browser_tab_id: exactScope.browserTabId,
+        },
+      });
+      const resource = await connection.client.readResource({
+        uri: "tabhub://logical-page/42",
+      });
+
+      expect(getPageContext).toHaveBeenNthCalledWith(1, 42);
+      expect(getPageContext).toHaveBeenNthCalledWith(2, 42);
+      expect(searchPageContext).toHaveBeenCalledWith({
+        logicalPageId: 42,
+        query: "agent frameworks",
+        limit: 12,
+      });
+      expect(getTabSessionIntent).toHaveBeenCalledWith(exactScope);
+      expect(textResult(page)).toBe(JSON.stringify(shareableContextBundle));
+      expect(textResult(search)).toBe(JSON.stringify([shareableContextEntry]));
+      expect(textResult(intent)).toBe(JSON.stringify(shareableSessionIntentBundle));
+      const resourceText = resource.contents[0];
+      expect(resourceText).toMatchObject({
+        uri: "tabhub://logical-page/42",
+        mimeType: "application/json",
+        text: JSON.stringify(shareableContextBundle),
+      });
+      for (const output of [
+        textResult(page),
+        textResult(search),
+        textResult(intent),
+        resourceText && "text" in resourceText ? String(resourceText.text) : "",
+      ]) {
+        expect(output).not.toContain("local_only");
+        expect(output).not.toContain("idempotencyKey");
+        expect(output).not.toContain("revision");
+        expect(output).not.toContain("hidden");
+      }
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("stamps explicit instructions on behalf of the user and accepts only strict model provenance", async () => {
+    const setPageContext = vi.fn(async () => contextMutationReceipt);
+    const setTabSessionIntent = vi.fn(async () => sessionIntentMutationReceipt);
+    const connection = await connectClient(
+      createApi({ setPageContext, setTabSessionIntent }),
+      { features: { context: true, logicalImportance: false } },
+    );
+    try {
+      const listed = await connection.client.listTools();
+      for (const name of ["set_page_context", "set_tab_session_intent"]) {
+        const annotations = listed.tools.find((tool) => tool.name === name)?.annotations;
+        expect(annotations).toMatchObject({
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        });
+      }
+
+      const pageArguments = {
+        logical_page_id: 42,
+        entry_kind: "purpose",
+        body: "Compare agent frameworks",
+        idempotency_key: "user-instruction-42",
+      };
+      const first = await connection.client.callTool({
+        name: "set_page_context",
+        arguments: pageArguments,
+      });
+      const replay = await connection.client.callTool({
+        name: "set_page_context",
+        arguments: pageArguments,
+      });
+      expect(textResult(first)).toBe(textResult(replay));
+      expect(setPageContext).toHaveBeenNthCalledWith(1, {
+        logicalPageId: 42,
+        command: {
+          kind: "append",
+          entryKind: "purpose",
+          body: "Compare agent frameworks",
+          provenance: { method: "on_behalf_of_user" },
+          idempotencyKey: "user-instruction-42",
+        },
+      });
+
+      const modelIntent = await connection.client.callTool({
+        name: "set_tab_session_intent",
+        arguments: {
+          installation_id: exactScope.installationId,
+          browser_session_id: exactScope.browserSessionId,
+          browser_tab_id: exactScope.browserTabId,
+          expected_url: "https://example.com/research",
+          body: "Model-proposed exact next action",
+          idempotency_key: "model-intent-7",
+          provenance: {
+            method: "model",
+            source_fingerprint: "intent-source-v1",
+            model: {
+              provider: "fixture",
+              name: "model-1",
+              prompt_version: "prompt-v2",
+            },
+            confidence: 0.8,
+          },
+        },
+      });
+      expect(modelIntent.isError).not.toBe(true);
+      expect(setTabSessionIntent).toHaveBeenCalledWith({
+        kind: "set",
+        scope: exactScope,
+        expectedUrl: "https://example.com/research",
+        body: "Model-proposed exact next action",
+        provenance: {
+          method: "model",
+          sourceFingerprint: "intent-source-v1",
+          model: {
+            provider: "fixture",
+            name: "model-1",
+            promptVersion: "prompt-v2",
+          },
+          confidence: 0.8,
+        },
+        idempotencyKey: "model-intent-7",
+      });
+
+      const invalidModel = await connection.client.callTool({
+        name: "set_tab_session_intent",
+        arguments: {
+          installation_id: exactScope.installationId,
+          browser_session_id: exactScope.browserSessionId,
+          browser_tab_id: exactScope.browserTabId,
+          expected_url: "https://example.com/research",
+          body: "Invalid model provenance",
+          idempotency_key: "invalid-model-intent",
+          provenance: {
+            method: "model",
+            source_fingerprint: "source",
+            model: {
+              provider: "fixture",
+              name: "model-1",
+              prompt_version: "prompt-v2",
+              extra: "forbidden",
+            },
+          },
+        },
+      });
+      expect(invalidModel.isError).toBe(true);
+      expect(setTabSessionIntent).toHaveBeenCalledTimes(1);
+
+      for (const output of [textResult(first), textResult(replay), textResult(modelIntent)]) {
+        expect(output).not.toContain("idempotency");
+        expect(output).not.toContain("local_only");
+        expect(output).not.toContain("revision");
+      }
+    } finally {
+      await connection.close();
+    }
+  });
+
   it("reviews personalized disposable-page suggestions without mutating them", async () => {
     const reviewDisposablePages = vi.fn(async () => retentionReviewResponse);
     const connection = await connectClient(
@@ -715,14 +1077,41 @@ describe("TabHub MCP server", () => {
     }
   });
 
-  it("sets importance using the MCP level vocabulary", async () => {
-    const setImportance = vi.fn(async () => ({
-      updated: 2,
-      importance: 3 as const,
-    }));
+  it("keeps set_importance as an explicit-user-command compatibility alias", async () => {
+    const setImportance = vi
+      .fn()
+      .mockResolvedValueOnce({ updated: 2, importance: 3 as const })
+      .mockResolvedValueOnce({ updated: 2, importance: 0 as const });
     const connection = await connectClient(createApi({ setImportance }));
 
     try {
+      const listed = await connection.client.listTools();
+      const tool = listed.tools.find(({ name }) => name === "set_importance");
+      expect(tool?.description).toContain("DEPRECATED");
+      expect(tool?.description).toContain("explicit user command");
+      expect(tool?.description).toContain("on behalf of the user");
+      expect(tool?.description).toContain("feature-disabled");
+      expect(tool?.description).toContain("schema-17");
+      expect(tool?.description).toContain("legacy scalar write");
+      expect(tool?.description).toContain("never an AI priority assessment");
+      expect(tool?.inputSchema).toMatchObject({
+        type: "object",
+        additionalProperties: false,
+        required: ["ids", "level"],
+        properties: {
+          ids: { description: expect.stringContaining("explicit command") },
+          level: {
+            description: expect.stringContaining("explicitly chosen"),
+          },
+        },
+      });
+      expect(tool?.annotations).toMatchObject({
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      });
+
       const result = await connection.client.callTool({
         name: "set_importance",
         arguments: { ids: [1, 2], level: 3 },
@@ -736,6 +1125,54 @@ describe("TabHub MCP server", () => {
         updated: 2,
         importance: 3,
       });
+
+      const cleared = await connection.client.callTool({
+        name: "set_importance",
+        arguments: { ids: [1, 2], level: 0 },
+      });
+      expect(setImportance).toHaveBeenNthCalledWith(2, {
+        ids: [1, 2],
+        importance: 0,
+      });
+      expect(JSON.parse(textResult(cleared))).toEqual({
+        updated: 2,
+        importance: 0,
+      });
+
+      const spoofed = await connection.client.callTool({
+        name: "set_importance",
+        arguments: {
+          ids: [1, 2],
+          level: 2,
+          recordedBy: "user",
+          recordMethod: "manual",
+        },
+      });
+      expect(spoofed.isError).toBe(true);
+      expect(setImportance).toHaveBeenCalledTimes(2);
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it("preserves trusted-route errors as MCP tool errors", async () => {
+    const setImportance = vi.fn(async () => {
+      throw new Error(
+        "TabHub API PATCH /api/agent/tabs/importance returned HTTP 404: No tabs exist with ids 999999",
+      );
+    });
+    const connection = await connectClient(createApi({ setImportance }));
+
+    try {
+      const result = await connection.client.callTool({
+        name: "set_importance",
+        arguments: { ids: [999_999], level: 3 },
+      });
+
+      expect(result.isError).toBe(true);
+      expect(textResult(result)).toBe(
+        "TabHub API PATCH /api/agent/tabs/importance returned HTTP 404: No tabs exist with ids 999999",
+      );
     } finally {
       await connection.close();
     }

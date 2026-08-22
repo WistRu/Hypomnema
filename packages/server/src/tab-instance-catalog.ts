@@ -12,9 +12,11 @@ import type {
 
 import { normalizeUrl } from "./normalize-url.js";
 import { stableBrowserOrderSql } from "./stable-tab-order.js";
+import type { SessionIntentReconciler } from "./session-intent-ledger.js";
 
 export interface FilterTabInstancesInput {
   browser: string | undefined;
+  resourceId?: number | undefined;
   canonicalTabId?: number | undefined;
   canonicalTabIds?: readonly number[] | undefined;
   q: string | undefined;
@@ -73,9 +75,11 @@ interface CountRow {
 interface TabInstanceRow {
   instance_id: number;
   canonical_tab_id: number;
+  logical_page_id: number;
   installation_id: string;
   browser_session_id: string | null;
   browser_tab_id: number | null;
+  navigation_revision: number;
   url: string;
   url_normalized: string;
   title: string | null;
@@ -133,6 +137,18 @@ function tabInstanceQuery(input: FilterTabInstancesInput): TabInstanceQuery {
     predicates.push("browser = ?");
     parameters.push(input.browser);
   }
+  if (input.resourceId !== undefined) {
+    predicates.push(`canonical_tab_id IN (
+      SELECT tabs.id
+      FROM tabs
+      JOIN logical_page_resource_heads AS resource_heads
+        ON resource_heads.logical_page_id = tabs.logical_page_id
+      JOIN logical_page_resource_assignments AS assignments
+        ON assignments.id = resource_heads.assignment_id
+      WHERE assignments.action = 'assigned' AND assignments.resource_id = ?
+    )`);
+    parameters.push(input.resourceId);
+  }
   if (input.canonicalTabId !== undefined) {
     predicates.push("canonical_tab_id = ?");
     parameters.push(input.canonicalTabId);
@@ -165,9 +181,11 @@ function tabInstanceQuery(input: FilterTabInstancesInput): TabInstanceQuery {
         SELECT
           tab_instances.id AS instance_id,
           tabs.id AS canonical_tab_id,
+          tabs.logical_page_id,
           tab_instances.installation_id,
           tab_instances.browser_session_id,
           tab_instances.browser_tab_id,
+          tab_instances.navigation_revision,
           tab_instances.url,
           tabs.url_normalized,
           tab_instances.title,
@@ -236,6 +254,7 @@ function mapInstanceRow(row: TabInstanceRow, tagPaths: string[]): TabInstance {
     installationId: row.installation_id,
     browserSessionId: row.browser_session_id,
     browserTabId: row.browser_tab_id,
+    instanceRevision: row.navigation_revision,
     url: row.url,
     urlNormalized: row.url_normalized,
     title: row.title,
@@ -263,7 +282,9 @@ function mapInstanceRow(row: TabInstanceRow, tagPaths: string[]): TabInstance {
 
 export function createTabInstanceCatalog(
   connection: Database.Database,
+  options: { sessionIntentReconciler?: SessionIntentReconciler } = {},
 ): TabInstanceCatalog {
+  const sessionIntentReconciler = options.sessionIntentReconciler;
   const selectInstanceKeys = connection.prepare(`
     SELECT instance_key
     FROM tab_instances
@@ -337,6 +358,7 @@ export function createTabInstanceCatalog(
       discarded,
       pinned,
       last_accessed,
+      navigation_revision,
       first_seen_at,
       last_seen_at
     ) VALUES (
@@ -356,6 +378,7 @@ export function createTabInstanceCatalog(
       @discarded,
       @pinned,
       @lastAccessed,
+      1,
       @now,
       @now
     )
@@ -374,6 +397,12 @@ export function createTabInstanceCatalog(
       discarded = excluded.discarded,
       pinned = excluded.pinned,
       last_accessed = excluded.last_accessed,
+      navigation_revision = CASE
+        WHEN tab_instances.tab_id IS NOT excluded.tab_id
+          OR tab_instances.url IS NOT excluded.url
+        THEN tab_instances.navigation_revision + 1
+        ELSE tab_instances.navigation_revision
+      END,
       last_seen_at = excluded.last_seen_at
   `);
   const closeCanonicalTabs = connection.prepare(`
@@ -405,6 +434,7 @@ export function createTabInstanceCatalog(
       tab_instances.installation_id,
       tab_instances.browser_session_id,
       tab_instances.browser_tab_id,
+      tab_instances.navigation_revision,
       tab_instances.url,
       tabs.url_normalized,
       tab_instances.title,
@@ -659,6 +689,7 @@ export function createTabInstanceCatalog(
           mapInstanceRow(row, tagPathsByTab.get(row.canonical_tab_id) ?? []),
         ),
         total: rows.length,
+        logicalPageCount: new Set(rows.map(({ logical_page_id }) => logical_page_id)).size,
       };
     });
 
@@ -667,6 +698,7 @@ export function createTabInstanceCatalog(
 
   return {
     syncSnapshot(snapshot, now) {
+      const sync = () => {
       const installationId = installationIdFor(snapshot);
       const affectedBrowsers = new Set<string>([
         snapshot.browser,
@@ -756,7 +788,10 @@ export function createTabInstanceCatalog(
         reopenCanonicalTabs.run(browser);
         closed += closeCanonicalTabs.run(now, browser).changes;
       }
+      sessionIntentReconciler?.reconcilePhysicalScopes({ at: now });
       return { closed };
+      };
+      return connection.inTransaction ? sync() : connection.transaction(sync)();
     },
 
     listInstances(input) {

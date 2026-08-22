@@ -1,0 +1,53 @@
+.live-resource-research-panel {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.live-resource-research-panel > section,
+.live-resource-research-panel fieldset,
+.live-resource-research-consent,
+.live-resource-research-progress {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.live-resource-research-panel label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.live-resource-research-panel textarea {
+  min-block-size: 5rem;
+}
+
+.live-resource-research-panel .live-research-checkbox {
+  align-items: start;
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: auto 1fr;
+}
+
+.live-research-warning {
+  border-inline-start: 0.25rem solid var(--color-warning, #a05a00);
+  margin: 0;
+  padding: 0.65rem 0.8rem;
+}
+
+.live-research-policy-grid {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  margin: 0;
+}
+
+.live-research-policy-grid > div {
+  border: 1px solid currentColor;
+  border-radius: 0.35rem;
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.5rem;
+}
+
+.live-research-policy-grid dd {
+  margin: 0;
+}

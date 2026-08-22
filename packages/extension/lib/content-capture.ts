@@ -114,7 +114,7 @@ export function finalizeExtractedPage(parts: ExtractionParts): ExtractedPage {
   };
 }
 
-function parseExtractedPage(value: unknown): ExtractedPage | undefined {
+export function parseExtractedPage(value: unknown): ExtractedPage | undefined {
   if (typeof value !== "object" || value === null) {
     return undefined;
   }

@@ -8,6 +8,7 @@
     "./limits": "./src/limits.ts"
   },
   "scripts": {
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

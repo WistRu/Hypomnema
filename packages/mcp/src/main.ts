@@ -4,7 +4,8 @@ import { createMcpServer } from "./server.js";
 import { createTabHubApi } from "./tabhub-api.js";
 
 const api = createTabHubApi();
-const handle = serveStdio(() => createMcpServer(api), {
+const features = await api.getFeatures();
+const handle = serveStdio(() => createMcpServer(api, { features }), {
   onerror(error) {
     console.error(`[tabhub-mcp] ${error.message}`);
   },

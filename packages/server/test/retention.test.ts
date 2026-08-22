@@ -78,6 +78,31 @@ describe("personal retention REST behavior", () => {
             },
           ],
         });
+
+        const tabId = response.json().items[0].tab.id as number;
+        const protectedWrite = await app.inject({
+          method: "PATCH",
+          url: "/api/tabs/importance",
+          payload: { ids: [tabId], importance: 3 },
+        });
+        expect(protectedWrite.statusCode).toBe(200);
+        const protectedReview = await app.inject({
+          method: "GET",
+          url: "/api/retention/review?pageSize=10",
+        });
+        expect(protectedReview.json()).toMatchObject({ total: 0, items: [] });
+
+        const clearedWrite = await app.inject({
+          method: "PATCH",
+          url: "/api/tabs/importance",
+          payload: { ids: [tabId], importance: 0 },
+        });
+        expect(clearedWrite.statusCode).toBe(200);
+        const restoredReview = await app.inject({
+          method: "GET",
+          url: "/api/retention/review?pageSize=10",
+        });
+        expect(restoredReview.json().total).toBe(1);
       } finally {
         await app.close();
         await rm(directory, { recursive: true, force: true });

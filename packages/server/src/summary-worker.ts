@@ -4,6 +4,7 @@ import type {
   ClaimedSummaryJob,
   SummaryCatalog,
 } from "./summary-catalog.js";
+import type { AiJobClaimBoundary } from "./ai-job-runtime-state.js";
 import {
   SummaryProviderError,
   summaryErrorRetry,
@@ -23,6 +24,9 @@ export interface SummaryWorkerOptions {
 }
 
 export interface SummaryWorker {
+  recoverInterrupted(): number;
+  claimNext(claimBoundary?: AiJobClaimBoundary): ClaimedSummaryJob | undefined;
+  executeClaim(job: ClaimedSummaryJob): Promise<void>;
   start(): void;
   wake(): void;
   drainAvailable(): Promise<number>;
@@ -87,7 +91,7 @@ export function createSummaryWorker(
     return new Date(clock().getTime() + delay).toISOString();
   }
 
-  async function process(job: ClaimedSummaryJob): Promise<void> {
+  async function executeClaim(job: ClaimedSummaryJob): Promise<void> {
     const controller = new AbortController();
     activeAttempt = controller;
     try {
@@ -105,6 +109,7 @@ export function createSummaryWorker(
             title: job.title,
             url: job.url,
             text: job.text,
+            ...(job.context === undefined ? {} : { context: job.context }),
             depth: job.depth,
             model: job.requestedModel,
             signal: controller.signal,
@@ -165,7 +170,7 @@ export function createSummaryWorker(
         return processed;
       }
 
-      await process(job);
+      await executeClaim(job);
       processed += 1;
     }
   }
@@ -196,6 +201,18 @@ export function createSummaryWorker(
   }
 
   return {
+    recoverInterrupted() {
+      stopping = false;
+      return catalog.recoverInterrupted();
+    },
+
+    claimNext(claimBoundary) {
+      if (stopping) return undefined;
+      return catalog.claimNext(options.dailyLimit, claimBoundary);
+    },
+
+    executeClaim,
+
     start() {
       if (timer !== undefined) {
         return;

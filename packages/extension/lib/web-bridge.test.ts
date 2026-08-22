@@ -124,6 +124,54 @@ describe("parseBridgeRequest", () => {
 });
 
 describe("createBridgeResponse", () => {
+  it.each([3, 4, 5])(
+    "accepts supported relay protocol v%s in a probe response",
+    (commandProtocolVersion) => {
+      const request = parseBridgeRequest({ ...baseRequest(), type: "probe" });
+      expect(
+        createBridgeResponse(request!, {
+          data: {
+            available: true,
+            browser: "chrome",
+            browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+            commandProtocolVersion,
+            controlWindowId: 90,
+            extensionOrigin: "chrome-extension://abcdefghijklmnop",
+            installationId: "123e4567-e89b-42d3-a456-426614174000",
+            pendingUndos: [],
+            windows: [],
+          },
+          ok: true,
+          type: "probe",
+        }),
+      ).toMatchObject({
+        ok: true,
+        data: { commandProtocolVersion },
+      });
+    },
+  );
+
+  it("rejects an unsupported relay protocol in a probe response", () => {
+    const request = parseBridgeRequest({ ...baseRequest(), type: "probe" });
+    expect(
+      createBridgeResponse(request!, {
+        data: {
+          available: true,
+          browser: "chrome",
+          browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+          commandProtocolVersion: 2,
+          controlWindowId: 90,
+          extensionOrigin: "chrome-extension://abcdefghijklmnop",
+          installationId: "123e4567-e89b-42d3-a456-426614174000",
+          pendingUndos: [],
+          windows: [],
+        },
+        ok: true,
+        type: "probe",
+      }),
+    ).toMatchObject({ ok: false });
+  });
+
   it("correlates the background result without reflecting request fields", () => {
     const request = parseBridgeRequest({ ...baseRequest(), type: "probe" });
     expect(request).toBeDefined();
@@ -136,6 +184,7 @@ describe("createBridgeResponse", () => {
           browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
           commandProtocolVersion: 4,
           controlWindowId: 90,
+          extensionOrigin: "chrome-extension://abcdefghijklmnop",
           installationId: "123e4567-e89b-42d3-a456-426614174000",
           pendingUndos: [
             {
@@ -160,6 +209,7 @@ describe("createBridgeResponse", () => {
         browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
         commandProtocolVersion: 4,
         controlWindowId: 90,
+        extensionOrigin: "chrome-extension://abcdefghijklmnop",
         installationId: "123e4567-e89b-42d3-a456-426614174000",
         pendingUndos: [
           {
@@ -177,6 +227,34 @@ describe("createBridgeResponse", () => {
     const request = parseBridgeRequest({ ...baseRequest(), type: "probe" });
 
     expect(createBridgeResponse(request!, { unexpected: true })).toMatchObject({
+      error: "TabHub extension returned an invalid bridge response.",
+      ok: false,
+      requestId: "request-1",
+      type: "probe",
+    });
+  });
+
+  it("rejects a probe reply that attempts to expose capability material", () => {
+    const request = parseBridgeRequest({ ...baseRequest(), type: "probe" });
+
+    expect(
+      createBridgeResponse(request!, {
+        data: {
+          available: true,
+          browser: "chrome",
+          browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
+          commandProtocolVersion: 4,
+          controlWindowId: 90,
+          credential: "must-never-reach-page-js",
+          extensionOrigin: "chrome-extension://abcdefghijklmnop",
+          installationId: "123e4567-e89b-42d3-a456-426614174000",
+          pendingUndos: [],
+          windows: [],
+        },
+        ok: true,
+        type: "probe",
+      }),
+    ).toMatchObject({
       error: "TabHub extension returned an invalid bridge response.",
       ok: false,
       requestId: "request-1",

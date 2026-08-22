@@ -1,0 +1,54 @@
+{
+  "receiptVersion": 1,
+  "packet": "R50",
+  "createdAt": "2026-08-12T22:12:27.253Z",
+  "goalId": "019ff487-6f70-7d13-a96a-08a131566281",
+  "baselineHead": "40f5297250cfd214d7fbac2639c013228044e56d",
+  "acceptedSchemaHead": 22,
+  "preAssessmentProof": {
+    "artifact": ".tmp/personal-attention-layer/g5-c50-proof-20260813T0035/result.json",
+    "artifactSha256": "83934e078bb3f1a75149f5d94a645ef2cb9f7d8bea64d978b44327588a876f60",
+    "migration022Sha256": "e7e0ce815965d68498f9c40fd71de401952629b15024cab61529cef6762bd04c",
+    "baselineAstSha256": "a5bf4436a04dad00bb6ba777169a19096edbdb0cbfb2841e3b338723925df535",
+    "pageAssessments": 0,
+    "pageExclusions": 0,
+    "resourceAssessments": 0,
+    "resourceExclusions": 0,
+    "pageFeedback": 0,
+    "resourceFeedback": 0
+  },
+  "seedDerivation": {
+    "algorithm": "SHA-256 over UTF-8 seedMaterial",
+    "seedMaterial": "TabHub:R50:priority-uat-v1|goal=019ff487-6f70-7d13-a96a-08a131566281|baselineHead=40f5297250cfd214d7fbac2639c013228044e56d|migration022=e7e0ce815965d68498f9c40fd71de401952629b15024cab61529cef6762bd04c|baselineAst=a5bf4436a04dad00bb6ba777169a19096edbdb0cbfb2841e3b338723925df535",
+    "seedHex": "1acc8aae437c60749b2c99b1c334659677b5ebb95ba85d8d06f712b9139d0b86",
+    "seedHexUtf8Sha256": "d69ab7f174eadb2f7b545dcb6134a64664a34c71caae699580acb81ed9af862e"
+  },
+  "selectionAlgorithm": {
+    "version": "R50-priority-uat-sample-v1",
+    "population": "eligible logical pages at UAT selection time after the full current assessment run",
+    "stratumPrecedence": [
+      "needs_review_or_disagreement",
+      "unranked_or_stale",
+      "critical_or_high",
+      "medium",
+      "low"
+    ],
+    "exclusiveAssignment": "assign each logical page to the first matching stratum",
+    "rankDigest": "lowercase SHA-256(raw 32 seed bytes decoded from seedHex || UTF-8 base-10 logicalPageId)",
+    "rankOrder": [
+      "rankDigest ASC",
+      "logicalPageId ASC"
+    ],
+    "takePerStratum": 4,
+    "targetSampleSize": 20,
+    "deduplicateBy": "logicalPageId",
+    "deficitFill": "take not-yet-selected subjects from the full population in the same rankOrder until 20 or population exhaustion",
+    "requiredReceiptFields": [
+      "logicalPageId",
+      "assignedStratum",
+      "rankDigest",
+      "selectionPhase",
+      "fallbackReason"
+    ]
+  }
+}

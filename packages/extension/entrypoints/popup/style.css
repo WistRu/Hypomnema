@@ -38,6 +38,67 @@ h1 {
   font-size: 19px;
 }
 
+h2 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.context-card {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid #25303b;
+  border-radius: 9px;
+  background: #111820;
+}
+
+.context-page {
+  overflow: hidden;
+  color: #aab5c0;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-card label {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  color: #93a1af;
+  font-size: 11px;
+}
+
+.context-card input,
+.context-card select,
+.context-card textarea {
+  min-width: 0;
+  border: 1px solid #344250;
+  border-radius: 6px;
+  padding: 7px 8px;
+  color: #e8edf2;
+  background: #0b1117;
+  font: inherit;
+}
+
+.context-card textarea {
+  min-height: 70px;
+  resize: vertical;
+}
+
+.context-card input:focus-visible,
+.context-card select:focus-visible,
+.context-card textarea:focus-visible {
+  outline: 2px solid #61aaff;
+  outline-offset: 2px;
+}
+
+#intent-history {
+  max-height: 90px;
+  overflow: auto;
+  padding-left: 18px;
+  color: #aab5c0;
+  font-size: 11px;
+}
+
 .status-dot {
   width: 10px;
   height: 10px;
@@ -134,4 +195,13 @@ button:disabled {
 
 .secondary:hover {
   background: #151e27;
+}
+
+.danger {
+  border-color: #87444a;
+  color: #ffb8bd;
+}
+
+.danger:hover:not(:disabled) {
+  background: #2b171a;
 }

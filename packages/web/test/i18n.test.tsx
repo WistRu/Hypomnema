@@ -25,6 +25,59 @@ function LocaleProbe() {
   );
 }
 
+function LiveUtcProbe() {
+  const { formatDate, t } = useI18n();
+  const date = formatDate("2026-08-21T12:34:56.000Z", {
+    dateStyle: "medium",
+    timeStyle: "medium",
+    timeZone: "UTC",
+  });
+  return <output>{t("Daily start limit resets at {date} UTC", { date })}</output>;
+}
+
+const W90_SOURCE_FILES = [
+  "LiveResourceResearchPanel.tsx",
+  "LiveAcquisitionRunView.tsx",
+  "ResearchPurgeControl.tsx",
+  "ResourceHeader.tsx",
+  "ResearchHistoryDrawer.tsx",
+] as const;
+
+const W90_DYNAMIC_TRANSLATION_KEYS = [
+  "Captured", "Missing", "Failed", "Excluded",
+  "discovered", "captured", "eligible", "used", "missing", "failed",
+  "live_acquisition", "safe_public_http_v1", "inventory", "exact_capture",
+  "page_context", "resource_context", "activity", "relation", "truncated", "complete",
+  "Live acquisition is running", "Live acquisition completed", "Mixed live acquisition completed",
+  "No usable live sources", "Live acquisition was blocked", "Live acquisition needs review",
+  "Live acquisition was cancelled", "Live acquisition failed", "Live acquisition is being purged",
+  "Live acquisition was redacted", "Queued", "Running", "Succeeded", "Partially completed",
+  "Cancelled", "Superseded", "Reserved pages", "Visited pages", "Captured pages",
+  "Blocked pages", "Ambiguous pages", "Robots actions", "Network actions", "Planned actions",
+  "Active actions", "active", "expired", "consumed", "revoked", "handoff", "captured_only",
+  "blocked", "ambiguous", "superseded", "Robots", "Page", "planned", "resolution_started",
+  "resolved", "authorized", "started", "completed", "unusable", "pending",
+  "DNS_RESULT_UNKNOWN", "RUNTIME_RESTARTED_BEFORE_REQUEST", "IPV4_REQUIRED_V1",
+  "PARTIAL_RESPONSE", "META_REFRESH", "AUTH_REQUIRED", "CHALLENGE_PAGE", "SPA_SHELL",
+  "INSUFFICIENT_PUBLIC_TEXT", "INVALID_UTF8", "CONSENT_EXPIRED_IN_FLIGHT",
+  "ACQUISITION_RESOURCE_MEMBERSHIP_MISMATCH", "SENSITIVE_URL_CAPTURE_REQUIRED",
+  "LIVE_ACQUISITION_DISABLED", "LIVE_ACQUISITION_DISABLED_IN_FLIGHT", "POLICY_BLOCKED",
+  "TRANSPORT_DNS_FAILURE", "TRANSPORT_CONNECT_FAILURE", "TRANSPORT_TLS_FAILURE",
+  "TRANSPORT_TIMEOUT", "HTTP_INFORMATIONAL", "HTTP_SUCCESS", "HTTP_REDIRECT",
+  "HTTP_CLIENT_ERROR", "HTTP_SERVER_ERROR", "RESPONSE_SIZE_LIMIT", "FETCH_COMPLETED",
+  "CANCELLED", "BUDGET_EXHAUSTED", "LIVE_ACQUISITION_RESOURCE_REQUIRED",
+  "LIVE_ACQUISITION_TARGET_UNSUPPORTED", "RESEARCH_WORKFLOW_UNSUPPORTED",
+  "PURGE_WAITING_FOR_ACTION", "SUBJECT_FORGOTTEN", "WORKFLOW_COMPLETED", "WORKFLOW_BLOCKED",
+  "WORKFLOW_AMBIGUOUS", "WORKFLOW_FAILED", "WORKFLOW_CANCELLED", "NO_ELIGIBLE_SOURCE",
+  "PROVIDER_UNAVAILABLE", "Waiting for safe deletion", "Deletion is on hold", "Ready to delete",
+  "Deletion committed", "Deletion completed", "Deletion failed", "Deletion requires manual review",
+  "Waiting for provider settlement",
+] as const;
+
+function placeholders(value: string): string[] {
+  return [...value.matchAll(/\{(\w+)\}/g)].map((match) => match[1]!).sort();
+}
+
 describe("locale resolution", () => {
   it("prefers a saved supported locale", () => {
     expect(resolveLocale("en", ["ru-RU"])).toBe("en");
@@ -77,6 +130,18 @@ describe("translations", () => {
       "Открыть «Пример» в браузере",
     );
     expect(hasRussianTranslation("Open {tab} in browser")).toBe(true);
+  });
+
+  it("localizes durable research progress stages", () => {
+    expect(
+      ["claimed", "provider_ready", "terminal_publication"].map((stage) =>
+        translate("ru", stage),
+      ),
+    ).toEqual([
+      "Задание получено",
+      "Запрос к ИИ подготовлен",
+      "Публикация результата",
+    ]);
   });
 
   it("uses Russian plural forms for tab counts", () => {
@@ -134,6 +199,74 @@ describe("translations", () => {
     expect(localizedErrorMessage("ru", systemTopic)).toBe(
       "Тема «Без темы» управляется автоматически.",
     );
+  });
+
+  it("maps the closed personal-context error set in English and Russian without server copy", () => {
+    const cases = [
+      {
+        code: "LOCAL_CAPABILITY_REQUIRED",
+        en: "Personal context requires a paired local browser. Pair this browser and try again.",
+        ru: "Для личного контекста нужен подключённый локальный браузер. Подключите этот браузер и повторите попытку.",
+      },
+      {
+        code: "CONTEXT_ENTRY_NOT_CURRENT",
+        en: "This context entry is no longer current. Reload personal context and try again.",
+        ru: "Эта запись контекста уже не является текущей. Обновите личный контекст и повторите попытку.",
+      },
+      {
+        code: "SESSION_SCOPE_STALE",
+        en: "This open tab changed. Refresh its copies and try again.",
+        ru: "Эта открытая вкладка изменилась. Обновите список копий и повторите.",
+      },
+      {
+        code: "NOT_FOUND",
+        en: "The requested personal context no longer exists. Reload and try again.",
+        ru: "Запрошенный личный контекст больше не существует. Обновите данные и повторите попытку.",
+      },
+      {
+        code: "CONTEXT_SUBJECT_MISMATCH",
+        en: "This context entry belongs to a different page. Reload personal context and try again.",
+        ru: "Эта запись контекста относится к другой странице. Обновите личный контекст и повторите попытку.",
+      },
+      {
+        code: "CONTEXT_STATE_INVALID",
+        en: "This context entry cannot be changed in its current state. Reload personal context and try again.",
+        ru: "Эту запись контекста нельзя изменить в её текущем состоянии. Обновите личный контекст и повторите попытку.",
+      },
+      {
+        code: "CONTEXT_REVIEW_NOT_ALLOWED",
+        en: "Only AI suggestions can be accepted or rejected.",
+        ru: "Принимать или отклонять можно только предложения ИИ.",
+      },
+      {
+        code: "IDEMPOTENCY_KEY_CONFLICT",
+        en: "This action conflicts with an earlier request. Reload and try again.",
+        ru: "Это действие конфликтует с предыдущим запросом. Обновите данные и повторите попытку.",
+      },
+      {
+        code: "SESSION_INTENT_STATE_INVALID",
+        en: "This open-tab intent cannot be changed in its current state. Reload it and try again.",
+        ru: "Цель этой открытой вкладки нельзя изменить в её текущем состоянии. Обновите её и повторите попытку.",
+      },
+      {
+        code: "SESSION_INTENT_SUBJECT_MISMATCH",
+        en: "This open-tab intent belongs to a different page. Refresh open copies and try again.",
+        ru: "Цель этой открытой вкладки относится к другой странице. Обновите список открытых копий и повторите попытку.",
+      },
+      {
+        code: "VALIDATION_ERROR",
+        en: "TabHub rejected invalid personal-context data. Review the fields and try again.",
+        ru: "TabHub отклонил некорректные данные личного контекста. Проверьте поля и повторите попытку.",
+      },
+    ];
+
+    for (const item of cases) {
+      const error = Object.assign(new Error("unsafe server detail"), {
+        code: item.code,
+      });
+      expect(localizedErrorMessage("en", error)).toBe(item.en);
+      expect(localizedErrorMessage("ru", error)).toBe(item.ru);
+    }
   });
 
   it("labels kept and duplicate copies in Russian", () => {
@@ -266,6 +399,30 @@ describe("translations", () => {
     expect(markup).toContain("Страница");
   });
 
+  it("translates every dynamic personal-context kind", () => {
+    expect(
+      ["Purpose", "Interest", "Question", "Project", "Next action", "Disposition", "Note"].map(
+        (key) => translate("ru", key),
+      ),
+    ).toEqual([
+      "Назначение",
+      "Интерес",
+      "Вопрос",
+      "Проект",
+      "Следующее действие",
+      "Решение",
+      "Примечание",
+    ]);
+  });
+
+  it("translates every quick personal-context preset", () => {
+    expect(
+      ["Do", "Research", "Reference", "Compare", "Temporary"].map((key) =>
+        translate("ru", key),
+      ),
+    ).toEqual(["Сделать", "Исследовать", "Справка", "Сравнить", "Временно"]);
+  });
+
   it("has Russian copy for every literal component translation key", () => {
     const sourceDirectory = fileURLToPath(new URL("../src", import.meta.url));
     const sourceFiles = readdirSync(sourceDirectory, { withFileTypes: true })
@@ -283,5 +440,110 @@ describe("translations", () => {
     }
 
     expect([...missing].sort()).toEqual([]);
+  });
+
+  it("has Russian copy for every closed research-history label", () => {
+    const keys = [
+      "fresh", "stale", "redacted", "superseded", "succeeded", "partial",
+      "budget_exhausted", "corpus_became_stale", "Valid", "Invalid", "Redacted",
+      "Captured page content", "Page context snapshot", "Resource context snapshot",
+      "Activity snapshot", "Relation snapshot",
+      "Fresh report", "Stale report", "Redacted report state", "Superseded report",
+      "Successful publication", "Partial publication", "Budget exhausted",
+      "Corpus became stale", "Research run queued", "Research run in progress",
+      "Research run published successfully", "Research run published partially",
+      "Research run failed", "Research run cancelled", "Research run superseded",
+    ];
+    expect(keys.filter((key) => !hasRussianTranslation(key))).toEqual([]);
+  });
+
+  it("localizes every W80b client and local-API failure path", () => {
+    const messages = [
+      "TabHub could not load research report history",
+      "TabHub returned unreadable research report history.",
+      "TabHub returned mismatched research report history.",
+      "TabHub could not load this research report",
+      "TabHub returned an unreadable research report.",
+      "TabHub returned mismatched research report detail.",
+      "Research refinement target does not match its parent report.",
+      "TabHub could not start this research refinement",
+      "TabHub returned an unreadable research job.",
+      "TabHub returned an unexpected research refinement job.",
+      "Research refinement parent does not match its preflight.",
+      "TabHub returned mismatched research progress.",
+      "Research history contains conflicting copies of one report.",
+      "Research history assigns one version to multiple reports.",
+      "A selection cannot receive one shared next action.",
+      "TabHub could not save resource context",
+      "TabHub returned an unreadable resource-context update.",
+      "TabHub returned an unexpected resource-context update.",
+      "TabHub could not update personal context",
+      "TabHub returned an unreadable personal-context update.",
+      "TabHub returned an unexpected personal-context update.",
+      "TabHub could not read research progress",
+      "TabHub returned unreadable research progress.",
+      "TabHub could not start this research run",
+      "TabHub returned an unexpected research job.",
+      "TabHub could not cancel this research run",
+      "TabHub could not prepare this research run",
+      "TabHub returned unreadable research preflight data.",
+      "TabHub returned mismatched research preflight data.",
+    ];
+    for (const message of messages) {
+      expect(localizedErrorMessage("ru", new Error(message))).not.toBe(message);
+    }
+    expect(localizedErrorMessage("ru", new Error(
+      "TabHub could not load research report history (503).",
+    ))).toMatch(/\(503\)\.$/);
+  });
+
+  it("closes every literal and typed W90 translation key with placeholder parity", () => {
+    const sourceDirectory = fileURLToPath(new URL("../src", import.meta.url));
+    const keys = new Set<string>(W90_DYNAMIC_TRANSLATION_KEYS);
+    const literalTranslation = /\bt\(\s*"((?:\\.|[^"\\])*)"/g;
+
+    for (const sourceName of W90_SOURCE_FILES) {
+      const source = readFileSync(`${sourceDirectory}/${sourceName}`, "utf8");
+      for (const match of source.matchAll(literalTranslation)) {
+        if (match[1] !== undefined) keys.add(JSON.parse(`"${match[1]}"`));
+      }
+    }
+
+    const failures = [...keys].sort().flatMap((key) => {
+      const translated = translate("ru", key);
+      const problems: string[] = [];
+      if (!hasRussianTranslation(key)) problems.push("missing RU entry");
+      if (placeholders(translated).join(",") !== placeholders(key).join(",")) {
+        problems.push(`placeholder mismatch: ${placeholders(translated)} != ${placeholders(key)}`);
+      }
+      if (/\uFFFD|Ã|Â|Ð|Ñ|Р[°±µ¶·ё№є»Ѕѕї]|С[Ђѓ„…†‡€‰Љљ‹ЊњЌќЋћЏџ‚]/u.test(translated)) {
+        problems.push("mojibake");
+      }
+      return problems.map((problem) => `${key}: ${problem}`);
+    });
+
+    expect(failures).toEqual([]);
+  });
+
+  it("keeps the W90 UTC disclosure while formatting its date for Russian", () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider initialLocale="ru">
+        <LiveUtcProbe />
+      </I18nProvider>,
+    );
+    const expectedDate = new Intl.DateTimeFormat("ru-RU", {
+      dateStyle: "medium",
+      timeStyle: "medium",
+      timeZone: "UTC",
+    }).format(new Date("2026-08-21T12:34:56.000Z"));
+
+    expect(markup).toContain("Дневной лимит запусков сбросится");
+    expect(markup).toContain(expectedDate);
+    expect(markup).toContain("UTC");
+  });
+
+  it("falls back to the English source key when a Russian W90 key is unknown", () => {
+    expect(translate("ru", "Unknown live acquisition label {code}", { code: "X" }))
+      .toBe("Unknown live acquisition label X");
   });
 });

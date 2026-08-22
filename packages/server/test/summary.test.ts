@@ -201,7 +201,11 @@ describe("summary jobs", () => {
         url: `/api/tabs/${tabId}/summarize`,
         payload: { depth: "short" },
       });
-      expect(repeated.json()).toEqual({ jobId, status: "running" });
+      expect(repeated.json()).toEqual({
+        jobId,
+        sourceContentRevision: 1,
+        status: "running",
+      });
 
       release?.(summaryResult("A unique capybara summary."));
       const completed = await waitForJob(app, jobId, "succeeded");
@@ -227,6 +231,201 @@ describe("summary jobs", () => {
         url: "/api/tabs?q=capybara",
       });
       expect(search.json().total).toBe(1);
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("projects only active reviewed shareable page context into the summary provider input", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-summary-context-"));
+    let providerContext: Parameters<SummaryProvider["summarize"]>[0]["context"];
+    const provider: SummaryProvider = {
+      modelFor: () => "test-haiku",
+      summarize: async (input) => {
+        providerContext = input.context;
+        return summaryResult("Context-aware summary.");
+      },
+    };
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      featureFlags: {
+        context: true,
+        logicalImportance: true,
+        priorityShadow: false,
+        research: false,
+        resources: false,
+      },
+      localDevProxySecret: "summary-context-secret",
+      logger: false,
+      summaryProvider: provider,
+      summaryWorkerPollMs: 5,
+    });
+
+    try {
+      const tabId = await seedCapturedTab(app, "context-projection");
+      const logicalPage = await app.inject({
+        method: "GET",
+        url: `/api/logical-pages/by-tab/${tabId}`,
+      });
+      const logicalPageId = logicalPage.json().page.id as number;
+      const session = await app.inject({
+        method: "POST",
+        url: "/api/local/session/bootstrap",
+        headers: { "x-tabhub-dev-proxy-secret": "summary-context-secret" },
+      });
+      const cookie = String(session.headers["set-cookie"]).split(";", 1)[0]!;
+      const commandUrl = `/api/local/pages/${logicalPageId}/context/commands`;
+      for (const [body, visibility, idempotencyKey] of [
+        ["PRIVATE_MODEL_CANARY", "local_only", "summary-private"],
+        ["SHAREABLE_ACTIVE_USER_CONTEXT", "share_with_ai", "summary-shareable-active"],
+        ["SHAREABLE_WITHDRAWN_CONTEXT", "share_with_ai", "summary-shareable-withdrawn"],
+      ] as const) {
+        const response = await app.inject({
+          method: "POST",
+          url: commandUrl,
+          headers: { cookie, "sec-fetch-site": "same-origin" },
+          payload: {
+            kind: "append",
+            entryKind: "purpose",
+            body,
+            visibility,
+            idempotencyKey,
+          },
+        });
+        expect(response.statusCode).toBe(200);
+        if (body === "SHAREABLE_WITHDRAWN_CONTEXT") {
+          const withdrawn = await app.inject({
+            method: "POST",
+            url: commandUrl,
+            headers: { cookie, "sec-fetch-site": "same-origin" },
+            payload: {
+              kind: "withdraw",
+              entryId: response.json().entry.id,
+              idempotencyKey: "summary-shareable-withdraw",
+            },
+          });
+          expect(withdrawn.statusCode).toBe(200);
+        }
+      }
+
+      for (const [body, idempotencyKey] of [
+        ["AGENT_UNREVIEWED_MODEL_CONTEXT", "summary-agent-unreviewed"],
+        ["AGENT_REJECTED_MODEL_CONTEXT", "summary-agent-rejected"],
+        ["AGENT_ACCEPTED_MODEL_CONTEXT", "summary-agent-accepted"],
+      ] as const) {
+        const response = await app.inject({
+          method: "POST",
+          url: `/api/agent/pages/${logicalPageId}/context`,
+          payload: {
+            kind: "append",
+            entryKind: "note",
+            body,
+            provenance: { method: "on_behalf_of_user" },
+            idempotencyKey,
+          },
+        });
+        expect(response.statusCode).toBe(200);
+      }
+      const context = (
+        await app.inject({
+          method: "GET",
+          url: `/api/local/pages/${logicalPageId}/context`,
+          headers: { cookie, "sec-fetch-site": "same-origin" },
+        })
+      ).json().context;
+      const agentEntryId = (body: string) =>
+        context.currentEntries.find((entry: { body: string }) => entry.body === body).id as number;
+      for (const [body, verdict, idempotencyKey] of [
+        ["AGENT_REJECTED_MODEL_CONTEXT", "rejected", "summary-review-rejected"],
+        ["AGENT_ACCEPTED_MODEL_CONTEXT", "accepted", "summary-review-accepted"],
+      ] as const) {
+        const response = await app.inject({
+          method: "POST",
+          url: commandUrl,
+          headers: { cookie, "sec-fetch-site": "same-origin" },
+          payload: {
+            kind: "review",
+            entryId: agentEntryId(body),
+            verdict,
+            idempotencyKey,
+          },
+        });
+        expect(response.statusCode).toBe(200);
+      }
+
+      const queued = await app.inject({
+        method: "POST",
+        url: `/api/tabs/${tabId}/summarize`,
+        payload: { depth: "short" },
+      });
+      await waitForJob(app, queued.json().jobId as number, "succeeded");
+
+      expect(providerContext?.map(({ body }) => body).sort()).toEqual([
+        "AGENT_ACCEPTED_MODEL_CONTEXT",
+        "SHAREABLE_ACTIVE_USER_CONTEXT",
+      ]);
+      expect(providerContext).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            body: "SHAREABLE_ACTIVE_USER_CONTEXT",
+            state: "active",
+            visibility: "share_with_ai",
+          }),
+          expect.objectContaining({
+            body: "AGENT_ACCEPTED_MODEL_CONTEXT",
+            reviewVerdict: "accepted",
+            state: "active",
+            visibility: "share_with_ai",
+          }),
+        ]),
+      );
+      expect(JSON.stringify(providerContext)).not.toContain("PRIVATE_MODEL_CANARY");
+      expect(JSON.stringify(providerContext)).not.toContain("local_only");
+      expect(JSON.stringify(providerContext)).not.toContain("SHAREABLE_WITHDRAWN_CONTEXT");
+      expect(JSON.stringify(providerContext)).not.toContain("AGENT_UNREVIEWED_MODEL_CONTEXT");
+      expect(JSON.stringify(providerContext)).not.toContain("AGENT_REJECTED_MODEL_CONTEXT");
+    } finally {
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("omits provider context entirely when the context feature is off", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-summary-context-off-"));
+    const providerInputs: Array<
+      Parameters<SummaryProvider["summarize"]>[0]["context"]
+    > = [];
+    const provider: SummaryProvider = {
+      modelFor: () => "test-haiku",
+      summarize: async (input) => {
+        providerInputs.push(input.context);
+        return summaryResult("Feature-off summary.");
+      },
+    };
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      featureFlags: {
+        context: false,
+        logicalImportance: true,
+        priorityShadow: false,
+        research: false,
+        resources: false,
+      },
+      logger: false,
+      summaryProvider: provider,
+      summaryWorkerPollMs: 5,
+    });
+
+    try {
+      const tabId = await seedCapturedTab(app, "context-projection-off");
+      const queued = await app.inject({
+        method: "POST",
+        url: `/api/tabs/${tabId}/summarize`,
+        payload: { depth: "short" },
+      });
+      await waitForJob(app, queued.json().jobId as number, "succeeded");
+      expect(providerInputs).toEqual([undefined]);
     } finally {
       await app.close();
       await rm(directory, { recursive: true, force: true });
@@ -397,6 +596,61 @@ describe("summary jobs", () => {
     }
   });
 
+  it("rejects a mismatched revision without superseding an active matching job", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-summary-revision-guard-"));
+    let release: ((result: SummaryJobResult) => void) | undefined;
+    const provider: SummaryProvider = {
+      modelFor: () => "test-haiku",
+      summarize: async () => new Promise<SummaryJobResult>((resolve) => {
+        release = resolve;
+      }),
+    };
+    const app = createApp({
+      databasePath: join(directory, "tabhub.sqlite"),
+      logger: false,
+      summaryProvider: provider,
+      summaryWorkerPollMs: 5,
+    });
+
+    try {
+      const tabId = await seedCapturedTab(app, "revision-guard");
+      const queued = await app.inject({
+        method: "POST",
+        url: `/api/tabs/${tabId}/summarize`,
+        payload: { depth: "short", expectedContentRevision: 1 },
+      });
+      expect(queued.statusCode).toBe(202);
+      const jobId = queued.json().jobId as number;
+      await waitForJob(app, jobId, "running");
+
+      const mismatch = await app.inject({
+        method: "POST",
+        url: `/api/tabs/${tabId}/summarize`,
+        payload: { depth: "short", expectedContentRevision: 2 },
+      });
+      expect(mismatch.statusCode).toBe(409);
+      expect(mismatch.json()).toMatchObject({
+        error: "TAB_CONTENT_REVISION_MISMATCH",
+        expectedContentRevision: 2,
+        currentContentRevision: 1,
+      });
+      const original = await app.inject({
+        method: "GET",
+        url: `/api/jobs/${jobId}`,
+      });
+      expect(original.json()).toMatchObject({
+        id: jobId,
+        status: "running",
+        sourceContentRevision: 1,
+        contentRevisionMatches: true,
+      });
+    } finally {
+      release?.(summaryResult("Cleanup summary."));
+      await app.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("retries transient provider failures and records each attempt cost", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-summary-retry-"));
     const databasePath = join(directory, "tabhub.sqlite");
@@ -458,7 +712,12 @@ describe("summary jobs", () => {
     const directory = await mkdtemp(join(tmpdir(), "tabhub-summary-recover-"));
     const databasePath = join(directory, "tabhub.sqlite");
     const clock = () => new Date("2026-08-08T22:00:00.000Z");
-    const seedApp = createApp({ databasePath, logger: false, clock });
+    const seedApp = createApp({
+      databasePath,
+      logger: false,
+      clock,
+      migrationClock: clock,
+    });
     const tabId = await seedCapturedTab(seedApp, "recover");
     await seedApp.close();
 
@@ -537,6 +796,11 @@ describe("summary jobs", () => {
 
       const failed = await waitForJob(app, jobId, "failed");
       expect(failed.error).toContain("changed during summarization");
+      expect(failed).toMatchObject({
+        sourceContentRevision: 1,
+        currentContentRevision: 2,
+        contentRevisionMatches: false,
+      });
       const detail = await app.inject({
         method: "GET",
         url: `/api/tabs/${tabId}`,

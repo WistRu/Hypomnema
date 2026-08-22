@@ -39,10 +39,12 @@ export interface TabCommandRelaySessionStorage {
 }
 
 export interface TabCommandRelayAgentOptions {
+  canConnect(): Promise<boolean>;
   createSocket(url: string): TabCommandRelaySocket;
   execute(
     scope: TabCommandScope,
     command: TabCommandRelayCommand,
+    metadata: TabCommandRelayExecutionMetadata,
   ): Promise<TabCommandRelayResult>;
   getScope(): Promise<TabCommandScope | undefined>;
   now?: () => number;
@@ -50,6 +52,11 @@ export interface TabCommandRelayAgentOptions {
   sequenceLiveCommand<T>(operation: () => Promise<T>): Promise<T>;
   storage: TabCommandRelaySessionStorage;
   onError?: (error: unknown) => void;
+}
+
+export interface TabCommandRelayExecutionMetadata {
+  executionDeadlineAt: number;
+  requestId: string;
 }
 
 export interface TabCommandRelayAgent {
@@ -309,7 +316,10 @@ export function createTabCommandRelayAgent(
     }
     try {
       const result = tabCommandRelayResultSchema.parse(
-        await options.execute(scope, command),
+        await options.execute(scope, command, {
+          executionDeadlineAt,
+          requestId,
+        }),
       );
       return tabCommandRelayResultEnvelopeSchema.parse({
         ok: true,
@@ -448,6 +458,12 @@ export function createTabCommandRelayAgent(
       if (!started || expectedGeneration !== generation) return;
       if (scopeValue === undefined) return;
       const scope = tabCommandScopeSchema.parse(scopeValue);
+      const canConnect = await options.canConnect();
+      if (!started || expectedGeneration !== generation) return;
+      if (!canConnect) {
+        scheduleReconnect();
+        return;
+      }
       let socket: TabCommandRelaySocket;
       try {
         socket = options.createSocket(options.relayUrl);
@@ -483,6 +499,13 @@ export function createTabCommandRelayAgent(
       scheduleReconnect();
     } finally {
       connectionPending = false;
+      if (
+        started &&
+        expectedGeneration !== generation &&
+        activeConnection === undefined
+      ) {
+        void connect(generation);
+      }
     }
   }
 

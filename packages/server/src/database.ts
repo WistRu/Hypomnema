@@ -5,6 +5,22 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
 
+import {
+  installPrivacyPurgeAuthorization,
+  runLiveAcquisitionMigration,
+  type LiveAcquisitionMigrationFailurePoint,
+} from "./live-acquisition-migration.js";
+import {
+  buildPrivacyPurgeDerivedSourceGuards,
+  buildPrivacyPurgeExpectedViews,
+  buildPrivacyPurgeMutationFences,
+  buildPrivacyPurgeRootGuards,
+} from "./privacy-purge-fence-spec.js";
+import {
+  adoptLegacy25PrivacyPurgeTerminals,
+  installPrivacyPurgeIntentCapabilities,
+} from "./privacy-purge-intent-capabilities.js";
+
 const migrationsDirectory = fileURLToPath(
   new URL("../migrations", import.meta.url),
 );
@@ -24,6 +40,18 @@ export interface TabHubDatabase {
   readonly connection: Database.Database;
   readonly schemaVersion: number;
   close(): void;
+}
+
+export interface OpenDatabaseOptions {
+  /** Clock used only by migrations that persist their creation epoch. */
+  readonly migrationClock?: () => Date;
+  /**
+   * Internal compatibility boundary for immutable historical fixtures.
+   * Normal runtime callers must omit this so every available migration runs.
+   */
+  readonly maximumMigrationVersion?: number;
+  /** Test-only deterministic fault injection for the schema-25 special runner. */
+  readonly liveAcquisitionMigrationFailurePoint?: LiveAcquisitionMigrationFailurePoint;
 }
 
 interface Migration {
@@ -122,7 +150,10 @@ function prepareDirectory(databasePath: string): void {
   mkdirSync(dirname(resolve(databasePath)), { recursive: true });
 }
 
-export function openDatabase(databasePath: string): TabHubDatabase {
+export function openDatabase(
+  databasePath: string,
+  options: OpenDatabaseOptions = {},
+): TabHubDatabase {
   prepareDirectory(databasePath);
 
   const connection = new Database(databasePath);
@@ -148,8 +179,22 @@ export function openDatabase(databasePath: string): TabHubDatabase {
       { deterministic: true },
       tabDisplayTitle,
     );
+    connection.function("tabhub_migration_now", () =>
+      (options.migrationClock?.() ?? new Date()).toISOString(),
+    );
+    installPrivacyPurgeAuthorization(connection);
     const migrations = loadMigrations();
-    const supportedVersion = migrations.at(-1)?.version ?? 0;
+    const latestVersion = migrations.at(-1)?.version ?? 0;
+    const supportedVersion = options.maximumMigrationVersion ?? latestVersion;
+    if (
+      !Number.isSafeInteger(supportedVersion) ||
+      supportedVersion < 0 ||
+      supportedVersion > latestVersion
+    ) {
+      throw new RangeError(
+        `maximumMigrationVersion must be an integer between 0 and ${latestVersion}`,
+      );
+    }
     const currentVersion = connection.pragma("user_version", {
       simple: true,
     }) as number;
@@ -161,20 +206,60 @@ export function openDatabase(databasePath: string): TabHubDatabase {
     connection.pragma("foreign_keys = ON");
     connection.pragma("busy_timeout = 5000");
 
+    if (currentVersion >= 26) {
+      connection.pragma("recursive_triggers = ON");
+      installPrivacyPurgeIntentCapabilities(connection);
+    }
+
     if (databasePath !== ":memory:") {
       connection.pragma("journal_mode = WAL");
       connection.pragma("synchronous = NORMAL");
     }
 
     for (const migration of migrations) {
-      if (migration.version <= currentVersion) {
+      if (
+        migration.version <= currentVersion ||
+        migration.version > supportedVersion
+      ) {
         continue;
       }
 
-      connection.transaction(() => {
-        connection.exec(migration.sql);
-        connection.pragma(`user_version = ${migration.version}`);
-      })();
+      if (migration.version === 25) {
+        const failurePoint = options.liveAcquisitionMigrationFailurePoint;
+        runLiveAcquisitionMigration(
+          connection,
+          migration.sql,
+          failurePoint === undefined ? {} : { failurePoint },
+        );
+      } else if (migration.version === 26) {
+        connection.pragma("recursive_triggers = ON");
+        installPrivacyPurgeIntentCapabilities(connection);
+        connection.transaction(() => {
+          connection.exec(migration.sql);
+          for (const sql of buildPrivacyPurgeExpectedViews(connection)) {
+            connection.exec(sql);
+          }
+          for (const fence of buildPrivacyPurgeMutationFences(connection)) {
+            connection.exec(fence.sql);
+          }
+          for (const sql of buildPrivacyPurgeRootGuards()) {
+            connection.exec(sql);
+          }
+          for (const sql of buildPrivacyPurgeDerivedSourceGuards(connection)) {
+            connection.exec(sql);
+          }
+          connection.pragma("user_version = 26");
+        })();
+      } else {
+        connection.transaction(() => {
+          connection.exec(migration.sql);
+          connection.pragma(`user_version = ${migration.version}`);
+        })();
+      }
+    }
+
+    if (supportedVersion >= 26) {
+      adoptLegacy25PrivacyPurgeTerminals(connection);
     }
 
     return {

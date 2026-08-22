@@ -88,6 +88,7 @@ describe("local extension bridge", () => {
         browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
         commandProtocolVersion: 4,
         controlWindowId: 7,
+        extensionOrigin: "chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef",
         installationId: "123e4567-e89b-42d3-a456-426614174000",
         browser: "chrome",
         pendingUndos: [
@@ -106,6 +107,7 @@ describe("local extension bridge", () => {
       browserSessionId: "223e4567-e89b-42d3-a456-426614174000",
       commandProtocolVersion: 4,
       controlWindowId: 7,
+      extensionOrigin: "chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef",
       installationId: "123e4567-e89b-42d3-a456-426614174000",
       browser: "chrome",
       pendingUndos: [

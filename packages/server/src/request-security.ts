@@ -1,3 +1,4 @@
+import { localExtensionOriginHeaderName } from "@tabhub/shared";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 const localAuthorityPattern = /^(?:127\.0\.0\.1|localhost)(?::([1-9]\d{0,4}))?$/i;
@@ -34,7 +35,34 @@ export function isExtensionOrigin(value: string | undefined): boolean {
   return value !== undefined && extensionOriginPattern.test(value);
 }
 
-function isTopLevelAppNavigation(request: FastifyRequest): boolean {
+export function resolveExtensionOrigin(
+  headers: FastifyRequest["headers"],
+): string | undefined {
+  const browserOriginHeader = headers.origin;
+  const extensionOriginHeader = headers[localExtensionOriginHeaderName];
+  if (
+    (browserOriginHeader !== undefined &&
+      typeof browserOriginHeader !== "string") ||
+    (extensionOriginHeader !== undefined &&
+      typeof extensionOriginHeader !== "string")
+  ) {
+    return undefined;
+  }
+  const browserOrigin = browserOriginHeader?.toLowerCase();
+  const extensionOrigin = extensionOriginHeader?.toLowerCase();
+  if (
+    (browserOrigin !== undefined && !isExtensionOrigin(browserOrigin)) ||
+    (extensionOrigin !== undefined && !isExtensionOrigin(extensionOrigin)) ||
+    (browserOrigin !== undefined &&
+      extensionOrigin !== undefined &&
+      browserOrigin !== extensionOrigin)
+  ) {
+    return undefined;
+  }
+  return extensionOrigin ?? browserOrigin;
+}
+
+export function isTopLevelAppNavigation(request: FastifyRequest): boolean {
   const pathname = request.url.split("?", 1)[0] ?? request.url;
   const targetsApp = pathname === "/app" || pathname.startsWith("/app/");
 
@@ -62,7 +90,7 @@ export function registerRequestSecurity(app: FastifyInstance): void {
 
     if (
       request.headers["sec-fetch-site"] === "cross-site" &&
-      !isExtensionOrigin(origin) &&
+      resolveExtensionOrigin(request.headers) === undefined &&
       !isTopLevelAppNavigation(request)
     ) {
       return reply.code(403).send({ error: "CROSS_SITE_REQUEST_BLOCKED" });

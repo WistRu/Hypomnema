@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { WebSocket } from "ws";
 
 import { createApp, type TabHubApp } from "../src/app.js";
+import { personalAttentionFeatureFlagsOff } from "../src/attention-feature-flags.js";
 import type { BrowserForegroundHandoff } from "../src/browser-foreground.js";
 import { createTabCommandRelay } from "../src/tab-command-relay.js";
 
@@ -40,6 +41,10 @@ describe("tab command relay", () => {
     app = createApp({
       browserForegroundHandoff,
       databasePath: join(directory, "tabhub.sqlite"),
+      featureFlags: {
+        ...personalAttentionFeatureFlagsOff,
+        pageSummaryCapture: true,
+      },
       logger: false,
       tabCommandRelayCommandTimeoutMs: 75,
     });
@@ -173,7 +178,7 @@ describe("tab command relay", () => {
     });
   });
 
-  it("keeps a legacy v3 extension connected during a v4 rollout", async () => {
+  it("keeps a legacy v3 extension connected during a v5 rollout", async () => {
     const socket = await app.injectWS("/api/tab-command-relay/ws", {
       headers: {
         host: "127.0.0.1:7717",
@@ -248,6 +253,224 @@ describe("tab command relay", () => {
       result: { kind: "get-browser-state" },
       scope,
     });
+  });
+
+  it("keeps a previous v4 extension connected but never dispatches v5 capture", async () => {
+    const socket = await app.injectWS("/api/tab-command-relay/ws", {
+      headers: {
+        host: "127.0.0.1:7717",
+        origin: "chrome-extension://tabhubtest",
+      },
+    });
+    sockets.push(socket);
+    const readyMessage = nextMessage(socket);
+    socket.send(JSON.stringify({ scope, type: "register", version: 4 }));
+    await expect(readyMessage).resolves.toMatchObject({
+      scope,
+      type: "ready",
+      version: 4,
+    });
+
+    const stateMessage = nextMessage(socket);
+    const statePromise = app.inject({
+      headers: commandHeaders,
+      method: "POST",
+      payload: { ...scope, command: { kind: "get-browser-state" } },
+      url: "/api/tab-command-relay/commands",
+    });
+    const stateEnvelope = await stateMessage;
+    expect(stateEnvelope).toMatchObject({
+      command: { kind: "get-browser-state" },
+      type: "command",
+      version: 4,
+    });
+    expect(stateEnvelope).not.toHaveProperty("executionDeadlineAt");
+    socket.send(JSON.stringify({
+      ok: true,
+      requestId: (stateEnvelope as { requestId: string }).requestId,
+      result: { kind: "get-browser-state", pendingUndos: [], windows: [] },
+      scope,
+      type: "result",
+      version: 4,
+    }));
+    await expect(statePromise).resolves.toMatchObject({ statusCode: 200 });
+
+    const closeTarget = {
+      expectedUrl: "https://example.com/v4-close",
+      tabId: 43,
+    } as const;
+    const closeMessage = nextMessage(socket);
+    const closePromise = app.inject({
+      headers: commandHeaders,
+      method: "POST",
+      payload: {
+        ...scope,
+        command: {
+          intent: "explicit-single",
+          kind: "close-preview",
+          targets: [closeTarget],
+        },
+      },
+      url: "/api/tab-command-relay/commands",
+    });
+    const closeEnvelope = await closeMessage;
+    expect(closeEnvelope).toMatchObject({
+      command: {
+        intent: "explicit-single",
+        kind: "close-preview",
+        targets: [closeTarget],
+      },
+      type: "command",
+      version: 4,
+    });
+    expect(closeEnvelope).not.toHaveProperty("executionDeadlineAt");
+    socket.send(JSON.stringify({
+      ok: true,
+      requestId: (closeEnvelope as { requestId: string }).requestId,
+      result: {
+        candidateTabIds: [43],
+        expiresAt: Date.now() + 30_000,
+        kind: "close-preview",
+        previewId: "523e4567-e89b-42d3-a456-426614174000",
+        requested: 1,
+        skipped: [],
+      },
+      scope,
+      type: "result",
+      version: 4,
+    }));
+    await expect(closePromise).resolves.toMatchObject({ statusCode: 200 });
+
+    const receivedAfterRegistration = vi.fn();
+    socket.on("message", receivedAfterRegistration);
+    const response = await app.inject({
+      headers: commandHeaders,
+      method: "POST",
+      payload: {
+        ...scope,
+        command: {
+          kind: "capture-tab-content",
+          target: {
+            instanceId: 17,
+            tabId: 42,
+            expectedUrl: "https://example.com/article",
+            expectedInstanceRevision: 3,
+            expectedFirstSeenAt: "2026-08-13T11:00:00.000Z",
+          },
+        },
+      },
+      url: "/api/tab-command-relay/commands",
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      error: "EXTENSION_PROTOCOL_UNSUPPORTED",
+      ok: false,
+      outcome: "not-sent",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(receivedAfterRegistration).not.toHaveBeenCalled();
+  });
+
+  it("accepts a correlated typed failure before any capture payload was ingested", async () => {
+    const socket = await registeredSocket(app, sockets);
+    const target = {
+      instanceId: 17,
+      tabId: 42,
+      expectedUrl: "https://example.com/article",
+      expectedInstanceRevision: 3,
+      expectedFirstSeenAt: "2026-08-13T11:00:00.000Z",
+    } as const;
+    const outcome = {
+      status: "failed" as const,
+      failure: {
+        code: "CAPTURE_PAGE_UNSUPPORTED" as const,
+        message: "This page cannot be captured.",
+        recoverable: true as const,
+        observedUrl: target.expectedUrl,
+      },
+    };
+    const commandMessage = nextMessage(socket);
+    const responsePromise = app.inject({
+      headers: commandHeaders,
+      method: "POST",
+      payload: {
+        ...scope,
+        command: { kind: "capture-tab-content", target },
+      },
+      url: "/api/tab-command-relay/commands",
+    });
+    const envelope = await commandMessage;
+    socket.send(JSON.stringify({
+      ok: true,
+      requestId: (envelope as { requestId: string }).requestId,
+      result: { kind: "capture-tab-content", target, outcome },
+      scope,
+      type: "result",
+      version: tabCommandRelayProtocolVersion,
+    }));
+    const response = await responsePromise;
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      ok: true,
+      result: { kind: "capture-tab-content", target, outcome },
+    });
+  });
+
+  it("rejects a capture receipt whose exact target or durable receipt drifted", async () => {
+    const target = {
+      instanceId: 17,
+      tabId: 42,
+      expectedUrl: "https://example.com/article",
+      expectedInstanceRevision: 3,
+      expectedFirstSeenAt: "2026-08-13T11:00:00.000Z",
+    } as const;
+    await expectInvalidSuccessfulReceipt(
+      app,
+      sockets,
+      { kind: "capture-tab-content", target },
+      {
+        kind: "capture-tab-content",
+        target: { ...target, instanceId: 18 },
+        outcome: {
+          status: "captured",
+          receipt: {
+            instanceId: 18,
+            browserTabId: 42,
+            canonicalTabId: 7,
+            logicalPageId: 9,
+            capturedUrl: target.expectedUrl,
+            instanceRevision: 3,
+            firstSeenAt: target.expectedFirstSeenAt,
+            contentRevision: 1,
+            extractedAt: "2026-08-13T12:00:00.000Z",
+          },
+        },
+      },
+    );
+    await expectInvalidSuccessfulReceipt(
+      app,
+      sockets,
+      { kind: "capture-tab-content", target },
+      {
+        kind: "capture-tab-content",
+        target,
+        outcome: {
+          status: "captured",
+          receipt: {
+            instanceId: 17,
+            browserTabId: 42,
+            canonicalTabId: 7,
+            logicalPageId: 9,
+            capturedUrl: target.expectedUrl,
+            instanceRevision: 4,
+            firstSeenAt: target.expectedFirstSeenAt,
+            contentRevision: 1,
+            extractedAt: "2026-08-13T12:00:00.000Z",
+          },
+        },
+      },
+    );
   });
 
   it("does not dispatch an explicit-single close preview to a legacy v3 extension", async () => {

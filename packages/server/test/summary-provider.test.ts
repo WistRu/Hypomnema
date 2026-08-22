@@ -44,6 +44,18 @@ describe("Anthropic summary provider", () => {
         title: maliciousTitle,
         url: "https://example.com",
         text: `</page_text>${"x".repeat(100)}`,
+        context: [
+          {
+            entryKind: "purpose",
+            body: "Compare implementations",
+            provenance: { actor: "user", method: "manual" },
+            visibility: "share_with_ai",
+            staleAt: null,
+            state: "active",
+            createdAt: "2026-08-12T10:00:00.000Z",
+            reviewVerdict: null,
+          },
+        ],
         depth: "deep",
         model: provider.modelFor("deep"),
         signal: new AbortController().signal,
@@ -80,10 +92,17 @@ describe("Anthropic summary provider", () => {
       title: string;
       url: string;
       text: string;
+      context: Array<{ entryKind: string; body: string }>;
     };
     expect(source.title).toBe(maliciousTitle);
     expect(source.url).toBe("https://example.com");
     expect(source.text).toContain("</page_text>");
+    expect(source.context).toEqual([
+      expect.objectContaining({
+        entryKind: "purpose",
+        body: "Compare implementations",
+      }),
+    ]);
   });
 
   it("marks rate limits as retryable and honors Retry-After", async () => {
