@@ -1574,15 +1574,15 @@ Research начинается не только из Resource header. В `TabDra
 Logical pages/context:
 
 - `GET /api/logical-pages/:id`
-- `GET /api/local/logical-pages/:id/context` — first-party handler вызывает только `readLocal`;
-- `GET /api/agent/logical-pages/:id/context` — MCP/AI handler вызывает только `readShareable`;
+- `GET /api/local/pages/:logicalPageId/context` — first-party handler вызывает только `readLocal`; _(план: `/api/local/logical-pages/:id/context`; фактический маршрут зафиксирован 2026-08-23)_
+- `GET /api/agent/pages/:logicalPageId/context` — MCP/AI handler вызывает только `readShareable`; _(план: `/api/agent/logical-pages/:id/context`)_
 - `POST /api/logical-pages/:id/context`
 - `POST /api/logical-pages/:id/context/:entryId/withdraw`
 - `POST /api/logical-pages/:id/context/:entryId/restore`
 - `POST /api/logical-pages/:id/context/:entryId/reviews`
-- `GET /api/local/tab-session-intents?installationId=...&browserSessionId=...&browserTabId=...` — exact current intent после reload;
-- `GET /api/local/tab-session-intents?logicalPageId=...&state=...` — first-party history с pagination;
-- `GET /api/agent/tab-session-intents?installationId=...&browserSessionId=...&browserTabId=...` — только shareable projection без private existence signal;
+- `GET /api/local/session-intents?installationId=...&browserSessionId=...&browserTabId=...` — exact current intent после reload; _(план: `/api/local/tab-session-intents`)_
+- `GET /api/local/session-intents?logicalPageId=...&state=...` — first-party history с pagination;
+- `GET /api/agent/session-intents?installationId=...&browserSessionId=...&browserTabId=...` — только shareable projection без private existence signal; _(план: `/api/agent/tab-session-intents`)_
 - `POST /api/tab-session-intents`
 - `PATCH /api/tab-session-intents/:id`
 - `POST /api/tab-session-intents/:id/promote`
@@ -1611,13 +1611,12 @@ Resources:
 Priority/personalization:
 
 - `GET /api/logical-pages/:id/priority` — current `PriorityOutcome`, включая typed exclusion;
-- `PUT /api/logical-pages/:id/user-importance`
-- `PUT /api/logical-pages/user-importance/bulk`
+- `PATCH /api/tabs/importance` — single/bulk user importance из UI; `POST /api/agent/user-importance` — on-behalf-of-user запись от агента _(план: `PUT /api/logical-pages/:id/user-importance` и `/user-importance/bulk`; фактический контракт зафиксирован 2026-08-23)_
 - `POST /api/logical-pages/:id/priority-feedback`
 - `GET /api/personalization/rules`
 - `POST /api/personalization/rules/preview`
 - `POST /api/personalization/rules/versions`
-- `POST /api/personalization/rules/versions/:version/activate` — возвращает `JobRef` полного recompute
+- `POST /api/personalization/rules/activate` — возвращает `JobRef` полного recompute _(план: `/rules/versions/:version/activate`)_
 - `POST /api/personalization/rules/disable`
 - `POST /api/personalization/rules/reset`
 - `POST /api/personalization/priority/recompute`
@@ -1700,8 +1699,8 @@ Context reads имеют server-owned audience projection: first-party web/exten
 
 - `tabhub://logical-page/{id}` — shareable projection без private existence signals;
 - `tabhub://resource/{id}`
-- `tabhub://research/{reportId}`
-- опционально `tabhub://job/{id}`
+- `tabhub://research/{reportId}` — **не реализован** (2026-08-23): отчёт читается через tool `get_research_report`; `tabhub://tab/{id}` реализован дополнительно;
+- опционально `tabhub://job/{id}` — не реализован
 
 `start_research` не повторяет 55-second polling pattern текущего summary tool: он сразу возвращает durable job ID, который читается отдельным tool/resource.
 
