@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "recordedAt": "2026-08-23",
+  "scope": "re_run_of_G8_and_G9_receipts_after_canonical_hash_unification",
+  "issue": "https://github.com/WistRu/Hypomnema/issues/5",
+  "supersedes": [
+    "G8-final-gate-receipt.json",
+    "G9-isolated-migration-rollback-receipt.json"
+  ],
+  "supersededOriginalsRetained": true,
+  "repositoryHead": "a653f87f0a0820d13c6ea8252df6d7e7dc5f0d98",
+  "gateStatus": {
+    "G8": "PASS (unchanged)",
+    "G9": "PENDING (unchanged); research, live acquisition and privacy purge remain under the 2026-08-23 deployment waiver and are not claimed verified"
+  },
+  "liveRuntimeTouched": false,
+  "liveDatabaseWritten": false,
+  "browserTouched": false,
+  "secretsRecorded": "none; no ANTHROPIC_API_KEY is configured and none was needed",
+  "commands": {
+    "test": {
+      "command": "corepack pnpm test",
+      "exitCode": 0,
+      "files": 278,
+      "tests": 2443,
+      "packages": {
+        "shared": { "files": 13, "tests": 78 },
+        "extension": { "files": 29, "tests": 321 },
+        "mcp": { "files": 12, "tests": 140 },
+        "server": { "files": 132, "tests": 1295 },
+        "web": { "files": 92, "tests": 609 }
+      },
+      "note": "The workspace run reported two web timeouts (library-primary-view, research-purge-control) under full concurrency; both passed on a repeat run of the web package at maxWorkers=4. Server Vitest is likewise stable only at bounded worker counts. No failure was hash-related."
+    },
+    "typecheck": { "command": "corepack pnpm typecheck", "exitCode": 0, "packagesPassed": 5 },
+    "build": { "command": "corepack pnpm build", "exitCode": 0, "packagesPassed": 5 }
+  },
+  "hashChanges": {
+    "canonicalizationOutputs": {
+      "changed": false,
+      "explanation": "No digest recorded in any G8/G9 receipt is an output of the canonical-JSON helper. The schema-25/26 migration fingerprints that are pinned in source (deletion manifest, purge target catalog, owned schema mutation) are unchanged, because those bytes mirror SQLite json_object() and now use the explicitly named sqlJsonObjectMirrorV1 rather than the canonical helper. The migration tests recompute them at runtime and pass."
+    },
+    "buildArtifacts": {
+      "serverDistSha256": {
+        "previous": "3ec97b23144fdf2fd1e64a1826ab7c2db23618d4aabca2d527699cc199b5eb71",
+        "current": "49d95c96061cee73e25ce407811cb89e6ad17fe70d8a5ffd79b6cdf6508c992b",
+        "reason": "server sources changed: sixteen local canonical-JSON copies replaced by shared imports"
+      },
+      "webIndexSha256": {
+        "previous": "b9b7be767a9c2721ae1a4ebefa18027c3be11ea8314eb40bd16f77ed4341a511",
+        "current": "111635374ffe14a6767c0bc6eb48ba8296ad992693e9acb73941d086a7093b40",
+        "reason": "rebuild output; web sources unchanged by this work"
+      },
+      "extensionManifestSha256": {
+        "previous": "ddc44f832e7c2a6919954a41500ec1fab45cf8fc45a2c108683453cea7be3942",
+        "current": "ddc44f832e7c2a6919954a41500ec1fab45cf8fc45a2c108683453cea7be3942",
+        "reason": "unchanged; the A70 quarantined extension paths were not touched"
+      }
+    }
+  },
+  "quarantineState": "closed_after_A70, unchanged; no quarantined extension path was modified",
+  "verdict": "PASS_REHASH"
+}
