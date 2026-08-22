@@ -64,20 +64,63 @@ export function researchContentDigestPayloadV1(text: string): Uint8Array {
   return new TextEncoder().encode(text);
 }
 
-/** Canonical UTF-8 bytes that every runtime hashes with SHA-256 (no runtime-specific hash seam). */
+/** Raised when a value cannot be canonicalized without silently changing its meaning. */
+export class CanonicalizationError extends TypeError {
+  readonly path: string;
+
+  constructor(message: string, path: string) {
+    super(`${message} at ${path}`);
+    this.name = "CanonicalizationError";
+    this.path = path;
+  }
+}
+
+/**
+ * Canonical UTF-8 bytes that every runtime hashes with SHA-256 (no runtime-specific
+ * hash seam). This is the single canonicalization for the whole workspace: object keys
+ * are sorted recursively, array order is kept, values carrying a `toJSON` (notably
+ * `Date`) are canonicalized through it, and anything JSON would silently drop or
+ * distort — `undefined`, `NaN`, `Infinity`, `bigint`, functions, symbols — throws.
+ * Callers that need to hash a `bigint` convert it to a decimal string themselves so the
+ * conversion is visible at the call site.
+ */
 export function researchCanonicalSha256PayloadV1(value: unknown): Uint8Array {
-  const canonicalize = (input: unknown): string => {
-    if (Array.isArray(input)) return `[${input.map(canonicalize).join(",")}]`;
+  const canonicalize = (input: unknown, path: string): string => {
+    if (typeof input === "bigint") {
+      throw new CanonicalizationError(
+        "Cannot canonicalize bigint (convert it to a decimal string first)", path);
+    }
+    if (typeof input === "undefined") {
+      throw new CanonicalizationError("Cannot canonicalize undefined", path);
+    }
+    if (typeof input === "function" || typeof input === "symbol") {
+      throw new CanonicalizationError(`Cannot canonicalize ${typeof input}`, path);
+    }
+    if (typeof input === "number" && !Number.isFinite(input)) {
+      throw new CanonicalizationError("Cannot canonicalize non-finite number", path);
+    }
+    if (Array.isArray(input)) {
+      return `[${input.map((item, index) =>
+        canonicalize(item, `${path}[${index}]`)).join(",")}]`;
+    }
     if (input !== null && typeof input === "object") {
+      const candidate = input as { toJSON?: unknown };
+      if (typeof candidate.toJSON === "function") {
+        return canonicalize(
+          (candidate.toJSON as (key?: string) => unknown).call(input), path);
+      }
       const record = input as Record<string, unknown>;
       return `{${Object.keys(record).sort().map((key) =>
-        `${JSON.stringify(key)}:${canonicalize(record[key])}`).join(",")}}`;
+        `${JSON.stringify(key)}:${canonicalize(record[key], `${path}.${key}`)}`)
+        .join(",")}}`;
     }
     const encoded = JSON.stringify(input);
-    if (encoded === undefined) throw new TypeError("Cannot canonicalize undefined");
+    if (encoded === undefined) {
+      throw new CanonicalizationError("Cannot canonicalize value", path);
+    }
     return encoded;
   };
-  return new TextEncoder().encode(canonicalize(value));
+  return new TextEncoder().encode(canonicalize(value, "$"));
 }
 
 export const researchCoverageSchema = z.strictObject({
