@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "recordedAt": "2026-08-22T23:39:21.096Z",
+  "scope": "isolated_live_database_migration_17_to_26_and_feature_off_read",
+  "issue": "https://github.com/WistRu/Hypomnema/issues/6",
+  "repositoryHead": "fc213de3d9b4b7c8ec4e54f94d67208e116a6e7d",
+  "liveRuntimeTouched": false,
+  "liveDatabaseWritten": false,
+  "browserTouched": false,
+  "liveDatabase": {
+    "path": "data/tabhub.sqlite",
+    "sha256Before": "8aad2bf1cf2a90db2427231c3ceb70595948f3bb385bcf27d7a5eedbe88019b9",
+    "sha256After": "8aad2bf1cf2a90db2427231c3ceb70595948f3bb385bcf27d7a5eedbe88019b9",
+    "schemaVersion": 17,
+    "integrityCheck": "ok",
+    "foreignKeyViolations": 0,
+    "tableCount": 28
+  },
+  "isolatedCopy": {
+    "sha256BeforeMigration": "b7a254c3c28dd8109eba0a9d546a4b2bbf84af6c5d16809492c6d1f7865637dc",
+    "sha256AfterMigration": "2e7f7a4aeb6ca21bdbb0c29dbc7dd6edb597f1e677d01d66b650ebb01842094c",
+    "schemaVersionAfter": 26,
+    "integrityCheck": "ok",
+    "foreignKeyViolations": 0,
+    "tableCountAfter": 167,
+    "tablesAdded": 139,
+    "tablesRemoved": []
+  },
+  "rowCounts": {
+    "before": {
+      "tabs": 2189,
+      "tab_instances": 1153,
+      "tags": 26,
+      "tab_tags": 2276
+    },
+    "after": {
+      "tabs": 2189,
+      "tab_instances": 1153,
+      "tags": 26,
+      "tab_tags": 2276
+    }
+  },
+  "featureOffSmoke": {
+    "health": {
+      "status": "ok",
+      "database": "ok",
+      "schemaVersion": 26
+    },
+    "features": {
+      "context": false,
+      "logicalImportance": false,
+      "liveAcquisition": false,
+      "resources": false,
+      "activityWindows": false,
+      "agentUserImportance": false,
+      "pageSummaryCapture": false,
+      "priorityAssessmentWriter": false,
+      "priorityPersonalization": false,
+      "priorityReaders": false,
+      "priorityShadow": false,
+      "privacyPurge": false,
+      "research": false
+    },
+    "libraryRead": {
+      "route": "GET /api/tabs?limit=1",
+      "statusCode": 200
+    }
+  }
+}
