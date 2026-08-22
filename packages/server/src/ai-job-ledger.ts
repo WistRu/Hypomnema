@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type Database from "better-sqlite3";
 import {
+  canonicalJsonV1 as canonicalJson,
   agentResearchCancelCommandFingerprintPayloadV1,
   agentResearchStartCommandFingerprintPayloadV1,
   agentResearchStartRequestFingerprintPayloadV1,
@@ -456,21 +457,6 @@ interface OwnedAiJobGuardDefinition {
   readonly statement: Database.Statement;
   readonly parameters: readonly AiJobGuardParameterType[];
   readonly stepsPerRow: 1;
-}
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record).sort().map((key) =>
-      `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
-  }
-  if (typeof value === "number" && !Number.isFinite(value)) {
-    throw new Error("Cannot canonicalize non-finite number");
-  }
-  const encoded = JSON.stringify(value);
-  if (encoded === undefined) throw new Error("Cannot canonicalize undefined");
-  return encoded;
 }
 
 function fingerprint(value: unknown): { json: string; hash: string } {

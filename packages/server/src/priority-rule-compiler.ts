@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import {
+  canonicalJsonV1 as canonicalJson,
   personalPriorityCompilerVersion,
   personalPriorityNaturalLanguageGrammarV1,
   personalPriorityRuleSchema,
@@ -70,16 +71,6 @@ const effectNames = Object.fromEntries((["en", "ru"] as const).map((locale) => [
 
 function escapedPattern(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const object = value as Record<string, unknown>;
-    return `{${Object.keys(object).sort().map((key) =>
-      `${JSON.stringify(key)}:${canonicalJson(object[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
 }
 
 function sha256(value: string): string {

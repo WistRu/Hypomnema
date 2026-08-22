@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 import type Database from "better-sqlite3";
 
+import { canonicalJsonV1 as canonicalJson } from "@tabhub/shared";
+
 export const prioritySignalNames = [
   "has_shareable_next_action",
   "has_shareable_project_context",
@@ -394,20 +396,6 @@ function assertExactKeys(
   for (const key of required) {
     if (!Object.hasOwn(value, key)) fail(`${context} is missing ${key}`);
   }
-}
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (isPlainObject(value)) {
-    return `{${Object.keys(value).sort().map((key) =>
-      `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
-  }
-  if (typeof value === "number" && !Number.isFinite(value)) {
-    throw new Error("Cannot canonicalize non-finite number");
-  }
-  const encoded = JSON.stringify(value);
-  if (encoded === undefined) throw new Error("Cannot canonicalize undefined");
-  return encoded;
 }
 
 function sha256(value: string): string {

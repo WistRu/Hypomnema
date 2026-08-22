@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import {
+  canonicalJsonV1 as canonicalJson,
   agentResearchCancelRequestSchema,
   agentResearchRunApprovalRequestSchema,
   agentResearchStartRequestSchema,
@@ -99,10 +100,6 @@ export class ResearchWorkflowError extends Error {
     super(message);
     this.name = "ResearchWorkflowError";
   }
-}
-
-function canonicalJson(value: unknown): string {
-  return new TextDecoder().decode(researchCanonicalSha256PayloadV1(value));
 }
 
 function utf8Bytes(value: string): number {

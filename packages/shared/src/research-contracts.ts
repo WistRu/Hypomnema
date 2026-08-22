@@ -123,6 +123,27 @@ export function researchCanonicalSha256PayloadV1(value: unknown): Uint8Array {
   return new TextEncoder().encode(canonicalize(value, "$"));
 }
 
+/**
+ * Canonical JSON text for the same byte contract as
+ * {@link researchCanonicalSha256PayloadV1}. This is the single canonicalization used
+ * across the workspace; no module may keep a private copy.
+ */
+export function canonicalJsonV1(value: unknown): string {
+  return new TextDecoder().decode(researchCanonicalSha256PayloadV1(value));
+}
+
+/**
+ * Byte mirror of SQLite's `json_object(...)`: key insertion order is preserved and
+ * never sorted, because the same bytes are produced inside SQL triggers and both sides
+ * must hash identically. This is deliberately NOT a canonicalization — use
+ * {@link canonicalJsonV1} for fingerprints that only TypeScript produces. `bigint` is
+ * written as a decimal string, matching how SQLite renders an INTEGER in JSON.
+ */
+export function sqlJsonObjectMirrorV1(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    typeof item === "bigint" ? item.toString(10) : item);
+}
+
 export const researchCoverageSchema = z.strictObject({
   discovered: nonnegativeSafeInteger.max(10_000),
   captured: nonnegativeSafeInteger.max(10_000),

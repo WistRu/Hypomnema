@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 
 import {
+  canonicalJsonV1 as canonicalJson,
   aiTaskSpecSchema,
   estimateResearchReservationV1,
   liveAcquisitionEffectivePolicy,
@@ -89,10 +90,6 @@ interface FreshPreflight {
 
 function digest(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
-}
-
-function canonicalJson(value: unknown): string {
-  return new TextDecoder().decode(researchCanonicalSha256PayloadV1(value));
 }
 
 function canonicalTimestamp(clock: () => Date): string {

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type Database from "better-sqlite3";
 import {
+  canonicalJsonV1 as canonicalJson,
   estimateResearchReservationV1,
   researchApprovedDraftSchema,
   researchCanonicalSha256PayloadV1,
@@ -30,10 +31,6 @@ export interface ReceiptBackedLiveResearchFixture {
 
 function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
-}
-
-function canonicalJson(value: unknown): string {
-  return new TextDecoder().decode(researchCanonicalSha256PayloadV1(value));
 }
 
 /**

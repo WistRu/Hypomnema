@@ -1,6 +1,6 @@
 import { createHash, createHmac } from "node:crypto";
 
-import { researchCanonicalSha256PayloadV1 } from "@tabhub/shared";
+import { canonicalJsonV1 as canonicalJson, researchCanonicalSha256PayloadV1 } from "@tabhub/shared";
 import type Database from "better-sqlite3";
 
 import {
@@ -210,10 +210,6 @@ export class LiveAcquisitionActionPolicyError extends Error {
 
 function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
-}
-
-function canonicalJson(value: unknown): string {
-  return new TextDecoder().decode(researchCanonicalSha256PayloadV1(value));
 }
 
 function canonicalTimestamp(clock: () => Date): string {

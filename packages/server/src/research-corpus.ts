@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type Database from "better-sqlite3";
 import {
+  canonicalJsonV1 as canonicalJson,
   durableJobIdSchema,
   estimateResearchReservationV1,
   researchApprovedDraftSchema,
@@ -288,10 +289,6 @@ interface AuditStateRow {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-function canonicalJson(value: unknown): string {
-  return new TextDecoder().decode(researchCanonicalSha256PayloadV1(value));
 }
 
 function isDigest(value: string): boolean {

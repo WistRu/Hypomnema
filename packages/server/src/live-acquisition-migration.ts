@@ -4,6 +4,8 @@ import { types as utilTypes } from "node:util";
 
 import type Database from "better-sqlite3";
 
+import { sqlJsonObjectMirrorV1 as sqlJsonMirror } from "@tabhub/shared";
+
 export type LiveAcquisitionMigrationFailurePoint =
   | "after_begin"
   | "after_sql"
@@ -177,7 +179,7 @@ function requireExactDataKeys(
 ): void {
   const actual = [...record.keys()].sort();
   const sortedExpected = [...expected].sort();
-  if (canonicalJson(actual) !== canonicalJson(sortedExpected)) {
+  if (sqlJsonMirror(actual) !== sqlJsonMirror(sortedExpected)) {
     throw new TypeError(`${label} has an invalid data shape`);
   }
 }
@@ -272,7 +274,7 @@ export function digestPrivacyPurgeExecutionTargets(
   orderedTargets: readonly PrivacyPurgeExecutionTarget[],
 ): string {
   const targets = snapshotPrivacyPurgeTargets(orderedTargets);
-  return sha256(canonicalJson(targets));
+  return sha256(sqlJsonMirror(targets));
 }
 
 function snapshotPrivacyPurgeLifecycleTargets(
@@ -317,7 +319,7 @@ function snapshotPrivacyPurgeLifecycleTargets(
 export function digestPrivacyPurgeLifecycleTargets(
   orderedTargets: readonly PrivacyPurgeLifecycleTarget[],
 ): string {
-  return sha256(canonicalJson(snapshotPrivacyPurgeLifecycleTargets(orderedTargets)));
+  return sha256(sqlJsonMirror(snapshotPrivacyPurgeLifecycleTargets(orderedTargets)));
 }
 
 function snapshotSafeCounts(value: unknown): Readonly<Record<string, number>> {
@@ -703,7 +705,7 @@ function assertPrivacyPurgeTargetCatalogFrozen(
       requires_authority, guard_trigger_name
     FROM privacy_purge_target_catalog ORDER BY table_name
   `).all();
-  if (sha256(canonicalJson(rows)) !== schema25PurgeTargetCatalogFingerprint) {
+  if (sha256(sqlJsonMirror(rows)) !== schema25PurgeTargetCatalogFingerprint) {
     throw new Error("Privacy purge target catalog fingerprint drifted");
   }
 }
@@ -730,7 +732,7 @@ function assertPrivacyPurgeDeletionManifestFrozen(
     tbl_name: string | null;
     sql: string | null;
   }>;
-  const fingerprint = sha256(canonicalJson(rows.map(({
+  const fingerprint = sha256(sqlJsonMirror(rows.map(({
     trigger_name,
     table_name,
     pk_columns_json,
@@ -845,7 +847,7 @@ function assertCommittedRunLifecycleTargets(
   if (
     requireRunRowEquality &&
     (command.target_kind === "run" || command.target_kind === "resource_history") &&
-    canonicalJson(committedRunRows) !== canonicalJson(lifecycleRunRows)
+    sqlJsonMirror(committedRunRows) !== sqlJsonMirror(lifecycleRunRows)
   ) {
     throw new Error(
       "Privacy purge research-run rows do not exactly match the lifecycle commitment",
@@ -999,7 +1001,7 @@ function runLifecycleTombstoneDigest(
   rootGenerationId: number,
 ): string {
   if (target.subjectGenerationId === rootGenerationId) return rootDigest;
-  return sha256(canonicalJson({
+  return sha256(sqlJsonMirror({
     version: "privacy_purge_run_tombstone:v1",
     rootDigest,
     subjectGenerationId: target.subjectGenerationId,
@@ -1013,7 +1015,7 @@ function historyLifecycleTombstoneDigest(
   target: PrivacyPurgeLifecycleTarget,
   historyEpochId: number,
 ): string {
-  return sha256(canonicalJson({
+  return sha256(sqlJsonMirror({
     version: "privacy_purge_history_run_tombstone:v1",
     rootDigest,
     historyEpochId,
@@ -1120,7 +1122,7 @@ export function executePrivacyPurgePlan(
   }
   const orderedTargets = plan.outcome === "completed" ? plan.orderedTargets : [];
   const planDigest = digestPrivacyPurgeExecutionTargets(orderedTargets);
-  const safeCountsJson = canonicalJson(plan.safeCounts);
+  const safeCountsJson = sqlJsonMirror(plan.safeCounts);
   if (acceptExactPrivacyPurgeReplay(
     connection,
     plan,
@@ -1980,12 +1982,6 @@ interface SchemaObjectRow {
   readonly sql: string | null;
 }
 
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(value, (_key, item: unknown) =>
-    typeof item === "bigint" ? item.toString(10) : item,
-  );
-}
-
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -2277,8 +2273,8 @@ function captureSchema24(connection: Database.Database): SchemaSnapshot {
   const rows = sourceRows(connection);
   const blockingDeletionTriggers = blockingDeletionTriggerNames(connection);
   if (
-    canonicalJson(blockingDeletionTriggers) !==
-    canonicalJson(schema24BlockingDeletionTriggers)
+    sqlJsonMirror(blockingDeletionTriggers) !==
+    sqlJsonMirror(schema24BlockingDeletionTriggers)
   ) {
     throw new Error(
       `Schema-24 blocking deletion trigger inventory drifted: expected ${schema24BlockingDeletionTriggers.length}, got ${blockingDeletionTriggers.length}`,
@@ -2290,21 +2286,21 @@ function captureSchema24(connection: Database.Database): SchemaSnapshot {
   );
   if (
     legacyDeletionTriggers.length !== 32 ||
-    canonicalJson(legacyDeletionTriggers) !==
-      canonicalJson(expectedLegacyDeletionTriggers)
+    sqlJsonMirror(legacyDeletionTriggers) !==
+      sqlJsonMirror(expectedLegacyDeletionTriggers)
   ) {
     throw new Error("Schema-24 purge guard inventory is not the exact legacy 32");
   }
   return {
     sourceCount: rows.length,
-    sourceChecksum: sha256(canonicalJson(rows)),
+    sourceChecksum: sha256(sqlJsonMirror(rows)),
     childSchema: new Map(
       sourceChildTables.map((table) => [table, schemaSql(connection, table)]),
     ),
     childForeignKeys: new Map(
       sourceChildTables.map((table) => [
         table,
-        canonicalJson(connection.pragma(`foreign_key_list('${table}')`)),
+        sqlJsonMirror(connection.pragma(`foreign_key_list('${table}')`)),
       ]),
     ),
     protectedObjects: namedSchemaObjects(connection, [
@@ -2329,7 +2325,7 @@ function finalizeDeletionManifest(connection: Database.Database): void {
     )
     .pluck()
     .all() as string[];
-  if (canonicalJson(rows) !== canonicalJson(expectedDeletionManifestTriggers)) {
+  if (sqlJsonMirror(rows) !== sqlJsonMirror(expectedDeletionManifestTriggers)) {
     throw new Error("Privacy purge deletion manifest is incomplete");
   }
   const update = connection.prepare(
@@ -2395,8 +2391,8 @@ function finalizePurgeTargetCatalog(connection: Database.Database): void {
   if (
     guardedTables.length !== expectedDeletionManifestTriggers.length ||
     rows.length !== expectedTables.length ||
-    canonicalJson(rows.map(({ table_name }) => table_name)) !==
-      canonicalJson(expectedTables)
+    sqlJsonMirror(rows.map(({ table_name }) => table_name)) !==
+      sqlJsonMirror(expectedTables)
   ) {
     throw new Error("Privacy purge target catalog is incomplete");
   }
@@ -2417,7 +2413,7 @@ function finalizePurgeTargetCatalog(connection: Database.Database): void {
       throw new Error(`Privacy purge catalog PK JSON is invalid: ${row.table_name}`);
     }
     if (
-      canonicalJson(declaredPrimaryKey) !== canonicalJson(primaryKeyColumns) ||
+      sqlJsonMirror(declaredPrimaryKey) !== sqlJsonMirror(primaryKeyColumns) ||
       !row.pk_expression_sql.startsWith(`'pk:v1|${primaryKeyColumns.length}|'`)
     ) {
       throw new Error(`Privacy purge catalog PK drifted: ${row.table_name}`);
@@ -2485,7 +2481,7 @@ function validateSchema25(
       `research_sources row count changed: ${before.sourceCount} -> ${rows.length}`,
     );
   }
-  if (sha256(canonicalJson(rows)) !== before.sourceChecksum) {
+  if (sha256(sqlJsonMirror(rows)) !== before.sourceChecksum) {
     throw new Error("research_sources checksum changed during migration");
   }
 
@@ -2494,7 +2490,7 @@ function validateSchema25(
       throw new Error(`Child schema changed during migration: ${table}`);
     }
     if (
-      canonicalJson(connection.pragma(`foreign_key_list('${table}')`)) !==
+      sqlJsonMirror(connection.pragma(`foreign_key_list('${table}')`)) !==
       before.childForeignKeys.get(table)
     ) {
       throw new Error(`Child foreign keys changed during migration: ${table}`);
@@ -2504,41 +2500,41 @@ function validateSchema25(
   const expectedExternal = [...externalSourceTriggers].sort();
   if (
     before.legacyDeletionTriggers.length !== 32 ||
-    canonicalJson(before.legacyDeletionTriggers) !==
-      canonicalJson(expectedLegacyDeletionTriggers)
+    sqlJsonMirror(before.legacyDeletionTriggers) !==
+      sqlJsonMirror(expectedLegacyDeletionTriggers)
   ) {
     throw new Error("Schema-24 blocking deletion trigger inventory is not exact");
   }
   if (
-    canonicalJson(before.blockingDeletionTriggers) !==
-    canonicalJson(schema24BlockingDeletionTriggers)
+    sqlJsonMirror(before.blockingDeletionTriggers) !==
+    sqlJsonMirror(schema24BlockingDeletionTriggers)
   ) {
     throw new Error("Schema-24 complete delete-guard inventory is not exact");
   }
   const blockingAfter = blockingDeletionTriggerNames(connection);
   if (
-    canonicalJson(blockingAfter) !==
-    canonicalJson(schema25BlockingDeletionTriggers)
+    sqlJsonMirror(blockingAfter) !==
+    sqlJsonMirror(schema25BlockingDeletionTriggers)
   ) {
     throw new Error(
       `Schema-25 blocking deletion trigger inventory drifted: expected ${schema25BlockingDeletionTriggers.length}, got ${blockingAfter.length}`,
     );
   }
   if (
-    canonicalJson([...before.externalTriggers.keys()]) !==
-    canonicalJson(expectedExternal)
+    sqlJsonMirror([...before.externalTriggers.keys()]) !==
+    sqlJsonMirror(expectedExternal)
   ) {
     throw new Error("Schema-24 research source trigger inventory is incomplete");
   }
   const afterExternal = namedSchemaObjects(connection, externalSourceTriggers);
-  if (canonicalJson([...afterExternal.keys()]) !== canonicalJson(expectedExternal)) {
+  if (sqlJsonMirror([...afterExternal.keys()]) !== sqlJsonMirror(expectedExternal)) {
     throw new Error("Schema-25 research source trigger inventory is incomplete");
   }
   if (
-    canonicalJson(before.externalDependencyNames) !==
-      canonicalJson([...externalSourceTriggers].sort()) ||
-    canonicalJson(externalDependencyNames(connection)) !==
-      canonicalJson(schema25ExternalSourceDependencies)
+    sqlJsonMirror(before.externalDependencyNames) !==
+      sqlJsonMirror([...externalSourceTriggers].sort()) ||
+    sqlJsonMirror(externalDependencyNames(connection)) !==
+      sqlJsonMirror(schema25ExternalSourceDependencies)
   ) {
     throw new Error("External research_sources dependency inventory changed");
   }
@@ -2555,8 +2551,8 @@ function validateSchema25(
     schema25ExternalSourceDependencies,
   );
   if (
-    canonicalJson([...afterExternalDependencies.keys()]) !==
-    canonicalJson(schema25ExternalSourceDependencies)
+    sqlJsonMirror([...afterExternalDependencies.keys()]) !==
+    sqlJsonMirror(schema25ExternalSourceDependencies)
   ) {
     throw new Error("Schema-25 external dependency inventory drifted");
   }
@@ -2569,7 +2565,7 @@ function validateSchema25(
     .filter(({ actual, expected }) => actual !== expected);
   if (externalFingerprintDrift.length !== 0) {
     throw new Error(
-      `External research_sources trigger fingerprint drifted: ${canonicalJson(externalFingerprintDrift)}`,
+      `External research_sources trigger fingerprint drifted: ${sqlJsonMirror(externalFingerprintDrift)}`,
     );
   }
 
@@ -2582,7 +2578,7 @@ function validateSchema25(
     .filter(([name]) => name !== "research_runs");
   const unchangedProtectedAfter = [...protectedAfter]
     .filter(([name]) => name !== "research_runs");
-  if (canonicalJson(unchangedProtectedAfter) !== canonicalJson(unchangedProtectedBefore)) {
+  if (sqlJsonMirror(unchangedProtectedAfter) !== sqlJsonMirror(unchangedProtectedBefore)) {
     throw new Error("Protected child/job/run schema fingerprint changed");
   }
   const runColumns = connection.pragma("table_info('research_runs')") as Array<{
@@ -2630,8 +2626,8 @@ function validateSchema25(
     "trigger:research_sources_live_capture_insert_guard",
   ];
   if (
-    canonicalJson([...before.sourceObjects.keys()]) !==
-    canonicalJson(expectedSourceV24)
+    sqlJsonMirror([...before.sourceObjects.keys()]) !==
+    sqlJsonMirror(expectedSourceV24)
   ) {
     throw new Error("Schema-24 research_sources object inventory drifted");
   }
@@ -2663,8 +2659,8 @@ function validateSchema25(
     )
     .all() as Array<{ name: string; sql: string }>;
   if (
-    canonicalJson(sourceObjectRows.map(({ name }) => name)) !==
-    canonicalJson([...schema25SourceObjectFingerprints.keys()])
+    sqlJsonMirror(sourceObjectRows.map(({ name }) => name)) !==
+    sqlJsonMirror([...schema25SourceObjectFingerprints.keys()])
   ) {
     throw new Error("Schema-25 research_sources object inventory drifted");
   }
@@ -2696,13 +2692,13 @@ function validateSchema25(
       sql: string | null;
     }>;
   if (
-    canonicalJson(manifestRows.map(({ trigger_name }) => trigger_name)) !==
-    canonicalJson(expectedDeletionManifestTriggers)
+    sqlJsonMirror(manifestRows.map(({ trigger_name }) => trigger_name)) !==
+    sqlJsonMirror(expectedDeletionManifestTriggers)
   ) {
     throw new Error("Deletion manifest exact inventory mismatch");
   }
   const manifestFingerprint = sha256(
-    canonicalJson(
+    sqlJsonMirror(
       manifestRows.map(
         ({
           trigger_name,
@@ -2754,7 +2750,7 @@ function validateSchema25(
       sha256(row.sql) !== row.trigger_sql_digest ||
       row.tbl_name !== row.table_name ||
       !triggerSql.includes(`BEFORE DELETE ON ${row.table_name}`) ||
-      canonicalJson(declaredPrimaryKey) !== canonicalJson(primaryKeyColumns) ||
+      sqlJsonMirror(declaredPrimaryKey) !== sqlJsonMirror(primaryKeyColumns) ||
       !triggerSql.includes(`WHEN (${predicate}) AND NOT EXISTS (`) ||
       pkExpressionUses < 2 ||
       !triggerSql.includes(`authority.table_name = '${row.table_name}'`) ||
@@ -2775,7 +2771,7 @@ function validateSchema25(
     FROM privacy_purge_target_catalog ORDER BY table_name
   `).all();
   const purgeTargetCatalogFingerprint = sha256(
-    canonicalJson(purgeTargetCatalogRows),
+    sqlJsonMirror(purgeTargetCatalogRows),
   );
   if (purgeTargetCatalogFingerprint !== schema25PurgeTargetCatalogFingerprint) {
     throw new Error(
@@ -2789,7 +2785,7 @@ function validateSchema25(
   > = [];
   for (const [key, object] of schemaAfter) {
     const prior = before.schemaObjects.get(key);
-    if (prior === undefined || canonicalJson(prior) !== canonicalJson(object)) {
+    if (prior === undefined || sqlJsonMirror(prior) !== sqlJsonMirror(object)) {
       schemaMutations.push({ state: "created_or_changed", object });
     }
   }
@@ -2803,7 +2799,7 @@ function validateSchema25(
     const rightKey = `${right.state}:${right.object.type}:${right.object.name}`;
     return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
   });
-  const schemaMutationFingerprint = sha256(canonicalJson(schemaMutations));
+  const schemaMutationFingerprint = sha256(sqlJsonMirror(schemaMutations));
   if (schemaMutationFingerprint !== schema25OwnedSchemaMutationFingerprint) {
     throw new Error(
       `Schema-25 owned schema aggregate fingerprint drifted: ${schemaMutationFingerprint}`,
@@ -2894,7 +2890,7 @@ export function runLiveAcquisitionMigration(
         `research_sources row count changed: ${before.sourceCount} -> ${copiedSources.length}`,
       );
     }
-    if (sha256(canonicalJson(copiedSources)) !== before.sourceChecksum) {
+    if (sha256(sqlJsonMirror(copiedSources)) !== before.sourceChecksum) {
       throw new Error("research_sources checksum changed during migration");
     }
     finalizeDeletionManifest(connection);

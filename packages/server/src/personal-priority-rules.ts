@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { performance } from "node:perf_hooks";
 
 import {
+  canonicalJsonV1 as canonicalJson,
   personalPriorityDraftSchema,
   personalPriorityLifecycleRequestSchema,
   personalPriorityRuleSchema,
@@ -66,17 +67,6 @@ interface ActiveRow { ruleset_id: number; version: number }
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (isObject(value)) {
-    return `{${Object.keys(value).sort().map((key) =>
-      `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
-  }
-  const result = JSON.stringify(value);
-  if (result === undefined) throw new Error("Cannot canonicalize undefined");
-  return result;
 }
 
 function sha256(value: string): string {

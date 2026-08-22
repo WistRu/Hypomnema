@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import {
+  canonicalJsonV1 as canonicalJson,
   researchCanonicalSha256PayloadV1,
   researchCapturedTextChunkManifestSchema,
   researchCoverageSchema,
@@ -273,10 +274,6 @@ function validatePublicationReason(
 
 function corrupt(message = "Research report storage is corrupt"): never {
   throw new ResearchReportCatalogError("RESEARCH_REPORT_STORAGE_CORRUPT", message);
-}
-
-function canonicalJson(value: unknown): string {
-  return new TextDecoder().decode(researchCanonicalSha256PayloadV1(value));
 }
 
 function sha256(value: string | Uint8Array): string {

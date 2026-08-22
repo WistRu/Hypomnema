@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import {
+  canonicalJsonV1 as canonicalJson,
   estimateResearchReservationV1,
   researchCanonicalSha256PayloadV1,
   researchSelectionFingerprintPayload,
@@ -40,10 +41,6 @@ const c81Budget = { maxSteps: 10, maxTokens: 4_000, maxCostUsd: 1,
 
 function digest(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-function canonicalJson(value: unknown): string {
-  return new TextDecoder().decode(researchCanonicalSha256PayloadV1(value));
 }
 
 function dossier(summary: string) {

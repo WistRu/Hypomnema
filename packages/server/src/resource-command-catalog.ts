@@ -5,6 +5,7 @@ import ipaddr from "ipaddr.js";
 import { parse as parseDomain } from "tldts";
 
 import {
+  canonicalJsonV1 as canonicalJson,
   resourceCommandSchema,
   resourceCommandReceiptSchema,
   type ResourceAlias,
@@ -177,20 +178,6 @@ const domainParseOptions = Object.freeze({
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
-}
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
-  }
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
-    .join(",")}}`;
 }
 
 function requestFingerprint(command: SupportedResourceCommand): string {

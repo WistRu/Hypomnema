@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import Database from "better-sqlite3";
 import {
+  canonicalJsonV1 as canonicalJson,
   estimateResearchReservationV1,
   researchCanonicalSha256PayloadV1,
   researchLiveAcquisitionSourceDraftSchema,
@@ -39,10 +40,6 @@ const limits = { maxConcurrent: 1, maxAttemptsPerUtcDay: 10, maxCostUsdPerUtcDay
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-function canonicalJson(value: unknown): string {
-  return new TextDecoder().decode(researchCanonicalSha256PayloadV1(value));
 }
 
 function reportDossier(summary: string) {

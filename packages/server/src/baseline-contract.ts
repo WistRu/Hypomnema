@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { canonicalJsonV1 as canonicalJson } from "@tabhub/shared";
+
 export const g0BaselineContractVersion = 1 as const;
 export const g0BaselineSchemaVersion = 17 as const;
 
@@ -202,20 +204,6 @@ export const s10kV1 = Object.freeze({
   seed: "tabhub-s10k-v1",
   topicCount: 20,
 } satisfies SyntheticFixtureContract);
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
-  }
-  if (value !== null && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
 
 export function baselineContractHash(value: unknown): string {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");

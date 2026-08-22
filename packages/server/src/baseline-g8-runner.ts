@@ -18,6 +18,7 @@ import { performance } from "node:perf_hooks";
 
 import Database from "better-sqlite3";
 
+import { canonicalJsonV1 as canonicalJson } from "@tabhub/shared";
 import type {
   ResearchPreflight,
   ResearchPreflightRequest,
@@ -39,18 +40,6 @@ function deepFreeze<Value>(value: Value): Value {
     Object.freeze(value);
   }
   return value;
-}
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record).sort().map((key) =>
-      `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
-  }
-  const encoded = JSON.stringify(value);
-  if (encoded === undefined) throw new TypeError("Cannot canonicalize undefined");
-  return encoded;
 }
 
 function sha256Text(value: string): string {

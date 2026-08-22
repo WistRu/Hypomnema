@@ -37,6 +37,8 @@ import {
 } from "./priority-engine.js";
 import type { PriorityListSubjectProjection } from "./priority-list-ordering.js";
 
+import { canonicalJsonV1 as canonicalJson } from "@tabhub/shared";
+
 export const prioritySingleCoverageGuardId = "priority_subject_coverage_v1";
 export const priorityCollectionCoverageGuardId = "priority_coverage_v1";
 
@@ -712,18 +714,6 @@ export interface PriorityAssessmentCoordinator {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record).sort().map((key) =>
-      `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
-  }
-  const encoded = JSON.stringify(value);
-  if (encoded === undefined) throw new Error("Cannot canonicalize undefined");
-  return encoded;
 }
 
 function guardProjection(

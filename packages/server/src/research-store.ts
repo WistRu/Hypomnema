@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type Database from "better-sqlite3";
 import {
+  canonicalJsonV1 as canonicalJson,
   estimateResearchReservationV1,
   researchEstimateFitsBudgetV1,
   researchApprovalFingerprintPayloadV1,
@@ -48,10 +49,6 @@ type ResearchExactExclusionCategory =
 interface ResearchDraftBuildOptions {
   readonly collectAccessConfirmations?: boolean;
   readonly sourceDetails?: Array<ResearchCurrentProjection["sources"][number]>;
-}
-
-function canonicalJson(value: unknown): string {
-  return new TextDecoder().decode(researchCanonicalSha256PayloadV1(value));
 }
 
 function sha256(value: string): string {

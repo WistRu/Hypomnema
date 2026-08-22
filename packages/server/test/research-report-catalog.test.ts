@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import {
+  canonicalJsonV1 as canonicalJson,
   estimateResearchReservationV1,
   projectAgentResearchReportDetail,
   researchCanonicalSha256PayloadV1,
@@ -56,10 +57,6 @@ const evidenceMaterial = "A界B research evidence";
 
 function digest(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
-}
-
-function canonicalJson(value: unknown): string {
-  return new TextDecoder().decode(researchCanonicalSha256PayloadV1(value));
 }
 
 function dossier(summary: string) {
