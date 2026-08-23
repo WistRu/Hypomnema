@@ -302,7 +302,6 @@ const russianMessages: Record<string, Message> = {
   "Save aliases": "Сохранить псевдонимы",
   "Aliases saved": "Псевдонимы сохранены",
   "Resource context": "Контекст ресурса",
-  "Visibility": "Видимость",
   "Resource note or next action": "Заметка о ресурсе или следующее действие",
   "Why is this resource useful?": "Чем полезен этот ресурс?",
   "What should happen next?": "Что нужно сделать дальше?",
@@ -384,6 +383,8 @@ const russianMessages: Record<string, Message> = {
   "No intent for this exact open tab.": "Для этой конкретной вкладки цели пока нет.",
   "Intent history": "История целей",
   "Pair this browser for personal context": "Подключить этот браузер к личному контексту",
+  "One-time step for this browser. Only the code below expires; the pairing itself does not.":
+    "Разовое действие для этого браузера. Истекает только код; само подключение — нет.",
   "Pairing code": "Код подключения",
   "Pairing challenge": "Идентификатор подключения",
   "Expires {date}": "Истекает {date}",
@@ -1815,7 +1816,6 @@ const russianMessages: Record<string, Message> = {
   Cost: "Стоимость",
   "Save next step as context": "Сохранить следующий шаг как контекст",
   "Choose one next step": "Выберите один следующий шаг",
-  "Next-action visibility": "Видимость следующего действия",
   "Next action saved.": "Следующее действие сохранено.",
   "A selection cannot save one shared next action. Open one page or Resource and choose its next step there.":
     "Для набора нельзя сохранить одно общее следующее действие. Откройте одну страницу или ресурс и выберите следующий шаг там.",

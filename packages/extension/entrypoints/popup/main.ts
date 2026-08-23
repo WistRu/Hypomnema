@@ -7,11 +7,7 @@ import type {
   ExtensionResponse,
   ExtensionStatus,
 } from "../../lib/messages";
-import type {
-  ContextEntryKind,
-  ContextVisibility,
-  SessionIntent,
-} from "@tabhub/shared";
+import type { ContextEntryKind, SessionIntent } from "@tabhub/shared";
 import { localizedExtensionError } from "../../lib/localized-error";
 
 const uiLocale = browser.i18n.getMessage("@@ui_locale");
@@ -64,7 +60,6 @@ const pairButton = requiredElement<HTMLButtonElement>("#pair-button");
 const contextForm = requiredElement<HTMLFormElement>("#context-form");
 const contextScope = requiredElement<HTMLSelectElement>("#context-scope");
 const contextKind = requiredElement<HTMLSelectElement>("#context-kind");
-const contextVisibility = requiredElement<HTMLSelectElement>("#context-visibility");
 const contextBody = requiredElement<HTMLTextAreaElement>("#context-body");
 const contextSave = requiredElement<HTMLButtonElement>("#context-save");
 const contextFeedback = requiredElement<HTMLElement>("#context-feedback");
@@ -111,15 +106,13 @@ function localizeStaticUi(): void {
   const localizedIds: Record<string, string> = {
     "context-heading": "popupContextHeading",
     "pairing-help": "popupPairingHelp",
+    "pairing-once": "popupPairingOnce",
     "pairing-challenge-label": "popupPairingChallengeLabel",
     "pairing-code-label": "popupPairingCodeLabel",
     "context-scope-label": "popupContextScopeLabel",
     "context-scope-page": "popupContextScopePage",
     "context-scope-tab": "popupContextScopeTab",
     "context-kind-label": "popupContextKindLabel",
-    "context-visibility-label": "popupContextVisibilityLabel",
-    "context-local-option": "popupContextLocalOnly",
-    "context-share-option": "popupContextShareAi",
     "context-body-label": "popupContextBodyLabel",
     "intent-history-label": "popupIntentHistory",
   };
@@ -427,7 +420,9 @@ contextForm.addEventListener("submit", (event) => {
     scope: contextScope.value as "page" | "this_tab",
     targetScope: target.scope,
     type: "tabhub:context-save",
-    visibility: contextVisibility.value as ContextVisibility,
+    // Personal context exists so the AI can read it; there is no visibility
+    // choice any more. See issue #30.
+    visibility: "share_with_ai",
   }).then((saved) => {
     if (saved) {
       contextBody.value = "";

@@ -245,4 +245,32 @@ describe("personal-context popup runtime", () => {
       "popupContextStaleDiscarded",
     );
   });
+
+  it("offers no visibility choice and always saves context as AI-visible", async () => {
+    await popupModule.refreshContext();
+    expect(document.querySelector("#context-visibility")).toBeNull();
+    expect(document.querySelector("#context-visibility-label")).toBeNull();
+
+    const form = document.querySelector<HTMLFormElement>("#context-form")!;
+    const body = document.querySelector<HTMLTextAreaElement>("#context-body")!;
+    body.value = "Notes the AI is always allowed to read";
+    form.requestSubmit();
+
+    await vi.waitFor(() =>
+      expect(popupBrowser.runtime.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: "Notes the AI is always allowed to read",
+          type: "tabhub:context-save",
+          visibility: "share_with_ai",
+        }),
+      ),
+    );
+  });
+
+  it("tells the user in the pairing panel that pairing is a one-time step", async () => {
+    await popupModule.refreshContext();
+    expect(document.querySelector("#pairing-once")?.textContent).toBe(
+      "popupPairingOnce",
+    );
+  });
 });

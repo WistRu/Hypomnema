@@ -360,7 +360,7 @@ describe("PersonalContextPanel", () => {
       kind: "set",
       scope: expect.objectContaining({ browserTabId: 8 }),
       expectedUrl: "https://example.com/docs",
-      visibility: "local_only",
+      visibility: "share_with_ai",
     })));
 
     fireEvent.click(screen.getByRole("button", { name: "Архивировать" }));
@@ -577,5 +577,76 @@ describe("PersonalContextPanel", () => {
     await waitFor(() => expect(screen.queryByText(/PAIRING-CODE-DOES-NOT-ENTER-A-URL/)).toBeNull());
     expect(mocks.changeLocalPageContext).not.toHaveBeenCalled();
     expect(mocks.changeLocalSessionIntent).not.toHaveBeenCalled();
+  });
+
+  it("offers no visibility choice and saves new context as AI-visible", async () => {
+    mocks.fetchLocalPageContext.mockResolvedValue(pageView());
+    renderPanel();
+    const textarea = await screen.findByLabelText("Why is this important?");
+    expect(screen.queryByRole("checkbox")).toBeNull();
+
+    fireEvent.change(textarea, { target: { value: "Always readable by the AI" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.changeLocalPageContext).toHaveBeenCalledOnce());
+    expect(mocks.changeLocalPageContext.mock.calls[0]?.[1]).toMatchObject({
+      kind: "append",
+      body: "Always readable by the AI",
+      visibility: "share_with_ai",
+    });
+  });
+
+  it("labels only the legacy local-only entries, not every AI-visible one", async () => {
+    const legacy = contextEntry({ id: 30, body: "Written before the choice went away", visibility: "local_only" });
+    const shared = contextEntry({ id: 31, body: "Written after", visibility: "share_with_ai" });
+    mocks.fetchLocalPageContext.mockResolvedValue(pageView([legacy, shared]));
+    renderPanel({ entries: [legacy, shared] });
+
+    await screen.findByText("Written before the choice went away");
+    expect(screen.getAllByText("Local only")).toHaveLength(1);
+    expect(screen.queryByText("May be used by AI")).toBeNull();
+  });
+
+  it("says pairing is a one-time step that does not expire", async () => {
+    mocks.probe.mockResolvedValue({
+      available: true,
+      browser: "chrome",
+      browserSessionId: scope.browserSessionId,
+      commandProtocolVersion: 4,
+      controlWindowId: 2,
+      extensionOrigin: "chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef",
+      installationId: scope.installationId,
+      pendingUndos: [],
+      windows: [],
+    });
+    renderPanel();
+
+    expect(
+      await screen.findByText("One-time step for this browser. Only the code below expires; the pairing itself does not."),
+    ).toBeTruthy();
+  });
+
+  it("does not carry a revised entry's local-only visibility into the next new entry", async () => {
+    const legacy = contextEntry({ id: 40, body: "Written before the choice went away", visibility: "local_only" });
+    mocks.fetchLocalPageContext.mockResolvedValue(pageView([legacy]));
+    mocks.changeLocalPageContext.mockResolvedValue({
+      kind: "changed",
+      operation: "append",
+      entry: contextEntry({ id: 41, entryKind: "next_action", body: "reference" }),
+    });
+    renderPanel({ entries: [legacy] });
+
+    await screen.findByText("Written before the choice went away");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reference" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.changeLocalPageContext).toHaveBeenCalledOnce());
+    expect(mocks.changeLocalPageContext.mock.calls[0]?.[1]).toMatchObject({
+      kind: "append",
+      body: "reference",
+      visibility: "share_with_ai",
+    });
+    expect(mocks.changeLocalPageContext.mock.calls[0]?.[1]).not.toHaveProperty("supersedesEntryId");
   });
 });

@@ -508,7 +508,7 @@ describe("ResourceHeader", () => {
       expect.objectContaining({
         body: "Useful talks",
         entryKind: "note",
-        visibility: "local_only",
+        visibility: "share_with_ai",
       }),
     );
 
@@ -595,12 +595,11 @@ describe("ResourceHeader", () => {
       expect.any(AbortSignal),
     ));
     fireEvent.change(draft, { target: { value: "A-only draft" } });
-    fireEvent.change(screen.getByLabelText("Visibility"), { target: { value: "share_with_ai" } });
     fireEvent.click(screen.getByRole("button", { name: "Switch resource" }));
 
     expect(await screen.findByRole("heading", { name: "Example" })).toBeTruthy();
     expect(screen.getByLabelText<HTMLTextAreaElement>("Resource note or next action").value).toBe("");
-    expect(screen.getByLabelText<HTMLSelectElement>("Visibility").value).toBe("local_only");
+    expect(screen.queryByLabelText("Visibility")).toBeNull();
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Save context" }).disabled).toBe(true);
     expect(screen.getByRole<HTMLInputElement>("radio", { name: "All time" }).checked).toBe(true);
     await waitFor(() => expect(mocks.fetchResourceActivity).toHaveBeenCalledWith(

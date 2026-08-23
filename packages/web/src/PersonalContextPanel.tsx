@@ -180,10 +180,17 @@ export function PersonalContextPanel({
   const [entryKind, setEntryKind] = useState<ContextEntryKind>("purpose");
   const [quickPreset, setQuickPreset] = useState<QuickContextPreset | null>(null);
   const [promotionKind, setPromotionKind] = useState<ContextEntryKind>("purpose");
-  const [visibility, setVisibility] = useState<ContextVisibility>("local_only");
   const [editing, setEditing] = useState<ContextEntry | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [announcement, setAnnouncement] = useState<LocalizedMessage | null>(null);
+
+  // Personal context exists so the AI can read it, so anything written now is
+  // AI-visible and the choice is gone (issue #30). Revising a stored entry is
+  // the one exception: a revision joins that entry's supersede chain, so it
+  // keeps the visibility the original was stored with rather than widening it.
+  // Derived rather than held in state on purpose — a remembered value outlives
+  // the entry it came from and leaks into the next, unrelated entry.
+  const visibility: ContextVisibility = editing?.visibility ?? "share_with_ai";
 
   const featuresQuery = useQuery({
     queryKey: ["features"],
@@ -292,7 +299,6 @@ export function PersonalContextPanel({
     setBody("");
     setEntryKind("purpose");
     setQuickPreset(null);
-    setVisibility("local_only");
     setEditing(null);
   };
 
@@ -722,14 +728,6 @@ export function PersonalContextPanel({
                 })}
               </p>
             ) : null}
-            <label className="context-visibility">
-              <input
-                checked={visibility === "share_with_ai"}
-                type="checkbox"
-                onChange={(event) => setVisibility(event.target.checked ? "share_with_ai" : "local_only")}
-              />
-              <span>{visibility === "share_with_ai" ? t("May be used by AI") : t("Local only")}</span>
-            </label>
             <div className="context-editor-actions">
               <button
                 disabled={
@@ -758,12 +756,12 @@ export function PersonalContextPanel({
                   </header>
                   <p>{entryBody(entry, t)}</p>
                   <footer>
-                    <span>{entry.visibility === "local_only" ? t("Local only") : t("May be used by AI")}</span>
+                    {entry.visibility === "local_only" ? <span>{t("Local only")}</span> : null}
                     {entry.currentReview ? <span>{entry.currentReview.verdict === "accepted" ? t("Accepted") : t("Rejected")}</span> : null}
                     {entry.state === "active" ? (
                       <>
                         {entry.provenance.actor === "user" ? (
-                          <button type="button" onClick={() => { setEditing(entry); setEntryKind(entry.entryKind); setBody(entry.body); setQuickPreset(null); setVisibility(entry.visibility); }}>
+                          <button type="button" onClick={() => { setEditing(entry); setEntryKind(entry.entryKind); setBody(entry.body); setQuickPreset(null); }}>
                             {t("Edit")}
                           </button>
                         ) : (
@@ -810,7 +808,7 @@ export function PersonalContextPanel({
                   <header><strong>{t("Open now")}</strong><span>{activeIntent.provenance.actor === "user" ? t("You") : t("AI suggestion")}</span></header>
                   <p>{activeIntent.body}</p>
                    <footer>
-                     <button type="button" onClick={() => { setBody(activeIntent.body); setQuickPreset(null); setVisibility(activeIntent.visibility); }}>{t("Edit")}</button>
+                     <button type="button" onClick={() => { setBody(activeIntent.body); setQuickPreset(null); }}>{t("Edit")}</button>
                      <button type="button" onClick={() => void archiveIntent(activeIntent).catch(() => undefined)}>{t("Archive")}</button>
                      <label className="context-promotion-kind">
                        <span>{t("Promote as")}</span>
@@ -842,6 +840,9 @@ export function PersonalContextPanel({
 
           {extensionProbe?.extensionOrigin ? (
             <div className="context-pairing">
+              <p className="muted-copy">
+                {t("One-time step for this browser. Only the code below expires; the pairing itself does not.")}
+              </p>
               <button
                 disabled={pairingMutation.isPending}
                 type="button"

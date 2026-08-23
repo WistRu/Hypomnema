@@ -247,6 +247,9 @@
   "popupPairingHelp": {
     "message": "Open TabHub in the browser, start pairing, then paste the challenge ID and one-time code here."
   },
+  "popupPairingOnce": {
+    "message": "One-time step for this browser. Only the code expires; the pairing itself does not."
+  },
   "popupPairingChallengeLabel": {
     "message": "Challenge ID"
   },
@@ -267,15 +270,6 @@
   },
   "popupContextKindLabel": {
     "message": "Kind"
-  },
-  "popupContextVisibilityLabel": {
-    "message": "Visibility"
-  },
-  "popupContextLocalOnly": {
-    "message": "Local only"
-  },
-  "popupContextShareAi": {
-    "message": "May be used by AI"
   },
   "popupContextBodyLabel": {
     "message": "Why is this open?"

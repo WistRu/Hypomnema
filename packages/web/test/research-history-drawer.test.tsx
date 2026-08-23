@@ -445,8 +445,7 @@ describe("ResearchHistoryDrawer", () => {
     fireEvent.click(await screen.findByRole("button", { name: "View report version 3" }));
     await screen.findByText("Plain report text");
 
-    expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "Next-action visibility" }).value)
-      .toBe("local_only");
+    expect(screen.queryByRole("combobox", { name: "Next-action visibility" })).toBeNull();
     fireEvent.click(screen.getByRole("radio", { name: "Compare alternatives" }));
     const save = screen.getByRole<HTMLButtonElement>("button", { name: "Save next step as context" });
     fireEvent.click(save);
@@ -462,7 +461,7 @@ describe("ResearchHistoryDrawer", () => {
       kind: "append",
       entryKind: "next_action",
       body: "Compare alternatives",
-      visibility: "local_only",
+      visibility: "share_with_ai",
       staleAt: null,
       idempotencyKey: expect.any(String),
     });
@@ -483,9 +482,6 @@ describe("ResearchHistoryDrawer", () => {
     fireEvent.click(await screen.findByRole("button", { name: "View report version 3" }));
     await screen.findByText("Plain report text");
     fireEvent.click(screen.getByRole("radio", { name: "Compare alternatives" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Next-action visibility" }), {
-      target: { value: "share_with_ai" },
-    });
     fireEvent.click(screen.getByRole("button", { name: "Save next step as context" }));
     await screen.findByText("Next action saved.");
     expect(mocks.appendResourceContext).toHaveBeenCalledWith(23, expect.objectContaining({

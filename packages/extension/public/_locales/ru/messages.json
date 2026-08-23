@@ -247,6 +247,9 @@
   "popupPairingHelp": {
     "message": "Откройте TabHub в браузере, начните сопряжение, затем вставьте сюда ID запроса и одноразовый код."
   },
+  "popupPairingOnce": {
+    "message": "Разовое действие для этого браузера. Истекает только код; само подключение — нет."
+  },
   "popupPairingChallengeLabel": {
     "message": "ID запроса"
   },
@@ -267,15 +270,6 @@
   },
   "popupContextKindLabel": {
     "message": "Тип"
-  },
-  "popupContextVisibilityLabel": {
-    "message": "Видимость"
-  },
-  "popupContextLocalOnly": {
-    "message": "Только локально"
-  },
-  "popupContextShareAi": {
-    "message": "Можно использовать ИИ"
   },
   "popupContextBodyLabel": {
     "message": "Почему это открыто?"

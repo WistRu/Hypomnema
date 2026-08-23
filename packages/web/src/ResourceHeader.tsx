@@ -1,5 +1,6 @@
 import type {
   ActivityWindow,
+  ContextVisibility,
   ResourceAlias,
   ResourceDetail,
 } from "@tabhub/shared";
@@ -115,7 +116,8 @@ export function ResourceHeader({
   const [aliasText, setAliasText] = useState("");
   const [contextKind, setContextKind] = useState<"note" | "next_action">("note");
   const [contextBody, setContextBody] = useState("");
-  const [visibility, setVisibility] = useState<"local_only" | "share_with_ai">("local_only");
+  // Notes exist so the AI can read them; there is no choice any more (issue #30).
+  const visibility: ContextVisibility = "share_with_ai";
   const [activityWindow, setActivityWindow] = useState<ActivityWindow>("all");
   const [capturedResearchOpenToken, setCapturedResearchOpenToken] = useState(0);
   const [exactTabFallbackRequest, setExactTabFallbackRequest] =
@@ -484,13 +486,6 @@ export function ResourceHeader({
                 <option value="next_action">{t("Next action")}</option>
               </select>
             </label>
-            <label>
-              <span>{t("Visibility")}</span>
-              <select value={visibility} onChange={(event) => setVisibility(event.target.value as "local_only" | "share_with_ai") }>
-                <option value="local_only">{t("Local only")}</option>
-                <option value="share_with_ai">{t("May be used by AI")}</option>
-              </select>
-            </label>
           </div>
           <textarea
             aria-label={t("Resource note or next action")}
@@ -509,7 +504,7 @@ export function ResourceHeader({
                 <li key={entry.id}>
                   <strong>{t(CONTEXT_KIND_LABELS[entry.entryKind])}</strong>
                   <span>{entry.body}</span>
-                  <small>{entry.visibility === "local_only" ? t("Local only") : t("May be used by AI")}</small>
+                  {entry.visibility === "local_only" ? <small>{t("Local only")}</small> : null}
                 </li>
               ))}
             </ul>

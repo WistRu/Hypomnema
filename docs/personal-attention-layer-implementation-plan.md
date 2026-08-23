@@ -2147,7 +2147,7 @@ Rollback: feature flag полностью возвращает Final Gate state 
 
 Модульные тесты не заменяют четыре обязательных E2E journey:
 
-1. **Контекст:** exact-tab intent из popup → promotion в page context → disposition `Not useful` → review agent hypothesis → close/reopen persistence → MCP видит только shareable projection.
+1. **Контекст:** exact-tab intent из popup → promotion в page context → disposition `Not useful` → review agent hypothesis → close/reopen persistence → MCP видит только shareable projection. С 2026-08-23 (issue #30) UI не умеет создавать `local_only`, поэтому последний leg проверяется на записи, вставленной в обход UI: граница `readLocal`/`readShareable` остаётся server-side инвариантом и обязана доказываться, даже когда ни один пользовательский путь её больше не порождает.
 2. **Ресурс:** Resource YouTube + существующий Topic одновременно → корректные unique/browser/physical counts → 7d/30d/all activity → alias override без изменения Topic.
 3. **Исследование:** `Research this resource` из интересной страницы → persisted page-to-Resource resolution → public-HTTPS privacy/coverage/worst-case-budget/server-egress consent → минимум одна ранее missing Resource page проходит sensitive policy + pure preview + one-shot DNS-pinned `SafePublicHttpClient` + usability check + persisted ResourceResolution → immutable tabless handoff → final G8 provider run → dossier с видимым acquired evidence и budget omissions → proof private/mixed DNS `connectAttempts=0`, peer mismatch HTTP application bytes 0, retries/redirects/scripts/subrequests/tab-window mutations 0 → сохранить next step → refine с сохранением прошлого report. Exact-tab capture остаётся обязательным полным fallback для authenticated/sensitive/SPA/challenge/login/insufficient-text/redirect/transport-unavailable content и не засчитывается как public live leg.
 4. **Приоритет:** single/bulk user importance → rules preview/activation → full assessment → My/AI/Recommended sort → feedback → доказательство отсутствия AI retention action.
@@ -2188,7 +2188,7 @@ Final вычисляет sufficiency/threshold отдельно для кажд�
 
 ## 18. Privacy, purge и lifecycle
 
-- `local_only` — default для нового context до явного выбора пользователя.
+- Новый context всегда `share_with_ai`: выбора видимости в UI нет (решение 2026-08-23, issue #30). Личный контекст существует затем, чтобы его читал ИИ, поэтому «локальная» запись не отвечала ни одной реальной задаче пользователя. Значение `local_only` остаётся в модели, в разделении `readLocal`/`readShareable` и во всех server-side проверках: записи, сделанные до этого решения, продолжают быть скрытыми от MCP/AI, и редактирование такой записи сохраняет её видимость, а не расширяет её молча. Отменяет прежнее правило «`local_only` — default для нового context до явного выбора пользователя».
 - Для authenticated/sensitive resources research preflight всегда требует confirmation.
 - `Forget logical page` удаляет page context, assessments, feedback и page-specific evidence refs.
 - Resource report, потерявший source, помечается stale/partial; он не продолжает показывать удалённый excerpt.
@@ -2332,7 +2332,7 @@ docs/
 | Legacy `importance=0` | Мигрировать в `NULL / unrated` | Slice 1 |
 | Conflicting browser importance | Не скрывать; logical value остаётся unrated до review, legacy values сохраняются только для диагностики | Slice 1 |
 | Session intent retention | Archive после session, purge через 30 дней, explicit promote | Slice 2 |
-| Context privacy | `local_only` по умолчанию | Slice 2 |
+| Context privacy | Новый context всегда `share_with_ai`, выбора нет (2026-08-23, issue #30); граница `readLocal`/`readShareable` остаётся и продолжает скрывать существующие `local_only` записи. Прежнее «`local_only` по умолчанию» отменено — см. §18 | Slice 2 |
 | Trusted local projection | Same-origin/extension capability; MCP имеет только shareable interface | Slice 2 |
 | Resource aliases | System seeds + user override; Topic не менять | Slice 3 |
 | Resource evaluation | User 1–3/null отдельно от typed AI assessment | Slice 3/5 |

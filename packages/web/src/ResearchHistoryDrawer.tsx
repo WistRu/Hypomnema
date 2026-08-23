@@ -3,6 +3,7 @@ import type {
   ResearchEvidenceDetail,
   ResearchLatestRun,
   ResearchPublicationReason,
+  ContextVisibility,
   ResearchReportDetail,
   ResearchReportSummary,
   ResearchTarget,
@@ -193,7 +194,8 @@ function NextActionSaver({ report, target }: {
   const { errorMessage, t } = useI18n();
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<string | null>(null);
-  const [visibility, setVisibility] = useState<"local_only" | "share_with_ai">("local_only");
+  // Notes exist so the AI can read them; there is no choice any more (issue #30).
+  const visibility: ContextVisibility = "share_with_ai";
   const [attempt, setAttempt] = useState<{ signature: string; key: string } | null>(null);
   const [receipt, setReceipt] = useState(false);
   const mutation = useMutation({
@@ -277,17 +279,6 @@ function NextActionSaver({ report, target }: {
           </label>
         ))}
       </fieldset>
-      <label>
-        <span>{t("Next-action visibility")}</span>
-        <select aria-label={t("Next-action visibility")} disabled={mutation.isPending} value={visibility}
-          onChange={(event) => {
-            setVisibility(event.target.value as "local_only" | "share_with_ai");
-            setReceipt(false);
-          }}>
-          <option value="local_only">{t("Local only")}</option>
-          <option value="share_with_ai">{t("May be used by AI")}</option>
-        </select>
-      </label>
       <button disabled={selected === null || mutation.isPending} type="button" onClick={save}>
         {t("Save next step as context")}
       </button>
