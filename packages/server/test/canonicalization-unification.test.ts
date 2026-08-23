@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -48,13 +48,15 @@ function privateCanonicalizationsIn(source: string): readonly string[] {
  * reproduces the retired algorithms on purpose, to show what they used to produce.
  *
  * This file is listed too: it holds the deliberate rewrites the guard is checked
- * against, so it must trip the guard rather than pass it.
+ * against, so it must trip the guard rather than pass it. The one shared
+ * implementation is not an oracle and is listed separately, above.
  *
  * Every entry is verified below: an entry that no longer carries its own copy fails the
  * suite, so the list cannot quietly outlive the reason it exists.
  */
+const canonicalizationDefinition = ["packages/shared/src/research-contracts.ts"];
+
 const independentOracles = [
-  "packages/shared/src/research-contracts.ts",
   "packages/server/test/baseline-g6-acceptance.test.ts",
   "packages/server/test/baseline-g8.test.ts",
   "packages/server/test/canonicalization-unification.test.ts",
@@ -62,6 +64,9 @@ const independentOracles = [
   "packages/server/test/personal-priority-materialization-acceptance.test.ts",
   "packages/server/test/persisted-fingerprint-divergence.test.ts",
 ];
+
+/** The definition plus its oracles: everything the guard is allowed to walk past. */
+const allowedTheirOwnCopy = [...canonicalizationDefinition, ...independentOracles];
 
 /** Build output and generated trees are not sources anyone maintains. */
 const skippedDirectories = new Set([
@@ -132,15 +137,43 @@ describe("canonicalization unification", () => {
     const sources = await readWorkspaceSources();
     const offenders: string[] = [];
     for (const [relativePath, source] of sources) {
-      if (independentOracles.includes(relativePath)) continue;
+      if (allowedTheirOwnCopy.includes(relativePath)) continue;
       if (privateCanonicalizationsIn(source).length > 0) offenders.push(relativePath);
     }
     expect(offenders.sort()).toEqual([]);
   });
 
+  it("fails on a private canonicalization planted outside the server package", async () => {
+    // The scan reads the working tree, so proving it reaches other packages means
+    // putting a real offender in one. Written under an obvious name and removed
+    // whatever happens.
+    const relativePath = "packages/web/src/__guard-probe-private-canonicalization.ts";
+    const absolutePath = join(workspaceRoot, relativePath);
+    const offender = [
+      "// Temporary fixture written by the canonicalization guard test.",
+      "export function probeCanonicalKeys(value: Record<string, unknown>): string {",
+      "  return Object.keys(value).sort().map((key) => key).join();",
+      "}",
+      "",
+    ].join(String.fromCharCode(10));
+    await writeFile(absolutePath, offender, "utf8");
+    try {
+      expect(privateCanonicalizationsIn(offender)).not.toEqual([]);
+      const sources = await readWorkspaceSources();
+      expect(sources.has(relativePath)).toBe(true);
+      const offenders = [...sources]
+        .filter(([path]) => !allowedTheirOwnCopy.includes(path))
+        .filter(([, source]) => privateCanonicalizationsIn(source).length > 0)
+        .map(([path]) => path);
+      expect(offenders).toContain(relativePath);
+    } finally {
+      await rm(absolutePath, { force: true });
+    }
+  });
+
   it("keeps the oracle allowlist free of entries that no longer need it", async () => {
     const sources = await readWorkspaceSources();
-    const stale = independentOracles.filter((relativePath) => {
+    const stale = allowedTheirOwnCopy.filter((relativePath) => {
       const source = sources.get(relativePath);
       return source === undefined || privateCanonicalizationsIn(source).length === 0;
     });

@@ -188,7 +188,10 @@ export function canonicalJsonV1(value: unknown): string {
  * `digestPrivacyPurgeExecutionTargets` must produce those exact bytes in TypeScript;
  * sorting the keys there makes the trigger reject every purge transition.
  * This is deliberately NOT a canonicalization — use {@link canonicalJsonV1} for
- * fingerprints that only TypeScript produces. Key order is the only thing it relaxes:
+ * fingerprints that only TypeScript produces. It is also used, inside the migration
+ * module, to compare two values built in the same process, where key order is fixed by
+ * construction and only equality matters; that is safe for the same reason sorting is
+ * unnecessary there. Key order is the only thing it relaxes:
  * its bytes are persisted as digests, so it refuses everything the canonical contract
  * refuses. A caller that must mirror a `bigint` renders it exactly as the SQL side
  * does, at the call site, where the choice is visible.

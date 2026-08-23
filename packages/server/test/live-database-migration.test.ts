@@ -126,10 +126,16 @@ describe.skipIf(!proveAgainstLiveDatabase)("live database migration 17 -> 26", (
 describe("rollback profile documentation", () => {
   it("lists every feature flag in .env.example", async () => {
     const example = await readFile(envExamplePath, "utf8");
-    for (const name of Object.keys(personalAttentionFeatureFlagsOff)) {
+    const flagNames = Object.keys(personalAttentionFeatureFlagsOff);
+    for (const name of flagNames) {
       const key = `TABHUB_FEATURE_${name.replace(/[A-Z]/g, (letter) =>
         `_${letter}`).toUpperCase()}`;
       expect(example).toContain(`${key}=`);
     }
+    // The file tells the reader how many flags there are; checking only that each
+    // one is present lets that number rot the moment a flag is added or removed.
+    const declared = example.match(/^TABHUB_FEATURE_[A-Z_]+=/gm) ?? [];
+    expect(declared).toHaveLength(flagNames.length);
+    expect(example).toContain(`(${flagNames.length} total)`);
   });
 });

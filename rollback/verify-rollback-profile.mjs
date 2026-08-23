@@ -16,7 +16,8 @@ import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-import { changedRowCounts, sha256File, tableRowCounts } from "./sqlite-facts.mjs";
+import { changedRowCounts, rowCountTableRule, sha256File, tableRowCounts } from
+  "./sqlite-facts.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -115,6 +116,11 @@ try {
       buildArtifact: { path: "packages/server/dist/main.js", sha256: await sha256File(buildArtifact) },
       port,
       pid: child.pid,
+      target:
+        "isolated online-backup copy of the live database; the live file is read only",
+      portAndPathOverridden: `the profile pins port ${profile.TABHUB_PORT} and ` +
+        `${profile.TABHUB_DB_PATH}; this run overrode both so it could run beside the ` +
+        "daily server",
       liveDatabase: { path: profile.TABHUB_DB_PATH, sha256Before: liveHashBefore },
       copyBefore: { ...before, rowCounts: Object.fromEntries(before.rowCounts) },
       health,
@@ -131,7 +137,7 @@ try {
   const changed = changedRowCounts(before.rowCounts, after.rowCounts);
   receipt.copyAfter = { ...after, rowCounts: Object.fromEntries(after.rowCounts) };
   receipt.tablesCounted = before.rowCounts.size;
-  receipt.tableCountRule = "type = 'table' AND name NOT LIKE 'sqlite_%'";
+  receipt.tableCountRule = rowCountTableRule;
   receipt.rowCountsChangedWhileServing = changed;
   // "No writer ran" has to mean something checkable: not one row moved in any table
   // while the profile was serving. This is that check, not a hand-written assurance.
