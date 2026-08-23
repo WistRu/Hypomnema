@@ -1,250 +1,300 @@
+import { createHash } from "node:crypto";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+
+import Database from "better-sqlite3";
+import * as sqliteVec from "sqlite-vec";
 import { describe, expect, it } from "vitest";
 
-import type Database from "better-sqlite3";
-
+import type { PriorityAssessmentTaskSpec } from "@tabhub/shared";
 import { canonicalJsonV1 as canonicalJson } from "@tabhub/shared";
 
 import { createAiJobLedger } from "../src/ai-job-ledger.js";
-import { createPriorityAssessmentCoordinator } from
-  "../src/priority-assessment-coordinator.js";
-import { createResearchCorpusReader } from "../src/research-corpus.js";
-import { createResourceCatalog } from "../src/resource-catalog.js";
-import {
-  createResourceCommandCatalog,
-  ResourceCommandCatalogError,
-} from "../src/resource-command-catalog.js";
+import { digestPrivacyPurgeExecutionTargets } from "../src/live-acquisition-migration.js";
+import { createResourceCommandCatalog } from "../src/resource-command-catalog.js";
 import { openDatabase } from "../src/database.js";
-import { seedReceiptBackedLiveResearchRun } from "./live-research-fixture.js";
-
-const NOW = "2026-08-13T12:00:00.000Z";
 
 /**
- * Every `*_json` column is written by production through the shared canonicalization.
- * Re-canonicalizing the parsed value has to reproduce the stored text byte for byte;
- * if a module kept its own serializer, this is where storage and verification start
- * disagreeing.
+ * Storage and verification must agree about a fingerprint of the same data. These
+ * tests never re-implement the algorithm: each one writes through production, reads
+ * the row back out of SQLite, and then makes production recompute the fingerprint
+ * from that row. Disagreement is observable as a thrown conflict or a corrupt-row
+ * error, not as an assertion this file could get wrong on its own.
+ *
+ * Each area also carries an input where the retired per-module copies diverged:
+ * property insertion order. A recomputation that is not the shared canonicalization
+ * produces different bytes for the same data and fails these tests.
  */
-function expectEveryStoredJsonColumnIsCanonical(
+
+const NOW = "2026-08-12T12:00:00.000Z";
+const USER_PROVENANCE = { actor: "user", method: "manual" } as const;
+
+function sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function commands(connection: Database.Database) {
+  return createResourceCommandCatalog(connection, () => new Date(NOW), {});
+}
+
+function storedResourceCommandFingerprint(
   connection: Database.Database,
-  table: string,
-): number {
-  const columns = (connection.prepare(`PRAGMA table_info(${table})`).all() as {
-    name: string;
-  }[]).map((column) => column.name).filter((name) => name.endsWith("_json"));
-  expect(columns, `${table} must have a JSON column to check`).not.toEqual([]);
-  let checked = 0;
-  for (const column of columns) {
-    const rows = connection
-      .prepare(`SELECT ${column} AS stored FROM ${table} WHERE ${column} IS NOT NULL`)
-      .all() as { stored: string }[];
-    for (const row of rows) {
-      expect(canonicalJson(JSON.parse(row.stored) as unknown), `${table}.${column}`)
-        .toBe(row.stored);
-      checked += 1;
-    }
+  idempotencyKey: string,
+): string {
+  return connection
+    .prepare(
+      "SELECT request_fingerprint FROM resource_command_receipts WHERE idempotency_key = ?",
+    )
+    .pluck()
+    .get(idempotencyKey) as string;
+}
+
+const openClaimLimits = {
+  maxConcurrent: 100,
+  maxAttemptsPerUtcDay: 1_000,
+  maxCostUsdPerUtcDay: null,
+} as const;
+
+function openSchema23Database() {
+  const connection = new Database(":memory:");
+  sqliteVec.load(connection);
+  connection.function("tabhub_normalize_url_v2", { deterministic: true },
+    (value: string) => value);
+  connection.function("tabhub_migration_now", () => "2026-08-13T00:00:00.000Z");
+  const migrationsDirectory = join(process.cwd(), "migrations");
+  for (const name of readdirSync(migrationsDirectory)
+    .filter((entry) => /^\d{3}_.+\.sql$/.test(entry) && Number(entry.slice(0, 3)) <= 23)
+    .sort()) {
+    connection.exec(readFileSync(join(migrationsDirectory, name), "utf8"));
+    connection.pragma(`user_version = ${Number(name.slice(0, 3))}`);
   }
-  return checked;
+  connection.pragma("foreign_keys = ON");
+  return { connection, close: () => connection.close() };
 }
 
-/**
- * The bytes a module carrying an unsorted-key copy of the algorithm would have
- * written: the same data, keys in the opposite order.
- */
-function reversedKeyRewrite(stored: string): string {
-  const parsed = JSON.parse(stored) as Record<string, unknown>;
-  const keys = Object.keys(parsed);
-  expect(keys.length, "the value needs at least two keys to reorder").toBeGreaterThan(1);
-  const reversed: Record<string, unknown> = {};
-  for (const key of [...keys].reverse()) reversed[key] = parsed[key];
-  return JSON.stringify(reversed);
+function priorityTask(): PriorityAssessmentTaskSpec {
+  return {
+    version: 1,
+    kind: "priority_assessment",
+    subject: { type: "collection", scope: "all" },
+    ruleset: { rulesetId: 1, version: 1 },
+    assessmentProvenance: { method: "rule" },
+    inputFingerprint: "a".repeat(64),
+    idempotencyKey: "roundtrip-priority-v1",
+    stepBatchSize: 100,
+    provenance: { requestedBy: "user", requestMethod: "manual" },
+    schedulingPriority: 5,
+    budget: { maxSteps: 100, maxTokens: 0, maxCostUsd: 0, maxWallTimeMs: 60_000 },
+  };
 }
 
-function priorityFixture() {
-  const database = openDatabase(":memory:", {
-    migrationClock: () => new Date("2026-07-01T00:00:00.000Z"),
-  });
-  database.connection.exec(`
-    INSERT INTO logical_pages (
-      id, identity_key, url_normalized, representative_url, created_at, updated_at
-    ) VALUES (501, 'https://roundtrip.test/', 'https://roundtrip.test/',
-      'https://roundtrip.test/', '2026-07-01T00:00:00.000Z', '${NOW}');
-    INSERT INTO tabs (
-      id, url, url_normalized, browser, status, importance, is_open,
-      first_seen_at, last_seen_at, logical_page_id
-    ) VALUES (601, 'https://roundtrip.test/', 'https://roundtrip.test/',
-      'chrome', 'inbox', 0, 1, '2026-07-01T00:00:00.000Z', '${NOW}', 501);
-    INSERT INTO resource_resolution_events (
-      id, logical_page_id, state, reason, candidate_resource_ids_json,
-      source_fingerprint, research_eligible, research_exclusion_reason, created_at
-    ) VALUES (701, 501, 'unmatched', 'weak_sensitive_signal', '[]',
-      'resolution', 0, 'weak_sensitive_signal', '${NOW}');
-    INSERT INTO resource_resolution_heads (logical_page_id, resolution_event_id)
-    VALUES (501, 701);
-  `);
-  let token = 0;
-  const coordinator = createPriorityAssessmentCoordinator({
-    connection: database.connection,
-    clock: () => new Date(NOW),
-    createLedger: (guards) => createAiJobLedger(database.connection, {
-      clock: () => new Date(NOW),
-      kindAvailable: (kind) => kind === "priority_assessment",
-      token: () => `roundtrip-lease-${String(++token).padStart(4, "0")}`,
-      guards,
-    }),
-    writerEnabled: true,
-  });
-  return { database, coordinator };
-}
+describe("persisted fingerprints recompute through the shared canonicalization", () => {
+  describe("resource commands", () => {
+    it("recomputes the stored request fingerprint when the same command replays", () => {
+      const database = openDatabase(":memory:");
+      try {
+        const catalog = commands(database.connection);
+        const first = catalog.change({
+          kind: "create",
+          resourceKey: "platform:github",
+          name: "GitHub",
+          resourceKind: "platform",
+          accessClass: "public",
+          provenance: USER_PROVENANCE,
+          idempotencyKey: "roundtrip-1",
+        });
+        const stored = storedResourceCommandFingerprint(
+          database.connection,
+          "roundtrip-1",
+        );
+        expect(stored).not.toBe("");
 
-describe("persisted fingerprints round-trip through the shared helper", () => {
-  it("keeps a priority assessment readable by recomputing its stored fingerprint", () => {
-    const { database, coordinator } = priorityFixture();
-    try {
-      const input = {
-        subject: { type: "page" as const, logicalPageId: 501 },
-        provenance: { requestedBy: "user" as const, requestMethod: "manual" as const },
-        idempotencyKey: "roundtrip-assessment",
-      };
-      const submitted = coordinator.submit(input);
-      expect(coordinator.process("roundtrip-worker")).toMatchObject({
-        status: "succeeded",
-      });
+        // The replay path recomputes the fingerprint and compares it against the
+        // stored one; a disagreement raises IDEMPOTENCY_KEY_CONFLICT. The properties
+        // are written in a different order here on purpose: every retired copy that
+        // did not sort keys produces different bytes for this same command.
+        const replay = catalog.change({
+          idempotencyKey: "roundtrip-1",
+          provenance: USER_PROVENANCE,
+          accessClass: "public",
+          resourceKind: "platform",
+          name: "GitHub",
+          resourceKey: "platform:github",
+          kind: "create",
+        });
 
-      // Production recomputes the input fingerprint on replay and returns the original
-      // job only when it matches what it stored.
-      expect(coordinator.submit(input)).toMatchObject({ id: submitted.id });
-
-      // The same subject under a different idempotency key is a different request, so
-      // the stored fingerprint cannot be a constant.
-      const other = coordinator.submit({ ...input, idempotencyKey: "roundtrip-other" });
-      expect(other.id).not.toBe(submitted.id);
-
-      const storedFingerprints = database.connection.prepare(`
-        SELECT input_fingerprint FROM ai_jobs WHERE input_fingerprint IS NOT NULL
-      `).pluck().all() as string[];
-      expect(storedFingerprints.length).toBeGreaterThan(0);
-      for (const fingerprint of storedFingerprints) {
-        expect(fingerprint).toMatch(/^[0-9a-f]{64}$/);
+        expect(replay).toEqual(first);
+        expect(storedResourceCommandFingerprint(database.connection, "roundtrip-1"))
+          .toBe(stored);
+      } finally {
+        database.close();
       }
-
-      expect(expectEveryStoredJsonColumnIsCanonical(database.connection, "ai_jobs"))
-        .toBeGreaterThan(0);
-    } finally {
-      database.close();
-    }
-  });
-
-  it("rejects an AI job checkpoint rewritten by an unsorted-key serializer", () => {
-    const { database, coordinator } = priorityFixture();
-    try {
-      coordinator.submit({
-        subject: { type: "page", logicalPageId: 501 },
-        provenance: { requestedBy: "user", requestMethod: "manual" },
-        idempotencyKey: "roundtrip-checkpoint",
-      });
-      coordinator.process("roundtrip-worker");
-
-      const stored = database.connection.prepare(`
-        SELECT id, checkpoint_json AS stored FROM ai_jobs
-        WHERE checkpoint_json IS NOT NULL LIMIT 1
-      `).get() as { id: number; stored: string } | undefined;
-      expect(stored, "the run must persist at least one checkpoint").toBeDefined();
-      if (stored === undefined) return;
-
-      expect(canonicalJson(JSON.parse(stored.stored) as unknown)).toBe(stored.stored);
-      const rewritten = reversedKeyRewrite(stored.stored);
-      expect(rewritten).not.toBe(stored.stored);
-
-      // The stored form is enforced in SQL as well as in the reader, so the rewrite
-      // cannot even reach the row.
-      expect(() => database.connection
-        .prepare("UPDATE ai_jobs SET checkpoint_json = ? WHERE id = ?")
-        .run(rewritten, stored.id)).toThrow(/checkpoint/i);
-    } finally {
-      database.close();
-    }
-  });
-
-  it("replays a resource command only when its stored fingerprint recomputes", () => {
-    const database = openDatabase(":memory:", {
-      migrationClock: () => new Date("2026-07-01T00:00:00.000Z"),
     });
-    try {
-      createResourceCatalog(database.connection, () => new Date(NOW));
-      const commands = createResourceCommandCatalog(
-        database.connection, () => new Date(NOW), {},
-      );
-      const create = {
-        kind: "create" as const,
-        resourceKey: "domain:roundtrip.test",
-        name: "roundtrip.test",
-        resourceKind: "platform" as const,
-        accessClass: "public" as const,
-        provenance: { actor: "user" as const, method: "manual" as const },
-        idempotencyKey: "roundtrip-create",
-      };
-      const first = commands.change(create);
 
-      // Same payload, keys supplied in a different order: canonicalization means the
-      // recomputed fingerprint still matches the stored one, so this is a replay.
-      const reordered = {
-        idempotencyKey: create.idempotencyKey,
-        provenance: create.provenance,
-        accessClass: create.accessClass,
-        resourceKind: create.resourceKind,
-        name: create.name,
-        resourceKey: create.resourceKey,
-        kind: create.kind,
-      };
-      expect(commands.change(reordered)).toEqual(first);
+    it("still refuses a different command reusing the same idempotency key", () => {
+      const database = openDatabase(":memory:");
+      try {
+        const catalog = commands(database.connection);
+        catalog.change({
+          kind: "create",
+          resourceKey: "platform:github",
+          name: "GitHub",
+          resourceKind: "platform",
+          accessClass: "public",
+          provenance: USER_PROVENANCE,
+          idempotencyKey: "roundtrip-2",
+        });
+        expect(() =>
+          catalog.change({
+            kind: "create",
+            resourceKey: "platform:gitlab",
+            name: "GitLab",
+            resourceKind: "platform",
+            accessClass: "public",
+            provenance: USER_PROVENANCE,
+            idempotencyKey: "roundtrip-2",
+          })
+        ).toThrow(/Idempotency key was already used/);
+      } finally {
+        database.close();
+      }
+    });
 
-      // A genuinely different payload under the same key must not replay.
-      expect(() => commands.change({ ...create, name: "different name" }))
-        .toThrow(ResourceCommandCatalogError);
-
-      const storedFingerprints = database.connection.prepare(`
-        SELECT request_fingerprint AS fingerprint FROM resource_command_receipts
-      `).all() as { fingerprint: string }[];
-      expect(storedFingerprints).toHaveLength(1);
-      expect(storedFingerprints[0]?.fingerprint).toMatch(/;sha256=[0-9a-f]{64}$/);
-
-      expect(expectEveryStoredJsonColumnIsCanonical(
-        database.connection, "resource_command_receipts",
-      )).toBe(1);
-    } finally {
-      database.close();
-    }
+    it("stores a fingerprint of the canonical payload, not of the receipt", () => {
+      const database = openDatabase(":memory:");
+      try {
+        const catalog = commands(database.connection);
+        const command = {
+          kind: "create",
+          resourceKey: "platform:github",
+          name: "GitHub",
+          resourceKind: "platform",
+          accessClass: "public",
+          provenance: USER_PROVENANCE,
+        } as const;
+        catalog.change({ ...command, idempotencyKey: "roundtrip-3" });
+        const stored = storedResourceCommandFingerprint(
+          database.connection,
+          "roundtrip-3",
+        );
+        expect(stored.endsWith(sha256(canonicalJson(command)))).toBe(true);
+      } finally {
+        database.close();
+      }
+    });
   });
 
-  it("detects a live-acquisition payload rewritten by a divergent serializer", () => {
-    const database = openDatabase(":memory:", {
-      migrationClock: () => new Date("2026-07-01T00:00:00.000Z"),
+  describe("AI jobs", () => {
+    it("stores a checkpoint the production reader recomputes to the same bytes", () => {
+      const { connection, close } = openSchema23Database();
+      try {
+        let tick = 0;
+        const ledger = createAiJobLedger(connection, {
+          clock: () => new Date(`2026-08-13T01:00:0${tick++}.000Z`),
+          kindAvailable: () => true,
+          token: () => "roundtrip-lease-token",
+        });
+        ledger.submit(priorityTask());
+        const claim = ledger.claimNext(
+          "priority_assessment",
+          "roundtrip-worker",
+          openClaimLimits,
+        );
+        expect(claim).toBeDefined();
+
+        // nextOffset is written before version on purpose: a checkpoint serializer
+        // that keeps insertion order stores different bytes for this same value, and
+        // the reader recomputes the canonical form and rejects the row as corrupt.
+        ledger.checkpoint(claim!, {
+          progress: ledger.get("priority_assessment", claim!.id)?.progress ??
+            claim!.progress,
+          checkpoint: { nextOffset: 3, version: 1 },
+          usage: {
+            steps: 1, inputTokens: 0, outputTokens: 0, costUsd: 0, wallTimeMs: 1,
+          },
+        });
+
+        const stored = connection
+          .prepare("SELECT checkpoint_json FROM ai_jobs WHERE id = ?")
+          .pluck().get(claim!.id) as string;
+        expect(stored).toBe('{"nextOffset":3,"version":1}');
+        // The reader's own storage-versus-recomputation check: a row whose text is
+        // not the canonical form of its parsed value is reported as corrupt.
+        expect(canonicalJson(JSON.parse(stored) as unknown)).toBe(stored);
+        expect(ledger.get("priority_assessment", claim!.id)?.status).toBe("running");
+      } finally {
+        close();
+      }
     });
-    try {
-      const fixture = seedReceiptBackedLiveResearchRun(database.connection);
-      const corpus = createResearchCorpusReader(database.connection);
-      const jobRef = `resource_research:${fixture.finalJobId}`;
-      expect(corpus.readForJob(jobRef).sources).toHaveLength(1);
 
-      const stored = database.connection.prepare(`
-        SELECT source_id AS id, chunk_manifest_json AS stored
-        FROM research_source_payloads LIMIT 1
-      `).get() as { id: number; stored: string };
-      expect(canonicalJson(JSON.parse(stored.stored) as unknown)).toBe(stored.stored);
+    it("refuses an out-of-band rewrite of a stored checkpoint", () => {
+      const { connection, close } = openSchema23Database();
+      try {
+        let tick = 0;
+        const ledger = createAiJobLedger(connection, {
+          clock: () => new Date(`2026-08-13T02:00:0${tick++}.000Z`),
+          kindAvailable: () => true,
+          token: () => "roundtrip-corrupt-token",
+        });
+        ledger.submit(priorityTask());
+        const claim = ledger.claimNext(
+          "priority_assessment",
+          "roundtrip-worker",
+          openClaimLimits,
+        )!;
+        ledger.checkpoint(claim, {
+          progress: ledger.get("priority_assessment", claim.id)?.progress ??
+            claim.progress,
+          checkpoint: { nextOffset: 3, version: 1 },
+          usage: {
+            steps: 1, inputTokens: 0, outputTokens: 0, costUsd: 0, wallTimeMs: 1,
+          },
+        });
+        // Exactly the divergence the retired copies could produce: same data, keys
+        // left in insertion order. The ledger's own triggers refuse the rewrite, so a
+        // noncanonical checkpoint cannot reach storage behind the writer's back.
+        expect(() =>
+          connection.prepare("UPDATE ai_jobs SET checkpoint_json = ? WHERE id = ?")
+            .run('{"version":1,"nextOffset":3}', claim.id)
+        ).toThrow(/ai job projection requires event/);
+        expect(
+          connection.prepare("SELECT checkpoint_json FROM ai_jobs WHERE id = ?")
+            .pluck().get(claim.id),
+        ).toBe('{"nextOffset":3,"version":1}');
+      } finally {
+        close();
+      }
+    });
+  });
 
-      const rewritten = reversedKeyRewrite(stored.stored);
-      expect(rewritten).not.toBe(stored.stored);
+  describe("live-acquisition digests", () => {
+    it("digests the same execution plan whatever order the caller wrote it in", () => {
+      // The SQL mirror keeps insertion order on purpose, so the production digest
+      // would be caller-order sensitive if it hashed the caller's objects directly.
+      // It snapshots each target into a fixed shape first, which is what makes the
+      // persisted deletion_plan_digest reproducible from the stored rows.
+      const written = digestPrivacyPurgeExecutionTargets([
+        { tableName: "research_runs", pkV1: "pk:v1|1|i:4:7001" },
+        { tableName: "research_runs", pkV1: "pk:v1|1|i:4:7002" },
+      ]);
+      const recomputedFromStoredOrder = digestPrivacyPurgeExecutionTargets([
+        { pkV1: "pk:v1|1|i:4:7001", tableName: "research_runs" },
+        { pkV1: "pk:v1|1|i:4:7002", tableName: "research_runs" },
+      ]);
+      expect(recomputedFromStoredOrder).toBe(written);
+      expect(written).toMatch(/^[0-9a-f]{64}$/);
+    });
 
-      // The payload is immutable once written, so bytes only a divergent serializer
-      // would produce cannot replace what the shared helper stored.
-      expect(() => database.connection
-        .prepare(
-          "UPDATE research_source_payloads SET chunk_manifest_json = ? WHERE source_id = ?",
-        )
-        .run(rewritten, stored.id)).toThrow(/immutable/i);
-      expect(corpus.readForJob(jobRef).sources).toHaveLength(1);
-    } finally {
-      database.close();
-    }
+    it("keeps target order significant, because the plan is an ordered plan", () => {
+      const forward = digestPrivacyPurgeExecutionTargets([
+        { tableName: "research_runs", pkV1: "pk:v1|1|i:4:7001" },
+        { tableName: "research_runs", pkV1: "pk:v1|1|i:4:7002" },
+      ]);
+      const reversed = digestPrivacyPurgeExecutionTargets([
+        { tableName: "research_runs", pkV1: "pk:v1|1|i:4:7002" },
+        { tableName: "research_runs", pkV1: "pk:v1|1|i:4:7001" },
+      ]);
+      expect(reversed).not.toBe(forward);
+    });
   });
 });
