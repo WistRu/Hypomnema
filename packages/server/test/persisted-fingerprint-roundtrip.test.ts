@@ -212,6 +212,47 @@ describe("persisted fingerprints round-trip through the shared helper", () => {
       expect(expectEveryStoredJsonColumnIsCanonical(
         database.connection, "resource_command_receipts",
       )).toBe(1);
+
+      // A replay would prove agreement only weakly if the stored fingerprint could
+      // drift afterwards — two values wrong in the same way replay just as happily.
+      // It cannot: the receipts are append-only, so the value the replay recomputes
+      // against is the one production wrote and nothing else.
+      expect(() => database.connection.prepare(`
+        UPDATE resource_command_receipts SET request_fingerprint = ?
+        WHERE idempotency_key = ?
+      `).run(`v1;sha256=${"0".repeat(64)}`, create.idempotencyKey))
+        .toThrow(/append-only/);
+      expect(database.connection.prepare(`
+        SELECT request_fingerprint FROM resource_command_receipts
+        WHERE idempotency_key = ?
+      `).pluck().get(create.idempotencyKey)).toBe(storedFingerprints[0]?.fingerprint);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("will not let a stored AI job fingerprint be corrupted in the first place", () => {
+    const { database, coordinator } = priorityFixture();
+    try {
+      coordinator.submit({
+        subject: { type: "page", logicalPageId: 501 },
+        provenance: { requestedBy: "user", requestMethod: "manual" },
+        idempotencyKey: "corruption-probe",
+      });
+      const stored = database.connection
+        .prepare("SELECT input_fingerprint FROM ai_jobs WHERE id = 1")
+        .pluck().get() as string;
+      expect(stored).toMatch(/^[0-9a-f]{64}$/);
+
+      // Same guarantee as the resource command receipts: the stored fingerprint
+      // cannot be moved after the fact, so "stored equals recomputed" cannot decay
+      // into "both wrong in the same way" between the write and the check.
+      expect(() => database.connection
+        .prepare("UPDATE ai_jobs SET input_fingerprint = ? WHERE id = ?")
+        .run("0".repeat(64), 1)).toThrow();
+      expect(database.connection
+        .prepare("SELECT input_fingerprint FROM ai_jobs WHERE id = 1")
+        .pluck().get()).toBe(stored);
     } finally {
       database.close();
     }
