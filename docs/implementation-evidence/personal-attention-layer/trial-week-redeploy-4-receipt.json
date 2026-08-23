@@ -1,0 +1,71 @@
+{
+ "version": 1,
+ "recordedAt": "2026-08-23T20:11:00Z",
+ "scope": "trial_week_runtime_redeploy_no_schema_change",
+ "reason": "Fourth redeploy of the day, still before the Trial week began counting. It carries the fixes for #35 and #34, the two defects the user found by walking journey J4. The user chose to fix them before starting the week rather than live with them for seven days — #35 in particular would have misled during exactly that period.",
+ "repositoryHead": "d9193d4",
+ "previousRepositoryHead": "fe36d6a",
+ "schemaChange": "none; database stayed at user_version 26 and no migration ran",
+ "preRedeploy": {
+  "backupPath": "backups/tabhub-2026-08-23T20-09-56.533Z.sqlite",
+  "backupSha256": "0f5184507e17a155aba2ea555e624ebea586bcb7326f3033baff4c098bfbedc3",
+  "backupSchemaVersion": 26,
+  "backupIntegrityCheck": "ok",
+  "backupForeignKeyViolations": 0,
+  "backupRowCounts": {
+   "tabs": 2278
+  },
+  "databaseSha256": "01945b43bf90135b679ee80a0cdef853cb5405d8d3bb58f5b4502644b4c87f10"
+ },
+ "processes": {
+  "oldPid": 904356,
+  "newPid": 432436,
+  "port": "127.0.0.1:7717",
+  "listeningVerified": true
+ },
+ "postRedeploy": {
+  "health": {
+   "status": "ok",
+   "database": "ok",
+   "schemaVersion": 26
+  },
+  "libraryRead": 200
+ },
+ "featureProjectionUnchanged": true,
+ "servedBundleVerified": {
+  "asset": "/app/assets/index-CcOFA49z.js",
+  "bytes": 969541,
+  "containsDegenerateOrderingNotice": true,
+  "containsRulePreviewImpactSentence": true,
+  "containsPlainBandLabels": true,
+  "note": "Fetched from the running server, not read from disk."
+ },
+ "extension": {
+  "reloadRequired": false,
+  "reloadNote": "No extension reload is needed this time. The extension package is untouched; the only shared-package change reaching it is an exported TypeScript type, which is erased at build and has no runtime effect. Both extensions reconnected on their own at 20:10:11Z at protocol 5.",
+  "scopes": [
+   {
+    "browser": "edge",
+    "protocolVersion": 5,
+    "connectedAt": "2026-08-23T20:10:11Z"
+   },
+   {
+    "browser": "yandex",
+    "protocolVersion": 5,
+    "connectedAt": "2026-08-23T20:10:11Z"
+   }
+  ]
+ },
+ "deploymentWaiver": "unchanged; research, live acquisition and privacy purge stay feature-off, G9 stays PENDING",
+ "rollbackRecipe": "unchanged; feature-off on schema 26. No restore performed and none authorised.",
+ "trialWeek": "not started; gated on issue #12",
+ "knownUnfixed": "#34 is only partly addressed: the preview now answers in words, but the version-control vocabulary in the rules dialog is untouched and the issue stays open. #35 leaves one reachable gap, recorded on that issue: with priorityReaders off and priorityPersonalization on, an AI ordering is selectable with no way to warn.",
+ "secretsRecorded": false,
+ "verdict": "PASS_WITH_UNPROVEN_ITEMS",
+ "unprovenAtRedeploy": [
+  "browser detection on chrome, the residue branch",
+  "both fixes have not been seen by a user in a browser yet",
+  "criteria 1 and 2 of issue #12, whose last measurement predates this runtime",
+  "activityDailyWriter, which /api/features does not project"
+ ]
+}
