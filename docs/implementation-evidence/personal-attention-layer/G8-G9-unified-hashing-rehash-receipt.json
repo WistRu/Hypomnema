@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "recordedAt": "2026-08-23",
   "scope": "re_run_of_G8_and_G9_receipts_after_canonical_hash_unification",
   "issue": "https://github.com/WistRu/Hypomnema/issues/5",
@@ -8,7 +8,9 @@
     "G9-isolated-migration-rollback-receipt.json"
   ],
   "supersededOriginalsRetained": true,
-  "repositoryHead": "a653f87f0a0820d13c6ea8252df6d7e7dc5f0d98",
+  "repositoryHead": "409638d64bf0feb5dd282d0073441802965679d6",
+  "headNote": "This receipt describes the code at the head above. The commit that adds the receipt file is necessarily later and touches docs only.",
+  "revisionNote": "Version 1 of this receipt recorded head a653f87 and was already stale when written, because commit 6de3a97 changed packages/shared afterwards. Version 2 is a full re-run.",
   "gateStatus": {
     "G8": "PASS (unchanged)",
     "G9": "PENDING (unchanged); research, live acquisition and privacy purge remain under the 2026-08-23 deployment waiver and are not claimed verified"
@@ -19,18 +21,18 @@
   "secretsRecorded": "none; no ANTHROPIC_API_KEY is configured and none was needed",
   "commands": {
     "test": {
-      "command": "corepack pnpm test",
+      "command": "npx vitest run --maxWorkers=4, run once per package",
+      "commandNote": "Run per package rather than through `corepack pnpm test`, because the workspace run at full concurrency times out tests that pass at bounded worker counts. This is pre-existing and not hash-related.",
       "exitCode": 0,
-      "files": 278,
-      "tests": 2443,
+      "files": 280,
+      "tests": 2448,
       "packages": {
         "shared": { "files": 13, "tests": 78 },
         "extension": { "files": 29, "tests": 321 },
         "mcp": { "files": 12, "tests": 140 },
-        "server": { "files": 132, "tests": 1295 },
+        "server": { "files": 134, "tests": 1300 },
         "web": { "files": 92, "tests": 609 }
-      },
-      "note": "The workspace run reported two web timeouts (library-primary-view, research-purge-control) under full concurrency; both passed on a repeat run of the web package at maxWorkers=4. Server Vitest is likewise stable only at bounded worker counts. No failure was hash-related."
+      }
     },
     "typecheck": { "command": "corepack pnpm typecheck", "exitCode": 0, "packagesPassed": 5 },
     "build": { "command": "corepack pnpm build", "exitCode": 0, "packagesPassed": 5 }
@@ -38,13 +40,14 @@
   "hashChanges": {
     "canonicalizationOutputs": {
       "changed": false,
-      "explanation": "No digest recorded in any G8/G9 receipt is an output of the canonical-JSON helper. The schema-25/26 migration fingerprints that are pinned in source (deletion manifest, purge target catalog, owned schema mutation) are unchanged, because those bytes mirror SQLite json_object() and now use the explicitly named sqlJsonObjectMirrorV1 rather than the canonical helper. The migration tests recompute them at runtime and pass."
+      "explanation": "No digest recorded in any G8/G9 receipt is an output of the canonical-JSON helper. The schema-25/26 migration fingerprints pinned in source (deletion manifest, purge target catalog, owned schema mutation) are unchanged, because those bytes mirror SQLite json_object() and now use the explicitly named sqlJsonObjectMirrorV1 rather than the canonical helper.",
+      "evidence": "packages/server/migrations/026_privacy_purge_intents.sql:1813 computes execution_plan_digest as tabhub_sha256_v1(json_group_array(json_object('tableName', ..., 'pkV1', ...))); digestPrivacyPurgeExecutionTargets must emit those exact bytes. test/migration-digest-agreement.test.ts proves a migrated and a fresh database agree on the schema-25 digests, and test/persisted-fingerprint-divergence.test.ts pins that every already-valid payload hashes to the same bytes as under the retired algorithms."
     },
     "buildArtifacts": {
       "serverDistSha256": {
         "previous": "3ec97b23144fdf2fd1e64a1826ab7c2db23618d4aabca2d527699cc199b5eb71",
         "current": "49d95c96061cee73e25ce407811cb89e6ad17fe70d8a5ffd79b6cdf6508c992b",
-        "reason": "server sources changed: sixteen local canonical-JSON copies replaced by shared imports"
+        "reason": "server sources changed: sixteen local canonical-JSON copies replaced by shared imports. @tabhub/shared stays external to this bundle, so later shared-only commits do not move this hash."
       },
       "webIndexSha256": {
         "previous": "b9b7be767a9c2721ae1a4ebefa18027c3be11ea8314eb40bd16f77ed4341a511",

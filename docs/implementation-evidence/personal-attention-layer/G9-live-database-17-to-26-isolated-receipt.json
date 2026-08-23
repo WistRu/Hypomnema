@@ -1,24 +1,24 @@
 {
   "version": 1,
-  "recordedAt": "2026-08-22T23:39:21.096Z",
+  "recordedAt": "2026-08-23T01:26:42.834Z",
   "scope": "isolated_live_database_migration_17_to_26_and_feature_off_read",
   "issue": "https://github.com/WistRu/Hypomnema/issues/6",
-  "repositoryHead": "fc213de3d9b4b7c8ec4e54f94d67208e116a6e7d",
+  "repositoryHead": "409638d64bf0feb5dd282d0073441802965679d6",
   "liveRuntimeTouched": false,
   "liveDatabaseWritten": false,
   "browserTouched": false,
   "liveDatabase": {
     "path": "data/tabhub.sqlite",
-    "sha256Before": "8aad2bf1cf2a90db2427231c3ceb70595948f3bb385bcf27d7a5eedbe88019b9",
-    "sha256After": "8aad2bf1cf2a90db2427231c3ceb70595948f3bb385bcf27d7a5eedbe88019b9",
+    "sha256Before": "5293d6e2d8f0f242cc9541da0245306e14cc97a7268363938ff79d9abc37dd56",
+    "sha256After": "5293d6e2d8f0f242cc9541da0245306e14cc97a7268363938ff79d9abc37dd56",
     "schemaVersion": 17,
     "integrityCheck": "ok",
     "foreignKeyViolations": 0,
     "tableCount": 28
   },
   "isolatedCopy": {
-    "sha256BeforeMigration": "b7a254c3c28dd8109eba0a9d546a4b2bbf84af6c5d16809492c6d1f7865637dc",
-    "sha256AfterMigration": "2e7f7a4aeb6ca21bdbb0c29dbc7dd6edb597f1e677d01d66b650ebb01842094c",
+    "sha256BeforeMigration": "54c80f1e02679de5fb7271393a33d8f0c261af7a9d5bba79d175d820f3283096",
+    "sha256AfterMigration": "8dd0eb79eb9eca74a7618552dc89aeccfa7f6fb3bc3849758c1806e1fae498ce",
     "schemaVersionAfter": 26,
     "integrityCheck": "ok",
     "foreignKeyViolations": 0,
@@ -28,16 +28,16 @@
   },
   "rowCounts": {
     "before": {
-      "tabs": 2189,
-      "tab_instances": 1153,
+      "tabs": 2192,
+      "tab_instances": 1154,
       "tags": 26,
-      "tab_tags": 2276
+      "tab_tags": 2279
     },
     "after": {
-      "tabs": 2189,
-      "tab_instances": 1153,
+      "tabs": 2192,
+      "tab_instances": 1154,
       "tags": 26,
-      "tab_tags": 2276
+      "tab_tags": 2279
     }
   },
   "featureOffSmoke": {
