@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
 import { App } from "../src/App";
+import { unavailableExtensionBridge } from "./support/extension-bridge-stub";
 import { I18nProvider } from "../src/i18n";
 import { TabDrawer } from "../src/TabDrawer";
 
@@ -53,6 +54,10 @@ vi.mock("../src/use-single-tab-close", () => ({
     isClosingCanonical: () => false,
     isClosingPhysical: () => false,
   }),
+}));
+vi.mock("../src/extension-bridge", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/extension-bridge")>()),
+  createWindowExtensionBridge: () => unavailableExtensionBridge(),
 }));
 
 interface HttpRequestRecord {

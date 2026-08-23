@@ -24,6 +24,7 @@ import { createPendingActivity, createPendingSnapshot } from "./queue";
 import {
   BROWSER_CONFIG_VERSION,
   getBrowserIdentifier,
+  getBrowserIdentity,
   getOrCreateBrowserSessionId,
   getOrCreateInstallationId,
   readQueueState,
@@ -52,6 +53,53 @@ describe("browser identity storage", () => {
     });
 
     await expect(getBrowserIdentifier()).resolves.toBe("edge");
+  });
+
+  it("falls back to the detected browser when nothing was ever chosen", async () => {
+    vi.stubGlobal("navigator", {
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 YaBrowser/24.10.0.0 Safari/537.36",
+    });
+    localStorage.get.mockResolvedValue({});
+
+    await expect(getBrowserIdentifier()).resolves.toBe("yandex");
+    await expect(getBrowserIdentity()).resolves.toMatchObject({
+      browser: "yandex",
+      detected: "yandex",
+      source: "detected",
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("never lets detection override a browser the user chose", async () => {
+    // The user labelled this install "other" on purpose; the agent says Edge.
+    vi.stubGlobal("navigator", {
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 Edg/128.0.2739.42",
+    });
+    localStorage.get.mockResolvedValue({
+      [STORAGE_KEYS.browser]: "other",
+      [STORAGE_KEYS.browserConfigured]: BROWSER_CONFIG_VERSION,
+    });
+
+    await expect(getBrowserIdentifier()).resolves.toBe("other");
+    await expect(getBrowserIdentity()).resolves.toMatchObject({
+      browser: "other",
+      detected: "edge",
+      source: "chosen",
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it("stays unconfigured when the agent names no browser it knows", async () => {
+    vi.stubGlobal("navigator", { userAgent: "curl/8.4.0" });
+    localStorage.get.mockResolvedValue({});
+
+    await expect(getBrowserIdentifier()).resolves.toBeUndefined();
+    await expect(getBrowserIdentity()).resolves.toMatchObject({
+      source: "unknown",
+    });
+    vi.unstubAllGlobals();
   });
 
   it("writes the identity and explicit-choice marker together", async () => {

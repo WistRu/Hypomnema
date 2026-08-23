@@ -31,8 +31,14 @@ export interface ExtensionProbeAvailable {
   browserSessionId: string;
   extensionOrigin?: string;
   browser: string | null;
+  /** How `browser` was arrived at; absent from extensions older than this field. */
+  browserSource?: "chosen" | "detected" | "unknown";
   commandProtocolVersion?: TabCommandRelayCompatibleProtocolVersion;
   controlWindowId: number;
+  /** What the user agent said, reported even when a choice overrides it. */
+  detectedBrowser?: string;
+  /** Whether this install holds a personal-context capability. */
+  paired?: boolean;
   pendingUndos: CloseUndoSummary[];
   windows: BrowserWindowSummary[];
 }
@@ -296,13 +302,23 @@ function parseProbe(value: unknown): ExtensionProbeAvailable {
       "available",
       "browser",
       "browserSessionId",
+      "browserSource",
       "commandProtocolVersion",
       "controlWindowId",
+      "detectedBrowser",
       "extensionOrigin",
       "installationId",
+      "paired",
       "pendingUndos",
       "windows",
     ]) ||
+    (value.browserSource !== undefined &&
+      !["chosen", "detected", "unknown"].includes(
+        value.browserSource as string,
+      )) ||
+    (value.detectedBrowser !== undefined &&
+      !isKnownBrowser(value.detectedBrowser)) ||
+    (value.paired !== undefined && typeof value.paired !== "boolean") ||
     value.available !== true ||
     commandProtocolVersion === undefined ||
     typeof value.browserSessionId !== "string" ||
@@ -332,6 +348,13 @@ function parseProbe(value: unknown): ExtensionProbeAvailable {
       ? { extensionOrigin: value.extensionOrigin }
       : {}),
     browser: value.browser as string | null,
+    ...(value.browserSource === undefined
+      ? {}
+      : { browserSource: value.browserSource as "chosen" | "detected" | "unknown" }),
+    ...(value.detectedBrowser === undefined
+      ? {}
+      : { detectedBrowser: value.detectedBrowser as string }),
+    ...(value.paired === undefined ? {} : { paired: value.paired as boolean }),
     controlWindowId: value.controlWindowId,
     pendingUndos: value.pendingUndos,
     windows: value.windows,

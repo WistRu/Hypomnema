@@ -153,6 +153,9 @@
   "optionsBrowserLabel": {
     "message": "Browser"
   },
+  "optionsBrowserDetected": {
+    "message": "Detected automatically. Change it if this is the wrong browser."
+  },
   "optionsChooseBrowser": {
     "message": "Choose this browser…"
   },

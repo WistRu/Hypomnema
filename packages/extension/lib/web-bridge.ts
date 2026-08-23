@@ -85,13 +85,27 @@ function isValidProbeData(value: unknown): boolean {
     "available",
     "browser",
     "browserSessionId",
+    "browserSource",
     "commandProtocolVersion",
     "controlWindowId",
+    "detectedBrowser",
     "extensionOrigin",
     "installationId",
+    "paired",
     "pendingUndos",
     "windows",
   ])) {
+    return false;
+  }
+  if (
+    (value.browserSource !== undefined &&
+      !["chosen", "detected", "unknown"].includes(
+        value.browserSource as string,
+      )) ||
+    (value.detectedBrowser !== undefined &&
+      !isKnownBrowser(value.detectedBrowser)) ||
+    (value.paired !== undefined && typeof value.paired !== "boolean")
+  ) {
     return false;
   }
   if (

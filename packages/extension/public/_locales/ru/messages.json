@@ -153,6 +153,9 @@
   "optionsBrowserLabel": {
     "message": "Браузер"
   },
+  "optionsBrowserDetected": {
+    "message": "Определено автоматически. Поменяйте, если браузер указан неверно."
+  },
   "optionsChooseBrowser": {
     "message": "Выберите этот браузер…"
   },

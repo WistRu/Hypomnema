@@ -72,6 +72,7 @@ import {
 } from "./library-sorting";
 import { TabBrowserAction } from "./TabBrowserAction";
 import { useI18n, type TranslationParams } from "./i18n";
+import { PairBrowser } from "./PairBrowser";
 import {
   handleMiddleClickClose,
   preventMiddleClickAutoscroll,
@@ -1428,6 +1429,10 @@ export function App() {
         </header>
 
         <main>
+          {/* Speaks only when the extension positively reports itself unpaired,
+              so the offer finds the user instead of the user finding the panel
+              buried in a tab drawer. */}
+          <PairBrowser variant="banner" />
           <section className="list-heading" aria-labelledby="tab-list-title">
             <div>
               <p className="eyebrow">{t("Workspace")}</p>

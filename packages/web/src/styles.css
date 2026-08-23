@@ -2361,6 +2361,47 @@ tbody tr.is-selected {
   font-size: 8px;
 }
 
+/* The same control as .context-pairing, but standing on its own above the
+   Library rather than tucked under a tab drawer, so it carries its own frame. */
+.pairing-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  border: 1px solid #343e50;
+  border-radius: 6px;
+  padding: 9px 12px;
+  background: #151b24;
+}
+
+.pairing-banner p {
+  margin: 0;
+  color: #aeb9ca;
+  font-size: 10px;
+}
+
+.pairing-banner [role="status"] {
+  display: grid;
+  gap: 4px;
+  flex-basis: 100%;
+}
+
+.pairing-banner button {
+  min-height: 27px;
+  border: 1px solid #3d6ea5;
+  border-radius: 5px;
+  padding: 0 10px;
+  color: #d6e2f2;
+  background: #1d2a3a;
+  font-size: 10px;
+}
+
+.pairing-banner code {
+  color: #d6e2f2;
+  word-break: break-all;
+}
+
 @media (max-width: 560px) {
   .context-scope-switch {
     grid-template-columns: 1fr;

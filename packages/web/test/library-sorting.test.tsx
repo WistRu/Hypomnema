@@ -11,6 +11,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../src/App";
+import { unavailableExtensionBridge } from "./support/extension-bridge-stub";
 import { I18nProvider } from "../src/i18n";
 
 const mocks = vi.hoisted(() => ({
@@ -80,6 +81,10 @@ vi.mock("../src/use-single-tab-close", () => ({
     isClosingCanonical: () => false,
     isClosingPhysical: () => false,
   }),
+}));
+vi.mock("../src/extension-bridge", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/extension-bridge")>()),
+  createWindowExtensionBridge: () => unavailableExtensionBridge(),
 }));
 
 const tab: TabListItem = {

@@ -5,7 +5,7 @@ import type {
   ExtensionResponse,
 } from "../../lib/messages";
 import { localizedExtensionError } from "../../lib/localized-error";
-import { getBrowserIdentifier, isKnownBrowser } from "../../lib/storage";
+import { getBrowserIdentity, isKnownBrowser } from "../../lib/storage";
 
 const uiLocale = browser.i18n.getMessage("@@ui_locale");
 const documentLocale = /^ru(?:[-_]|$)/i.test(uiLocale) ? "ru" : "en";
@@ -60,8 +60,27 @@ function localizeStaticUi(): void {
 
 localizeStaticUi();
 
-let selectedBrowser = await getBrowserIdentifier();
-browserSelect.value = selectedBrowser ?? "";
+const detectedNote = requiredElement<HTMLElement>("#browser-detected");
+
+/**
+ * A detected browser is shown as the current value so nobody has to answer a
+ * question the user agent already answered, but it is labelled as a guess so a
+ * wrong one reads as correctable rather than as something the user chose.
+ */
+async function renderBrowserIdentity(): Promise<
+  Awaited<ReturnType<typeof getBrowserIdentity>>["browser"]
+> {
+  const identity = await getBrowserIdentity();
+  browserSelect.value = identity.browser ?? "";
+  detectedNote.hidden = identity.source !== "detected";
+  detectedNote.textContent =
+    identity.source === "detected"
+      ? browser.i18n.getMessage("optionsBrowserDetected")
+      : "";
+  return identity.browser;
+}
+
+let selectedBrowser = await renderBrowserIdentity();
 
 function savedMessage(
   response: Extract<ExtensionResponse, { ok: true }>,
@@ -93,8 +112,7 @@ function savedMessage(
 }
 
 async function reconcileSelection(): Promise<void> {
-  selectedBrowser = await getBrowserIdentifier();
-  browserSelect.value = selectedBrowser ?? "";
+  selectedBrowser = await renderBrowserIdentity();
 }
 
 browserSelect.addEventListener("change", () => {

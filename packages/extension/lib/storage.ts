@@ -7,6 +7,7 @@ import {
 import { browser } from "wxt/browser";
 
 import { STORAGE_KEYS } from "./constants";
+import { detectBrowser } from "./detect-browser";
 import {
   MAX_DEAD_LETTERS,
   type DeadLetter,
@@ -62,16 +63,37 @@ export const isBrowserSessionId = isInstallationId;
 export async function getBrowserIdentifier(): Promise<
   KnownBrowser | undefined
 > {
+  return (await getBrowserIdentity()).browser;
+}
+
+/**
+ * An explicit choice always wins; detection only fills the gap where there is
+ * none, so an install the user has already labelled is never relabelled behind
+ * their back. `source` lets the options page say which of the two it is showing
+ * rather than presenting a guess as a decision.
+ */
+export async function getBrowserIdentity(): Promise<{
+  browser: KnownBrowser | undefined;
+  detected: KnownBrowser | undefined;
+  source: "chosen" | "detected" | "unknown";
+}> {
   const stored = await browser.storage.local.get([
     STORAGE_KEYS.browser,
     STORAGE_KEYS.browserConfigured,
   ]);
   const storedBrowser = stored[STORAGE_KEYS.browser];
+  const detected = detectBrowser();
 
-  return stored[STORAGE_KEYS.browserConfigured] === BROWSER_CONFIG_VERSION &&
+  if (
+    stored[STORAGE_KEYS.browserConfigured] === BROWSER_CONFIG_VERSION &&
     isKnownBrowser(storedBrowser)
-    ? storedBrowser
-    : undefined;
+  ) {
+    return { browser: storedBrowser, detected, source: "chosen" };
+  }
+
+  return detected === undefined
+    ? { browser: undefined, detected, source: "unknown" }
+    : { browser: detected, detected, source: "detected" };
 }
 
 async function loadOrCreateInstallationId(): Promise<string> {

@@ -104,6 +104,7 @@ import {
 } from "../lib/queue";
 import {
   getBrowserIdentifier,
+  getBrowserIdentity,
   getOrCreateBrowserSessionId,
   getOrCreateInstallationId,
   readQueueState,
@@ -1191,12 +1192,17 @@ async function handleAppRequest(
       return { data: { installationId, paired: true }, ok: true, type: "pair" };
     }
     case "tabhub:app-probe": {
-      const [browserIdentifier, installationId, browserSessionId] =
+      const [identity, installationId, browserSessionId, capability] =
         await Promise.all([
-          getBrowserIdentifier(),
+          getBrowserIdentity(),
           getOrCreateInstallationId(),
           getOrCreateBrowserSessionId(),
+          // Pairing state is a nicety on a probe that many things depend on.
+          // Secure storage being unavailable must not take the whole probe
+          // down with it, so an unreadable capability reads as "unknown".
+          readLocalCapability().catch(() => undefined),
         ]);
+      const browserIdentifier = identity.browser;
 
       if (browserIdentifier !== undefined) {
         // Enqueue this before answering so a following preview is serialized
@@ -1228,10 +1234,15 @@ async function handleAppRequest(
           available: true,
           browser: browserIdentifier ?? null,
           browserSessionId,
+          browserSource: identity.source,
           commandProtocolVersion: tabCommandRelayProtocolVersion,
           controlWindowId: controlWindowId as number,
+          ...(identity.detected === undefined
+            ? {}
+            : { detectedBrowser: identity.detected }),
           extensionOrigin: extensionOrigin(),
           installationId,
+          paired: capability !== undefined,
           pendingUndos,
           windows,
         },

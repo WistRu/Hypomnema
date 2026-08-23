@@ -114,11 +114,17 @@ export const isPairingChallengeId = isInstallationId;
 export interface AppProbeData {
   available: true;
   browser: KnownBrowser | null;
+  /** How `browser` was arrived at, so the page never shows a guess as a choice. */
+  browserSource?: "chosen" | "detected" | "unknown";
   browserSessionId: string;
   commandProtocolVersion?: typeof tabCommandRelayProtocolVersion;
   controlWindowId: number;
+  /** What the user agent said, reported even when an explicit choice overrides it. */
+  detectedBrowser?: KnownBrowser;
   extensionOrigin?: string;
   installationId: string;
+  /** Whether this install already holds a personal-context capability. */
+  paired?: boolean;
   pendingUndos: PhysicalTabCloseUndoSummary[];
   windows: PhysicalWindowSummary[];
 }
