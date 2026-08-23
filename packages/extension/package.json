@@ -7,7 +7,7 @@
     "dev": "wxt",
     "build": "wxt build",
     "typecheck": "wxt prepare && tsc --noEmit",
-    "test": "wxt prepare && vitest run"
+    "test": "wxt prepare && vitest run --maxWorkers=4"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",

@@ -268,7 +268,7 @@ Final может начаться только после PASS G6 и G9, отс�
 8. P0/P1 и required unverified items равны 0; все required diffs accounted and integrated, независимо от наличия git commit.
 9. Условные UAT и post-rollout measurement predicates из §13/§16 выполнены; провал при достаточном sample/window нельзя заменить waiver/checkpoint.
 
-Полный `corepack pnpm test`, `corepack pnpm typecheck`, `corepack pnpm build` обязателен перед `PASS` каждого G0–G9 и Final; gate не считается independently shippable без этого прогона. После G2, G7, G8, G9 дополнительно обязательны extension reload и exact physical-tab live smoke. После MCP gates обязательны protocol/tool transcripts.
+Полный `corepack pnpm test`, `corepack pnpm typecheck`, `corepack pnpm build` обязателен перед `PASS` каждого G0–G9 и Final; gate не считается independently shippable без этого прогона. Каждый package задаёт свой bounded worker count прямо в `test` script (server 2, остальные 4), поэтому мандатная команда и есть та, которая запускается: подменять её на ручной per-package прогон нельзя. Предусловие прогона — свободная физическая память: при нескольких GB свободных из 130 GB прогон падает аллокацией в произвольном package, и это состояние машины, а не результат теста; такой прогон не засчитывается ни как PASS, ни как FAIL. После G2, G7, G8, G9 дополнительно обязательны extension reload и exact physical-tab live smoke. После MCP gates обязательны protocol/tool transcripts.
 
 ## 11. Decision frontier
 
