@@ -5,7 +5,6 @@ import {
   canonicalJsonV1 as canonicalJson,
   estimateResearchReservationV1,
   researchApprovedDraftSchema,
-  researchCanonicalSha256PayloadV1,
   type ResearchApprovedDraft,
 } from "@tabhub/shared";
 

@@ -1,5 +1,4 @@
 import type {
-  ActivityRollup,
   ActivityWindow,
   ResourceAlias,
   ResourceDetail,

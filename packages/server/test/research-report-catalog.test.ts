@@ -4,7 +4,6 @@ import {
   canonicalJsonV1 as canonicalJson,
   estimateResearchReservationV1,
   projectAgentResearchReportDetail,
-  researchCanonicalSha256PayloadV1,
   researchSelectionFingerprintPayload,
   type ResearchApprovalRequest,
   type ResearchApprovedDraft,

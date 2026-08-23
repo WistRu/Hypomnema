@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 
 import {
   canonicalJsonV1 as canonicalJson,
-  researchCanonicalSha256PayloadV1,
   researchCapturedTextChunkManifestSchema,
   researchCoverageSchema,
   researchDossierSchema,

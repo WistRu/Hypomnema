@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import {
   canonicalJsonV1 as canonicalJson,
   estimateResearchReservationV1,
-  researchCanonicalSha256PayloadV1,
   researchSelectionFingerprintPayload,
   type ResourceResearchTaskSpec,
 } from "@tabhub/shared";

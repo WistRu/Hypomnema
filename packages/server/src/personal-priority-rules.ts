@@ -65,10 +65,6 @@ interface VersionRow {
 interface RulesetRow { id: number }
 interface ActiveRow { ruleset_id: number; version: number }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }

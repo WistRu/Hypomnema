@@ -7,7 +7,6 @@ import Database from "better-sqlite3";
 import {
   canonicalJsonV1 as canonicalJson,
   estimateResearchReservationV1,
-  researchCanonicalSha256PayloadV1,
   researchLiveAcquisitionSourceDraftSchema,
   researchSelectionFingerprintPayload,
   type ResearchApprovalRequest,

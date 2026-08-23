@@ -5,7 +5,6 @@ import {
   aiTaskSpecSchema,
   estimateResearchReservationV1,
   researchApprovedDraftSchema,
-  researchCanonicalSha256PayloadV1,
   type ResearchApprovedDraftInput,
   type ResourceResearchTaskSpec,
 } from "@tabhub/shared";

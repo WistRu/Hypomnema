@@ -22,7 +22,6 @@ import {
   shareableSessionIntentBundleSchema,
   tabIdParamSchema,
   type ContextCommand,
-  type ExactTabScope,
   type SessionIntentCommand,
 } from "@tabhub/shared";
 import type {

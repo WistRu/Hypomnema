@@ -9,7 +9,6 @@ import {
   agentResearchStartRequestSchema,
   aiTaskSpecSchema,
   durableJobViewSchema,
-  researchApprovedDraftSchema,
   researchApprovalRequestSchema,
   researchPublicationDraftSchema,
   type DurableJobId,
@@ -2984,20 +2983,6 @@ export function createAiJobLedger(
         ? (completion.result as { reportId: number }).reportId : null,
       errorCode: completion.status === "partial" ? "JOB_BUDGET_EXHAUSTED" : null,
     };
-  }
-
-  function cancellableCompletionRow(
-    claim: AiJobClaim,
-    now: string,
-  ): AiJobRow | undefined {
-    const row = read(claim.kind, claim.id);
-    if (row === undefined) {
-      throw new DurableAiJobError("JOB_LEASE_LOST", "AI job lease was lost");
-    }
-    assertLease(row, claim, now);
-    if (row.cancellation_requested_at === null) return row;
-    cancelRunningAtCheckpoint(row, claim, now);
-    return undefined;
   }
 
   function completeInTransaction(

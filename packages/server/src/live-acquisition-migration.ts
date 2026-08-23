@@ -32,12 +32,6 @@ export interface LiveAcquisitionMigrationOptions {
 const approvedMigration025Sha256 =
   "68c09c694ddd7b38df0e3956155cb6c472507a53154fe7a6f5f54c67ce011811";
 
-interface PurgeAuthorityRow {
-  readonly tableName: string;
-  readonly pkV1: string;
-  readonly nonceDigest: string;
-}
-
 export interface PrivacyPurgeExecutionTarget {
   readonly tableName: string;
   readonly pkV1: string;

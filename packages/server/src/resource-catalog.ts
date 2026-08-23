@@ -1159,9 +1159,11 @@ export function createResourceCatalog(
 
   return {
     resolvePage(logicalPageId) {
-      const resolved = connection.inTransaction
-        ? resolveInternal(logicalPageId)
-        : resolveTransaction(logicalPageId);
+      if (connection.inTransaction) {
+        resolveInternal(logicalPageId);
+      } else {
+        resolveTransaction(logicalPageId);
+      }
       const row = selectCurrentResolution.get(logicalPageId) as ResolutionRow;
       if (row === undefined) {
         throw new Error(`Resolution for logical page ${logicalPageId} was not persisted`);

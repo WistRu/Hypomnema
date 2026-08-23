@@ -10,7 +10,6 @@ import {
   liveAcquisitionStartReceiptSchema,
   liveAcquisitionStartRequestSchema,
   liveAcquisitionWorkflowRef,
-  researchCanonicalSha256PayloadV1,
   type LiveAcquisitionPreflight,
   type LiveAcquisitionPreflightRequest,
   type LiveAcquisitionStartReceipt,

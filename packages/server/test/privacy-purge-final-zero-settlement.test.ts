@@ -263,10 +263,6 @@ function fixture(options: {
     SELECT id FROM privacy_subject_generations
     WHERE subject_kind = 'logical_page' AND logical_page_id = 7001 AND is_active = 1
   `).pluck().get());
-  const historyEpochId = Number(connection.prepare(`
-    SELECT id FROM research_history_epochs
-    WHERE resource_id = 7001 AND is_active = 1
-  `).pluck().get());
   const intentKey = sha256("purge-final-zero-intent");
   return {
     database,

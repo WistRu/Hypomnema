@@ -35,12 +35,6 @@ function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
-function trackedExecutionDigest(input: {
-  jobId: number; attemptId: number; attemptNo: number; leaseTokenDigest: string;
-}): string {
-  return sha256(`tabhub:c90-tracked-execution:v1\0${JSON.stringify(input)}`);
-}
-
 function acknowledgedAbort(input: {
   actionId: number; jobId: number; attemptId: number; attemptNo: number;
   leaseTokenDigest: string; executionKeyDigest: string; abortRequestDigest: string;

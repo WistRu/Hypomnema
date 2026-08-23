@@ -13,7 +13,6 @@ import {
   type PrivacyPurgeIntentStore,
   type PrivacyPurgeIntentStoreOptions,
   type PrivacyPurgeReadyCommandIdentity,
-  type PrivacyPurgeWaitingPublication,
 } from "./privacy-purge-intent-capabilities.js";
 import type { PrivacyPurgeIntentTarget } from "./privacy-purge-fence-spec.js";
 import {

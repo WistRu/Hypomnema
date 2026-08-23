@@ -1,6 +1,6 @@
 import { createHash, createHmac } from "node:crypto";
 
-import { canonicalJsonV1 as canonicalJson, researchCanonicalSha256PayloadV1 } from "@tabhub/shared";
+import { canonicalJsonV1 as canonicalJson } from "@tabhub/shared";
 import type Database from "better-sqlite3";
 
 import {
