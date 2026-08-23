@@ -1,0 +1,112 @@
+{
+ "version": 1,
+ "recordedAt": "2026-08-23T14:23:00Z",
+ "scope": "trial_week_runtime_redeploy_no_schema_change",
+ "issue": "https://github.com/WistRu/Hypomnema/issues/30",
+ "alsoIssue": "https://github.com/WistRu/Hypomnema/issues/31",
+ "parentIssue": "https://github.com/WistRu/Hypomnema/issues/2",
+ "precedingReceipt": "docs/implementation-evidence/personal-attention-layer/rollout-receipt.json",
+ "reason": "The user decided on 2026-08-23, before the Trial week began counting, that the per-entry visibility choice goes away and that pairing must explain itself. Spending the Trial week on an interface already judged wrong would waste the week, so the runtime was redeployed onto the new build first. The Trial week had not started: it waits on issue #12, so nothing was invalidated by redeploying.",
+ "repositoryHead": "8a88bb730fc468ab42c699aa6bbcce06210ea709",
+ "previousRepositoryHead": "d2579aaa71a1f5615a54a51d4e778f857e66864b",
+ "buildCommand": "corepack pnpm build",
+ "schemaChange": "none; database stayed at user_version 26 and no migration ran",
+ "preRedeploy": {
+  "backupPath": "backups/tabhub-2026-08-23T14-20-12.990Z.sqlite",
+  "backupSha256": "b684c6be4e3ffe89c77e20500333311a21a44d6354f8136fae3159dea7af3dcd",
+  "backupSchemaVersion": 26,
+  "backupIntegrityCheck": "ok",
+  "backupForeignKeyViolations": 0,
+  "backupTableCount": 167,
+  "backupRowCounts": {
+   "tabs": 2266
+  },
+  "databaseSha256": "b77dd1f29a382b3732694e6c5abab3f93081611d92f17b6372478248759424ec",
+  "databaseBytes": 15880192,
+  "schemaVersion": 26,
+  "libraryRead": 200,
+  "stats": {
+   "total": 2266,
+   "open": 1167
+  }
+ },
+ "processes": {
+  "oldPid": 1099148,
+  "oldProcessStopCommand": "Stop-Process -Id 1099148 -Force",
+  "newPid": 1094604,
+  "newProcessStartCommand": "Start-Process node.exe packages/server/dist/main.js -WorkingDirectory D:\\VibeCoding\\TabHub -WindowStyle Hidden",
+  "port": "127.0.0.1:7717",
+  "listeningVerified": true
+ },
+ "postRedeploy": {
+  "health": {
+   "status": "ok",
+   "database": "ok",
+   "schemaVersion": 26
+  },
+  "databaseSha256": "b77dd1f29a382b3732694e6c5abab3f93081611d92f17b6372478248759424ec",
+  "databaseSha256Unchanged": true,
+  "libraryRead": 200,
+  "tabsApiRead": 200,
+  "stats": {
+   "total": 2266,
+   "open": 1167
+  }
+ },
+ "featureProjectionUnchanged": true,
+ "features": {
+  "context": true,
+  "logicalImportance": true,
+  "resources": true,
+  "activityWindows": true,
+  "agentUserImportance": true,
+  "priorityReaders": true,
+  "priorityShadow": true,
+  "priorityPersonalization": true,
+  "liveAcquisition": false,
+  "pageSummaryCapture": false,
+  "priorityAssessmentWriter": false,
+  "privacyPurge": false,
+  "research": false
+ },
+ "featureFlagNotes": "Identical before and after, field for field. activityDailyWriter remains set in the environment file but is not projected by /api/features, exactly as issue #20 corrected the original rollout receipt to say; it is therefore still unobserved from the runtime rather than confirmed.",
+ "servedBundleVerified": {
+  "asset": "/app/assets/index-CzvOt2gU.js",
+  "bytes": 962817,
+  "containsNewPairingCopy": true,
+  "containsRemovedVisibilityKey": false,
+  "note": "Fetched from the running server, not read from disk, so this proves the new build is what is served."
+ },
+ "mcpSmoke": {
+  "transport": "stdio",
+  "binary": "packages/mcp/dist/main.js",
+  "apiUrl": "http://127.0.0.1:7717",
+  "toolCount": 32,
+  "toolsCalled": [
+   "get_stats",
+   "list_resources"
+  ],
+  "result": "both answered from the live runtime"
+ },
+ "extension": {
+  "relayReconnectedWithoutUserAction": true,
+  "scopes": [
+   {
+    "browser": "edge",
+    "protocolVersion": 5,
+    "connectedAt": "2026-08-23T14:21:12Z"
+   }
+  ],
+  "unproven": "chrome and yandex were not connected at the time of this receipt; their Manifest V3 service workers were asleep, which is ordinary and was already recorded under issue #12. The extensions still run the pre-change popup: this redeploy did not reload them, so the removed visibility control and the new pairing sentence are not yet visible in any browser. A deliberate reload is still owed, and is tracked by issue #12."
+ },
+ "deploymentWaiver": "unchanged; research, live acquisition and privacy purge stay feature-off, G9 stays PENDING, Final Gate not claimed",
+ "rollbackRecipe": "unchanged; feature-off on schema 26 via rollback/trial-week-feature-off.env. No restore was performed and none is authorised.",
+ "trialWeek": "not started; still gated on issue #12",
+ "secretsRecorded": false,
+ "verdict": "PASS_WITH_UNPROVEN_ITEMS",
+ "unprovenAtRedeploy": [
+  "extension reload in any browser, so the user-visible half of issues #30 and #31 is deployed but not yet seen",
+  "chrome and yandex relay connectivity at the moment of the receipt",
+  "activityDailyWriter, which /api/features does not project"
+ ]
+}
