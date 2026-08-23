@@ -6,7 +6,10 @@ import {
   snapshotTabTitleMaxLength,
   tabUrlMaxLength,
 } from "@tabhub/shared/limits";
-import { researchOriginConfirmationRequirementsSchema } from "./research-contracts.ts";
+import {
+  researchCanonicalSha256PayloadV1,
+  researchOriginConfirmationRequirementsSchema,
+} from "./research-contracts.ts";
 
 export * from "@tabhub/shared/limits";
 export * from "./research-contracts.ts";
@@ -2534,24 +2537,18 @@ export const personalPriorityNaturalLanguageGrammarV1 = deepFreeze({
   ],
 } as const);
 
-function canonicalPersonalPriorityJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalPersonalPriorityJson).join(",")}]`;
-  }
-  if (value !== null && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record).sort().map((key) =>
-      `${JSON.stringify(key)}:${canonicalPersonalPriorityJson(record[key])}`).join(",")}}`;
-  }
-  const encoded = JSON.stringify(value);
-  if (encoded === undefined) throw new TypeError("Cannot fingerprint undefined");
-  return encoded;
-}
-
+/**
+ * The browser computes this fingerprint and the server recomputes it before accepting
+ * the request, so both sides must canonicalize identically. They do it with the one
+ * shared canonicalization; a private copy here diverged on `Date`, `NaN` and
+ * `Infinity`, which is a request the server would reject for reasons nobody could see.
+ */
 export async function personalPriorityRequestFingerprint(
   payload: unknown,
 ): Promise<string> {
-  const bytes = new TextEncoder().encode(canonicalPersonalPriorityJson(payload));
+  // Copied into a plain ArrayBuffer-backed view: SubtleCrypto will not accept the
+  // helper's wider Uint8Array<ArrayBufferLike> return type.
+  const bytes = new Uint8Array(researchCanonicalSha256PayloadV1(payload));
   const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))

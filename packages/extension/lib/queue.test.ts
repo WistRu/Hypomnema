@@ -8,7 +8,6 @@ import {
   createPendingSnapshot,
   drainPendingQueue,
   MAX_DEAD_LETTERS,
-  PendingQueueCapacityError,
   PendingRequestError,
   summarizePendingItems,
   type DeadLetter,

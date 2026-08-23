@@ -7,11 +7,16 @@ import { describe, expect, it } from "vitest";
 import {
   CanonicalizationError,
   canonicalJsonV1,
+  personalPriorityRequestFingerprint as browserPersonalPriorityRequestFingerprint,
   sqlJsonObjectMirrorV1,
   SqlJsonMirrorError,
 } from "@tabhub/shared";
 
-const packageRoot = fileURLToPath(new URL("..", import.meta.url));
+import {
+  personalPriorityRequestFingerprint as serverPersonalPriorityRequestFingerprint,
+} from "../src/personal-priority-rules.js";
+
+const workspaceRoot = fileURLToPath(new URL("../../..", import.meta.url));
 
 /**
  * The shapes a private canonicalization takes: object keys sorted and then re-emitted,
@@ -49,36 +54,48 @@ function privateCanonicalizationsIn(source: string): readonly string[] {
  * suite, so the list cannot quietly outlive the reason it exists.
  */
 const independentOracles = [
-  "test/baseline-g6-acceptance.test.ts",
-  "test/canonicalization-unification.test.ts",
-  "test/baseline-g8.test.ts",
-  "test/durable-ai-jobs.test.ts",
-  "test/personal-priority-materialization-acceptance.test.ts",
-  "test/persisted-fingerprint-divergence.test.ts",
+  "packages/shared/src/research-contracts.ts",
+  "packages/server/test/baseline-g6-acceptance.test.ts",
+  "packages/server/test/baseline-g8.test.ts",
+  "packages/server/test/canonicalization-unification.test.ts",
+  "packages/server/test/durable-ai-jobs.test.ts",
+  "packages/server/test/personal-priority-materialization-acceptance.test.ts",
+  "packages/server/test/persisted-fingerprint-divergence.test.ts",
 ];
+
+/** Build output and generated trees are not sources anyone maintains. */
+const skippedDirectories = new Set([
+  "node_modules", "dist", "coverage", ".wxt", ".output", ".vite",
+]);
 
 async function* typescriptFiles(
   directory: string,
   prefix: string,
 ): AsyncGenerator<{ relativePath: string; absolutePath: string }> {
-  for (const entry of await readdir(join(packageRoot, directory), {
+  for (const entry of await readdir(join(workspaceRoot, directory), {
     withFileTypes: true,
   })) {
     const relativePath = `${prefix}${entry.name}`;
     if (entry.isDirectory()) {
+      if (skippedDirectories.has(entry.name)) continue;
       yield* typescriptFiles(join(directory, entry.name), `${relativePath}/`);
       continue;
     }
     if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".tsx")) continue;
-    yield { relativePath, absolutePath: join(packageRoot, directory, entry.name) };
+    yield { relativePath, absolutePath: join(workspaceRoot, directory, entry.name) };
   }
 }
 
-async function readPackageSources(): Promise<
-  ReadonlyMap<string, string>
-> {
+/**
+ * Every package, not one. The invariant is that no module anywhere disagrees with
+ * another about the fingerprint of the same data, and a copy in the browser bundle
+ * breaks it exactly as a copy in the server does — a request fingerprinted one way
+ * and verified the other is rejected for a reason nobody can see.
+ */
+async function readWorkspaceSources(): Promise<ReadonlyMap<string, string>> {
   const files: { relativePath: string; absolutePath: string }[] = [];
-  for (const directory of ["src", "test"]) {
+  for (const workspacePackage of await readdir(join(workspaceRoot, "packages"))) {
+    const directory = `packages/${workspacePackage}`;
     for await (const file of typescriptFiles(directory, `${directory}/`)) {
       files.push(file);
     }
@@ -111,8 +128,8 @@ describe("canonicalization unification", () => {
     )).toEqual([]);
   });
 
-  it("keeps every module and test on the shared canonicalization", async () => {
-    const sources = await readPackageSources();
+  it("keeps every package on the shared canonicalization", async () => {
+    const sources = await readWorkspaceSources();
     const offenders: string[] = [];
     for (const [relativePath, source] of sources) {
       if (independentOracles.includes(relativePath)) continue;
@@ -122,7 +139,7 @@ describe("canonicalization unification", () => {
   });
 
   it("keeps the oracle allowlist free of entries that no longer need it", async () => {
-    const sources = await readPackageSources();
+    const sources = await readWorkspaceSources();
     const stale = independentOracles.filter((relativePath) => {
       const source = sources.get(relativePath);
       return source === undefined || privateCanonicalizationsIn(source).length === 0;
@@ -156,5 +173,37 @@ describe("canonicalization unification", () => {
     // Every copy flattened a Date to `{}` except the two that used a plain-object test.
     expect(canonicalJsonV1({ at: new Date("2026-08-23T00:00:00.000Z") }))
       .toBe('{"at":"2026-08-23T00:00:00.000Z"}');
+  });
+
+  it("agrees across the wire about a personal priority request fingerprint", async () => {
+    // The browser computes this before sending and the server recomputes it before
+    // accepting, so a disagreement rejects a legitimate request with no visible cause.
+    const payloads: readonly unknown[] = [
+      { b: 1, a: 2 },
+      { rules: [{ ruleKey: "personal.x", effects: { scoreDelta: 3 } }], version: 1 },
+      { nested: { d: 4, c: [3, 1, 2] } },
+      { at: new Date("2026-08-23T10:11:12.130Z") },
+      { "é": "стр", emoji: "\u{1f600}" },
+      { zero: 0, negZero: -0, exp: 1e21 },
+      [],
+      {},
+    ];
+    for (const payload of payloads) {
+      expect(
+        await browserPersonalPriorityRequestFingerprint(payload),
+        `fingerprint of ${canonicalJsonV1(payload)}`,
+      ).toBe(serverPersonalPriorityRequestFingerprint(payload as object));
+    }
+  });
+
+  it("refuses on both sides of the wire what neither can represent", async () => {
+    await expect(browserPersonalPriorityRequestFingerprint({ score: Number.NaN }))
+      .rejects.toThrow(CanonicalizationError);
+    expect(() => serverPersonalPriorityRequestFingerprint({ score: Number.NaN }))
+      .toThrow(CanonicalizationError);
+    await expect(browserPersonalPriorityRequestFingerprint({ note: undefined }))
+      .rejects.toThrow(CanonicalizationError);
+    expect(() => serverPersonalPriorityRequestFingerprint({ note: undefined }))
+      .toThrow(CanonicalizationError);
   });
 });

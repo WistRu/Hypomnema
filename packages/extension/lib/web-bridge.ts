@@ -2,7 +2,6 @@ import { tabCommandRelayCompatibleProtocolVersionSchema } from "@tabhub/shared";
 
 import {
   type AppExtensionResponse,
-  type BridgeRequestType,
   type ExtensionRequest,
   isValidBridgeRequestId,
 } from "./messages";
