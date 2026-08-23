@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   CanonicalizationError,
   researchCanonicalSha256PayloadV1,
+  SqlJsonMirrorError,
+  sqlJsonObjectMirrorV1,
 } from "./index.js";
 
 const canonical = (value: unknown): string =>
@@ -58,5 +60,55 @@ describe("researchCanonicalSha256PayloadV1", () => {
       .toThrow(/\$\.a\.b\[1\]/);
     expect(() => researchCanonicalSha256PayloadV1({ a: 1n }))
       .toThrow(/bigint/i);
+  });
+});
+
+describe("sqlJsonObjectMirrorV1", () => {
+  it("keeps key insertion order, because SQLite json_object does", () => {
+    expect(sqlJsonObjectMirrorV1({ b: 1, a: 2 })).toBe('{"b":1,"a":2}');
+    expect(sqlJsonObjectMirrorV1({ tableName: "research_runs", pkV1: "i:7" }))
+      .toBe('{"tableName":"research_runs","pkV1":"i:7"}');
+    expect(sqlJsonObjectMirrorV1([{ z: 1 }, { a: 2 }])).toBe('[{"z":1},{"a":2}]');
+  });
+
+  it("pins the bytes for the values the purge digests actually carry", () => {
+    expect(sqlJsonObjectMirrorV1([])).toBe("[]");
+    expect(sqlJsonObjectMirrorV1({})).toBe("{}");
+    expect(sqlJsonObjectMirrorV1(null)).toBe("null");
+    expect(sqlJsonObjectMirrorV1("plain")).toBe('"plain"');
+    expect(sqlJsonObjectMirrorV1(42)).toBe("42");
+    expect(sqlJsonObjectMirrorV1(true)).toBe("true");
+    expect(sqlJsonObjectMirrorV1(["a", "b"])).toBe('["a","b"]');
+    expect(sqlJsonObjectMirrorV1({ "é": "стр", emoji: "\u{1f600}" }))
+      .toBe('{"é":"стр","emoji":"\u{1f600}"}');
+    expect(sqlJsonObjectMirrorV1({ at: new Date("2026-08-23T10:11:12.130Z") }))
+      .toBe('{"at":"2026-08-23T10:11:12.130Z"}');
+  });
+
+  it("rejects every value JSON.stringify would silently drop or distort", () => {
+    expect(() => sqlJsonObjectMirrorV1(undefined)).toThrow(SqlJsonMirrorError);
+    expect(() => sqlJsonObjectMirrorV1({ a: undefined })).toThrow(SqlJsonMirrorError);
+    expect(() => sqlJsonObjectMirrorV1([undefined])).toThrow(SqlJsonMirrorError);
+    expect(() => sqlJsonObjectMirrorV1({ a: { b: [1, undefined] } }))
+      .toThrow(SqlJsonMirrorError);
+    expect(() => sqlJsonObjectMirrorV1(Number.NaN)).toThrow(SqlJsonMirrorError);
+    expect(() => sqlJsonObjectMirrorV1({ a: Number.POSITIVE_INFINITY }))
+      .toThrow(SqlJsonMirrorError);
+    expect(() => sqlJsonObjectMirrorV1([Number.NEGATIVE_INFINITY]))
+      .toThrow(SqlJsonMirrorError);
+    expect(() => sqlJsonObjectMirrorV1(() => 1)).toThrow(SqlJsonMirrorError);
+    expect(() => sqlJsonObjectMirrorV1({ a: () => 1 })).toThrow(SqlJsonMirrorError);
+    expect(() => sqlJsonObjectMirrorV1({ a: Symbol("s") })).toThrow(SqlJsonMirrorError);
+  });
+
+  it("rejects bigint so the caller converts it where the choice is visible", () => {
+    expect(() => sqlJsonObjectMirrorV1({ rows: 7n })).toThrow(SqlJsonMirrorError);
+    expect(() => sqlJsonObjectMirrorV1({ rows: 7n })).toThrow(/bigint/i);
+  });
+
+  it("names the offending path in the error message", () => {
+    expect(() => sqlJsonObjectMirrorV1({ a: { b: [1, Number.NaN] } }))
+      .toThrow(/\$\.a\.b\[1\]/);
+    expect(() => sqlJsonObjectMirrorV1({ a: undefined })).toThrow(/\$\.a/);
   });
 });

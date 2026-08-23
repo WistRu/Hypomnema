@@ -134,9 +134,12 @@ export function canonicalJsonV1(value: unknown): string {
 
 /** Raised when a value has no faithful SQLite `json_object(...)` byte mirror. */
 export class SqlJsonMirrorError extends TypeError {
-  constructor(message: string) {
-    super(message);
+  readonly path: string;
+
+  constructor(message: string, path: string) {
+    super(`${message} at ${path}`);
     this.name = "SqlJsonMirrorError";
+    this.path = path;
   }
 }
 
@@ -150,16 +153,49 @@ export class SqlJsonMirrorError extends TypeError {
  * `digestPrivacyPurgeExecutionTargets` must produce those exact bytes in TypeScript;
  * sorting the keys there makes the trigger reject every purge transition.
  * This is deliberately NOT a canonicalization — use
- * {@link canonicalJsonV1} for fingerprints that only TypeScript produces. `bigint` is
- * written as a decimal string, matching how SQLite renders an INTEGER in JSON.
+ * {@link canonicalJsonV1} for fingerprints that only TypeScript produces. Key order is
+ * the only thing it relaxes: like {@link researchCanonicalSha256PayloadV1} it refuses
+ * every value plain `JSON.stringify` would silently drop or distort — `undefined`,
+ * `NaN`, `Infinity`, `bigint`, functions, symbols — because these bytes are persisted
+ * as digests and a silent substitution here is undetectable afterwards. A caller that
+ * must mirror a `bigint` renders it exactly as the SQL side does, at the call site,
+ * where the choice is visible.
  */
 export function sqlJsonObjectMirrorV1(value: unknown): string {
-  const encoded = JSON.stringify(value, (_key, item: unknown) =>
-    typeof item === "bigint" ? item.toString(10) : item);
-  if (encoded === undefined) {
-    throw new SqlJsonMirrorError("Cannot mirror value as SQL JSON");
-  }
-  return encoded;
+  const mirror = (input: unknown, path: string): string => {
+    if (typeof input === "bigint") {
+      throw new SqlJsonMirrorError(
+        "Cannot mirror bigint (convert it to the exact SQL rendering first)", path);
+    }
+    if (typeof input === "undefined") {
+      throw new SqlJsonMirrorError("Cannot mirror undefined", path);
+    }
+    if (typeof input === "function" || typeof input === "symbol") {
+      throw new SqlJsonMirrorError(`Cannot mirror ${typeof input}`, path);
+    }
+    if (typeof input === "number" && !Number.isFinite(input)) {
+      throw new SqlJsonMirrorError("Cannot mirror non-finite number", path);
+    }
+    if (Array.isArray(input)) {
+      return `[${input.map((item, index) =>
+        mirror(item, `${path}[${index}]`)).join(",")}]`;
+    }
+    if (input !== null && typeof input === "object") {
+      const candidate = input as { toJSON?: unknown };
+      if (typeof candidate.toJSON === "function") {
+        return mirror((candidate.toJSON as (key?: string) => unknown).call(input), path);
+      }
+      const record = input as Record<string, unknown>;
+      return `{${Object.keys(record).map((key) =>
+        `${JSON.stringify(key)}:${mirror(record[key], `${path}.${key}`)}`).join(",")}}`;
+    }
+    const encoded = JSON.stringify(input);
+    if (encoded === undefined) {
+      throw new SqlJsonMirrorError("Cannot mirror value", path);
+    }
+    return encoded;
+  };
+  return mirror(value, "$");
 }
 
 export const researchCoverageSchema = z.strictObject({
