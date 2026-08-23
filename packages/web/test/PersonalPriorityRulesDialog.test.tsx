@@ -49,7 +49,7 @@ const preview: Awaited<ReturnType<typeof previewRulesType>> = {
       needsReview: false, reasons: [], missingSignals: [] },
     after: { kind: "assessment", agentScore: 30, agentBand: "medium", confidence: 0.8,
       needsReview: false, reasons: [], missingSignals: [] } }],
-  eligibleCount: 1, scannedCount: 1, comparedActiveRef: baselineRef,
+  eligibleCount: 1, scannedCount: 1, strataCounts: { exclusionChanged: 0, bandChanged: 1, assessmentChanged: 0, unchanged: 0 }, comparedActiveRef: baselineRef,
   comparedActiveAstHash: "a".repeat(64), requestFingerprint: "c".repeat(64),
 };
 
@@ -287,5 +287,36 @@ describe("PersonalPriorityRulesDialog", () => {
       "Priority recompute finished: superseded",
     );
     expect(mocks.submitPriorityRecompute).not.toHaveBeenCalled();
+  });
+});
+
+describe("PersonalPriorityRulesDialog preview, in words", () => {
+  it("states how many pages change, and what each example becomes", async () => {
+    // The fixture's example moves low -> medium. A renderer that misreads the
+    // outcome shape would say "no assessment" both sides and look plausible,
+    // which is the failure that made hashes preferable to prose. Assert the
+    // rendered sentence, not the payload.
+    renderDialog();
+    const source = await screen.findByRole("textbox", { name: "Rule source" });
+    fireEvent.change(source, { target: { value:
+      "pages when is open equals true then score add 10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview changes" }));
+
+    expect(await screen.findByText("1 of 1 checked pages change with this rule.")).toBeTruthy();
+    expect(screen.getByText("Was importance: low, becomes importance: medium.")).toBeTruthy();
+    expect(screen.getByText("Moves to a different importance band")).toBeTruthy();
+  });
+
+  it("keeps the hashes reachable rather than deleting them", async () => {
+    renderDialog();
+    const source = await screen.findByRole("textbox", { name: "Rule source" });
+    fireEvent.change(source, { target: { value:
+      "pages when is open equals true then score add 10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview changes" }));
+
+    // Two disclosures carry the label: one for the preview as a whole, one per
+    // compiled rule. Both are deliberate; assert the hashes rather than the count.
+    expect((await screen.findAllByText("Technical detail")).length).toBeGreaterThan(0);
+    expect(screen.getByText("b".repeat(64))).toBeTruthy();
   });
 });

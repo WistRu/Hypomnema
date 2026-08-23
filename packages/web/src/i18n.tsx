@@ -46,6 +46,14 @@ function russianPlural(
 // locale branches.
 const russianMessages: Record<string, Message> = {
   "AI": "ИИ",
+  "AI assessment is turned off, so the AI has not ranked these pages.":
+    "Оценка ИИ выключена, поэтому ИИ эти страницы не ранжировал.",
+  "The AI has not assessed these pages yet.":
+    "ИИ ещё не оценил эти страницы.",
+  "This list is in the default order.":
+    "Список показан в порядке по умолчанию.",
+  "This list is ordered by the importance you set.":
+    "Список упорядочен по важности, которую задали вы.",
   "Activate saved version": "Активировать сохранённую версию",
   "Active version": "Активная версия",
   "All": "Все",
@@ -70,6 +78,24 @@ const russianMessages: Record<string, Message> = {
   "Natural language": "Естественный язык",
   "Personal priority rules": "Персональные правила приоритета",
   "Preview": "Предпросмотр",
+  "{changed} of {scanned} checked pages change with this rule.":
+    "С этим правилом меняются {changed} страниц из {scanned} проверенных.",
+  "No page changes with this rule. {scanned} pages were checked.":
+    "С этим правилом не меняется ни одна страница. Проверено страниц: {scanned}.",
+  "Examples of what changes": "Примеры того, что изменится",
+  "Technical detail": "Технические подробности",
+  "Was {before}, becomes {after}.": "Было: {before}. Станет: {after}.",
+  "Stops being excluded, or starts being excluded":
+    "Меняется признак исключения из приоритета",
+  "Moves to a different importance band": "Переходит в другую группу важности",
+  "Keeps its band, but the assessment changes":
+    "Группа важности та же, меняется оценка",
+  "Unchanged": "Без изменений",
+  "excluded from priority": "исключена из приоритета",
+  "importance: low": "важность: низкая",
+  "importance: medium": "важность: средняя",
+  "importance: high": "важность: высокая",
+  "importance: critical": "важность: критическая",
   "Preview changes": "Предпросмотр изменений",
   "Preview rollback": "Предпросмотр отката",
   "Priority order": "Порядок приоритета",

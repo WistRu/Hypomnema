@@ -93,6 +93,12 @@ describe("C60c shared personal-priority acceptance", () => {
       comparedActiveAstHash: "e".repeat(64),
       diff: { added: [], changed: [], removed: [] },
       eligibleCount: 1,
+      strataCounts: {
+        exclusionChanged: 0,
+        bandChanged: 1,
+        assessmentChanged: 0,
+        unchanged: 0,
+      },
       examples: [{
         logicalPageId: 7,
         display: {

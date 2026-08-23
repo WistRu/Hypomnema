@@ -99,7 +99,7 @@ describe("priority personalization API", () => {
       compiler: { kind: "structured", compilerVersion: null, sourceSpans: [], readableRules: [] },
       candidate: { additions: [], astHash: "b".repeat(64), naturalLanguageSource: null,
         totalRuleCount: 8 },
-      diff: { added: [], changed: [], removed: [] }, examples: [], eligibleCount: 0,
+      diff: { added: [], changed: [], removed: [] }, examples: [], eligibleCount: 0, strataCounts: { exclusionChanged: 0, bandChanged: 0, assessmentChanged: 0, unchanged: 0 },
       scannedCount: 0, comparedActiveRef: activeRef, comparedActiveAstHash: "a".repeat(64),
       requestFingerprint: "c".repeat(64),
     };

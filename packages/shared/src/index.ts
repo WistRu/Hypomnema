@@ -2765,6 +2765,15 @@ export const personalPriorityPreviewOutcomeSchema = z.discriminatedUnion("kind",
   personalPriorityPreviewExclusionSchema,
 ]);
 
+/**
+ * Exported so a reader of a preview outcome is type-checked against the real
+ * discriminants. A structurally loose local type let a renderer test for a
+ * `kind` that does not exist and silently label every outcome "no assessment".
+ */
+export type PersonalPriorityPreviewOutcome = z.infer<
+  typeof personalPriorityPreviewOutcomeSchema
+>;
+
 export const personalPriorityPreviewRequestSchema = z.object({
   draft: personalPriorityDraftSchema,
 }).strict();
@@ -2793,6 +2802,18 @@ export const personalPriorityPreviewResponseSchema = z.object({
   }).strict()).max(20),
   eligibleCount: z.number().int().nonnegative().max(10_000),
   scannedCount: z.number().int().nonnegative().max(10_000),
+  /**
+   * How many evaluated pages fall in each stratum, counted before the example
+   * list is truncated to a sample. Without this a reader can see twenty
+   * examples but not learn whether the rule touches twenty pages or two
+   * thousand, which is the question they need answered before activating it.
+   */
+  strataCounts: z.object({
+    exclusionChanged: z.number().int().nonnegative().max(10_000),
+    bandChanged: z.number().int().nonnegative().max(10_000),
+    assessmentChanged: z.number().int().nonnegative().max(10_000),
+    unchanged: z.number().int().nonnegative().max(10_000),
+  }).strict(),
   comparedActiveRef: priorityRulesetRefContractSchema,
   comparedActiveAstHash: durableFingerprintSchema,
   requestFingerprint: durableFingerprintSchema,

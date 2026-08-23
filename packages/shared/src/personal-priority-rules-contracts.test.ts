@@ -107,11 +107,22 @@ describe("personal priority rules contracts", () => {
       examples: [],
       eligibleCount: 0,
       scannedCount: 0,
+      strataCounts: {
+        exclusionChanged: 0,
+        bandChanged: 0,
+        assessmentChanged: 0,
+        unchanged: 0,
+      },
       comparedActiveRef: { rulesetId: 1, version: 1 },
       comparedActiveAstHash: "d".repeat(64),
       requestFingerprint: "c".repeat(64),
     });
     expect(preview.examples).toHaveLength(0);
+    // The sample may be empty or truncated; the counts must still say how
+    // many pages a rule touches, which is what a reader decides on.
+    expect(preview.strataCounts).toEqual({
+      exclusionChanged: 0, bandChanged: 0, assessmentChanged: 0, unchanged: 0,
+    });
     expect(preview.candidate.totalRuleCount).toBe(9);
   });
 });

@@ -516,6 +516,12 @@ export function createPersonalPriorityRulesCatalog(
       diff: diffRules(active, candidate.ast),
       examples: selectedWithDisplay,
       eligibleCount: examples.length,
+      strataCounts: {
+        exclusionChanged: examples.filter((e) => e.stratum === "exclusion_changed").length,
+        bandChanged: examples.filter((e) => e.stratum === "band_changed").length,
+        assessmentChanged: examples.filter((e) => e.stratum === "assessment_changed").length,
+        unchanged: examples.filter((e) => e.stratum === "unchanged").length,
+      },
       scannedCount,
       comparedActiveRef: comparedActive.ref,
       comparedActiveAstHash: sha256(canonicalPriorityRuleAstJson(comparedActive.ast)),

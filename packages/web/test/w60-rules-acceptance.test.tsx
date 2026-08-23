@@ -176,7 +176,7 @@ describe("W60 rules and durable recompute acceptance", () => {
       candidate: { additions: [], astHash: "b".repeat(64), naturalLanguageSource: null,
         totalRuleCount: 8 },
       diff: { added: [], changed: [], removed: [] },
-      examples: [], eligibleCount: 0, scannedCount: 0,
+      examples: [], eligibleCount: 0, scannedCount: 0, strataCounts: { exclusionChanged: 0, bandChanged: 0, assessmentChanged: 0, unchanged: 0 },
       comparedActiveRef: baselineRef, comparedActiveAstHash: "a".repeat(64),
       requestFingerprint: "c".repeat(64),
     });

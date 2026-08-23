@@ -5,6 +5,7 @@ import {
   applyPrioritySelection,
   derivePriorityCapabilities,
   resourceEvaluationIdempotencyKey,
+  aiOrderingNotice,
 } from "../src/priority-personalization-model";
 
 describe("priority personalization model", () => {
@@ -72,5 +73,50 @@ describe("priority personalization model", () => {
       .resolves.toBe(await resourceEvaluationIdempotencyKey("bulk-17", 22, null));
     await expect(resourceEvaluationIdempotencyKey("bulk-17", 22, 3))
       .resolves.not.toBe(await resourceEvaluationIdempotencyKey("bulk-17", 23, 3));
+  });
+});
+
+describe("aiOrderingNotice", () => {
+  const page = (logicalPageId: number, outcome: unknown) => ({
+    subject: { type: "page" as const, logicalPageId },
+    outcome,
+    isCurrent: true,
+    dirty: false,
+    needsReview: false,
+  }) as never;
+  const anOutcome = { band: "high", score: 70 };
+
+  it("says nothing for orderings that do not depend on the AI", () => {
+    expect(aiOrderingNotice("default", [page(1, null)], false)).toBeNull();
+    expect(aiOrderingNotice("my", [page(1, null)], false)).toBeNull();
+  });
+
+  it("says nothing while there is no read to judge by", () => {
+    // An empty batch means "not loaded" or "nothing visible", not "no AI data".
+    // Claiming degeneracy here would flash a false notice on every load.
+    expect(aiOrderingNotice("ai", [], false)).toBeNull();
+  });
+
+  it("says nothing when at least one subject carries an AI outcome", () => {
+    expect(aiOrderingNotice("ai", [page(1, null), page(2, anOutcome)], false)).toBeNull();
+    expect(aiOrderingNotice("recommended", [page(1, anOutcome)], false)).toBeNull();
+  });
+
+  it("names the writer being off, and what the list is actually ordered by", () => {
+    expect(aiOrderingNotice("ai", [page(1, null), page(2, null)], false)).toEqual({
+      reason: "writer_off",
+      shownInstead: "default",
+    });
+    expect(aiOrderingNotice("recommended", [page(1, null)], false)).toEqual({
+      reason: "writer_off",
+      shownInstead: "my",
+    });
+  });
+
+  it("distinguishes a writer that is on but has not assessed anything yet", () => {
+    expect(aiOrderingNotice("ai", [page(1, null)], true)).toEqual({
+      reason: "not_assessed_yet",
+      shownInstead: "default",
+    });
   });
 });

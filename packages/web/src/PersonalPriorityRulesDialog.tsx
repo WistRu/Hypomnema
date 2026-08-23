@@ -3,6 +3,7 @@ import {
   personalPriorityNaturalLanguageGrammarV1,
   type PersonalPriorityDraft,
   type PersonalPriorityLifecycleRequest,
+  type PersonalPriorityPreviewOutcome,
 } from "@tabhub/shared";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -57,6 +58,36 @@ function errorSourceSpan(cause: unknown) {
     : undefined;
 }
 
+
+/** The wire words for a preview stratum are enum values; these are the human ones. */
+function stratumLabel(stratum: string): string {
+  return stratum === "exclusion_changed"
+    ? "Stops being excluded, or starts being excluded"
+    : stratum === "band_changed"
+      ? "Moves to a different importance band"
+      : stratum === "assessment_changed"
+        ? "Keeps its band, but the assessment changes"
+        : "Unchanged";
+}
+
+const bandLabels = {
+  low: "importance: low",
+  medium: "importance: medium",
+  high: "importance: high",
+  critical: "importance: critical",
+} as const;
+
+/**
+ * Typed against the real union rather than a structural guess: an earlier
+ * loose type let this test for a discriminant that does not exist, so every
+ * example read "no assessment" while the fixture said otherwise.
+ */
+function outcomeLabel(outcome: PersonalPriorityPreviewOutcome): string {
+  return outcome.kind === "exclusion"
+    ? "excluded from priority"
+    : bandLabels[outcome.agentBand];
+}
+
 export function PersonalPriorityRulesDialog({
   canMutateAndRecompute,
   onDismiss,
@@ -66,7 +97,7 @@ export function PersonalPriorityRulesDialog({
   readonly onDismiss: () => void;
   readonly trigger?: HTMLElement | null;
 }) {
-  const { errorMessage, locale, t } = useI18n();
+  const { errorMessage, formatNumber, locale, t } = useI18n();
   const queryClient = useQueryClient();
   const dialogRef = useRef<HTMLElement>(null);
   const editorRevision = useRef(0);
@@ -297,10 +328,32 @@ export function PersonalPriorityRulesDialog({
           {preview !== null ? (
             <section aria-live="polite" className="priority-rules-preview">
               <h3>{t("Preview")}</h3>
-              <p>{t("Compared with active version")}: {preview.comparedActiveRef.rulesetId}/
-                {preview.comparedActiveRef.version}</p>
-              <p>{t("Candidate hash")}: <code>{preview.candidate.astHash}</code></p>
-              <p>{t("Compared active AST hash")}: <code>{preview.comparedActiveAstHash}</code></p>
+              {/* Issue #34: the decision this screen exists for is "should I
+                  turn this on", so the answer to it leads and the machinery
+                  that proves it moves below a disclosure. */}
+              <p className="priority-rules-impact">
+                {(() => {
+                  const c = preview.strataCounts;
+                  const changed = c.exclusionChanged + c.bandChanged + c.assessmentChanged;
+                  return changed === 0
+                    ? t("No page changes with this rule. {scanned} pages were checked.", {
+                        scanned: formatNumber(preview.scannedCount),
+                      })
+                    : t("{changed} of {scanned} checked pages change with this rule.", {
+                        changed: formatNumber(changed),
+                        scanned: formatNumber(preview.scannedCount),
+                      });
+                })()}
+              </p>
+              {/* Kept, not dropped: this repo verifies by hash, so the audit
+                  trail has to stay reachable — just not ahead of the answer. */}
+              <details className="priority-rules-technical">
+                <summary>{t("Technical detail")}</summary>
+                <p>{t("Compared with active version")}: {preview.comparedActiveRef.rulesetId}/
+                  {preview.comparedActiveRef.version}</p>
+                <p>{t("Candidate hash")}: <code>{preview.candidate.astHash}</code></p>
+                <p>{t("Compared active AST hash")}: <code>{preview.comparedActiveAstHash}</code></p>
+              </details>
               <ul>{preview.compiler.readableRules.map((readable) => {
                 const compiled = preview.candidate.additions.find(({ ruleKey }) =>
                   ruleKey === readable.ruleKey);
@@ -312,16 +365,24 @@ export function PersonalPriorityRulesDialog({
                     ? null : <span>{t("Compiled source")}: <code>{
                       sourceAtCodePointSpan(preview.candidate.naturalLanguageSource, spans.rule)
                     }</code></span>}
-                  {compiled === undefined ? null : <>
-                    <span>{t("Compiled conditions")}: <code>{JSON.stringify(compiled.when.all)}</code></span>
-                    <span>{t("Compiled effects")}: <code>{JSON.stringify(compiled.effect)}</code></span>
-                  </>}
+                  {compiled === undefined ? null : (
+                    <details className="priority-rules-technical">
+                      <summary>{t("Technical detail")}</summary>
+                      <span>{t("Compiled conditions")}: <code>{JSON.stringify(compiled.when.all)}</code></span>
+                      <span>{t("Compiled effects")}: <code>{JSON.stringify(compiled.effect)}</code></span>
+                    </details>
+                  )}
                 </li>;
               })}</ul>
-              <ul>{preview.examples.map((example) => <li key={example.logicalPageId}>
+              <p className="priority-rules-sample-heading">{t("Examples of what changes")}</p>
+              <ul className="priority-rules-examples">{preview.examples.map((example) => <li key={example.logicalPageId}>
                 <strong>{example.display.title ?? t("Untitled")}</strong>
                 <span>{example.display.representativeUrl}</span>
-                <span>{example.stratum}</span>
+                <span>{t(stratumLabel(example.stratum))}</span>
+                <span>{t("Was {before}, becomes {after}.", {
+                  before: t(outcomeLabel(example.before)),
+                  after: t(outcomeLabel(example.after)),
+                })}</span>
               </li>)}</ul>
               <button disabled={!previewIsFresh || previewedDraft === null || lifecycleMutation.isPending} type="button"
                 onClick={() => lifecycleMutation.mutate({ kind: "save", draft: previewedDraft!,

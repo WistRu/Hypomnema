@@ -93,6 +93,7 @@ import {
   applyPrioritySelection,
   derivePriorityCapabilities,
   type PriorityListSelection,
+  aiOrderingNotice,
 } from "./priority-personalization-model";
 import {
   resolveCanonicalPrioritySelection,
@@ -819,6 +820,17 @@ export function App() {
   const priorityReads = useMemo(
     () => priorityReadMap(priorityReadsQuery.isSuccess ? priorityReadsQuery.data : []),
     [priorityReadsQuery.data, priorityReadsQuery.isSuccess],
+  );
+  // Issue #35: the AI and Recommended orderings look deliberate even when
+  // nothing has been assessed. Say so rather than let the reader infer a
+  // judgement the AI never made.
+  const aiOrderingWarning = useMemo(
+    () => aiOrderingNotice(
+      prioritySelection.mode,
+      priorityReads.values(),
+      priorityCapabilities.writer,
+    ),
+    [prioritySelection.mode, priorityReads, priorityCapabilities.writer],
   );
   const libraryPhysicalResolutionAvailable =
     libraryOpenTabsQuery.data !== undefined && !libraryOpenTabsQuery.isError;
@@ -1664,6 +1676,20 @@ export function App() {
                     <button type="button" onClick={() => setRulesDialogOpen(true)}>
                       {t("Personal priority rules")}
                     </button>
+                    {aiOrderingWarning ? (
+                      <p className="priority-degenerate-notice" role="status">
+                        {t(
+                          aiOrderingWarning.reason === "writer_off"
+                            ? "AI assessment is turned off, so the AI has not ranked these pages."
+                            : "The AI has not assessed these pages yet.",
+                        )}{" "}
+                        {t(
+                          aiOrderingWarning.shownInstead === "default"
+                            ? "This list is in the default order."
+                            : "This list is ordered by the importance you set.",
+                        )}
+                      </p>
+                    ) : null}
                   </div>
                 ) : null}
                 <label className="search-field">
