@@ -1,0 +1,55 @@
+{
+ "version": 1,
+ "recordedAt": "2026-08-23T17:06:30Z",
+ "scope": "trial_week_runtime_redeploy_no_schema_change",
+ "reason": "Third redeploy of the day, still before the Trial week began counting. It carries automatic browser detection and the Library pairing banner. Deploying is what makes the user's own condition checkable — they asked that the browser be detected *correctly*, and that can only be compared against their real installs from a running build.",
+ "repositoryHead": "fe36d6a",
+ "previousRepositoryHead": "89e135efb112146202119ee7e472bb290b0d1440",
+ "schemaChange": "none; database stayed at user_version 26 and no migration ran",
+ "preRedeploy": {
+  "backupPath": "backups/tabhub-2026-08-23T17-05-29.024Z.sqlite",
+  "backupSha256": "3ec29e798b647bfc5d69be23179fa28becaa0982b6ede4c894734f11f025adba",
+  "backupSchemaVersion": 26,
+  "backupIntegrityCheck": "ok",
+  "backupForeignKeyViolations": 0,
+  "backupRowCounts": {
+   "tabs": 2269
+  },
+  "databaseSha256": "6215daeedfe55cfa27c9f4d30adc8d3a0250aad6b5449bad2812edcf94579f47"
+ },
+ "processes": {
+  "oldPid": 676880,
+  "newPid": 904356,
+  "port": "127.0.0.1:7717",
+  "listeningVerified": true
+ },
+ "postRedeploy": {
+  "health": {
+   "status": "ok",
+   "database": "ok",
+   "schemaVersion": 26
+  },
+  "databaseSha256": "8dff92c6d2a00d74d5eb90b2e39c818b87f73e646e48cc88c2afa9ed84c5564c",
+  "databaseSha256Unchanged": false,
+  "databaseHashNote": "Unlike the two earlier redeploys today the main database file hash moved, because the runtime is continuously ingesting tabs from the connected extensions and the restart checkpointed the write-ahead log into the main file. Schema, integrity and the feature projection are unchanged; this is ordinary write activity, not a migration, and the pre-redeploy hash above plus the verified backup remain the rollback anchor.",
+  "libraryRead": 200,
+  "tabsApiRead": 200
+ },
+ "featureProjectionUnchanged": true,
+ "servedBundleVerified": {
+  "asset": "/app/assets/index-CHupEPfL.js",
+  "bytes": 965552,
+  "containsPairingBannerCopy": true,
+  "note": "Fetched from the running server, not read from disk."
+ },
+ "deploymentWaiver": "unchanged; research, live acquisition and privacy purge stay feature-off, G9 stays PENDING",
+ "rollbackRecipe": "unchanged; feature-off on schema 26. No restore performed and none authorised.",
+ "trialWeek": "not started; still gated on issue #12",
+ "secretsRecorded": false,
+ "verdict": "PASS_WITH_UNPROVEN_ITEMS",
+ "unprovenAtRedeploy": [
+  "browser detection has NOT been compared against this machine's real installs; that comparison is the point of the deploy and needs the extensions reloaded first",
+  "the pairing banner has not been seen in any browser, since the installed extensions predate the probe field it keys on",
+  "activityDailyWriter, which /api/features does not project"
+ ]
+}
