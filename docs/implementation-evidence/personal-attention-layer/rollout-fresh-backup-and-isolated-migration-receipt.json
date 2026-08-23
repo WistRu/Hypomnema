@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "recordedAt": "2026-08-23T02:17:00Z",
+  "scope": "same_day_fresh_backup_and_isolated_17_to_26_migration_before_rollout",
+  "issue": "https://github.com/WistRu/Hypomnema/issues/10",
+  "parentIssue": "https://github.com/WistRu/Hypomnema/issues/2",
+  "repositoryHead": "d2579aaa71a1f5615a54a51d4e778f857e66864b",
+  "buildCommand": "corepack pnpm build",
+  "buildArtifact": "packages/server/dist/main.js",
+  "liveDatabaseWritten": false,
+  "browserTouched": false,
+  "quiescence": {
+    "note": "The daily runtime was stopped before the backup so the backup and the hashes are taken against a quiescent database.",
+    "stoppedPid": 581820,
+    "stoppedProcessStartedAt": "2026-08-12T12:22:02+03:00",
+    "stopCommand": "taskkill /PID 581820",
+    "walCheckpointedOnNextOpen": true
+  },
+  "liveDatabase": {
+    "path": "data/tabhub.sqlite",
+    "sha256BeforeProof": "9077d22772098fbb35d046930e713e7800cf806fcefd52e7c7ad89f4ebb54830",
+    "sha256AfterProof": "9077d22772098fbb35d046930e713e7800cf806fcefd52e7c7ad89f4ebb54830",
+    "unchangedByThisProof": true,
+    "bytes": 5644288,
+    "schemaVersion": 17,
+    "integrityCheck": "ok",
+    "foreignKeyViolations": 0,
+    "tableCount": 28,
+    "rowCounts": {
+      "tabs": 2198,
+      "tab_instances": 1154,
+      "tags": 26,
+      "tab_tags": 2285
+    }
+  },
+  "freshBackup": {
+    "path": "backups/tabhub-2026-08-23T02-16-12.227Z.sqlite",
+    "command": "corepack pnpm backup",
+    "method": "better-sqlite3 online backup",
+    "sha256": "36d765af707cb16c7820b314858caebbab69104466f60d05ff4cc119a5cc9a12",
+    "bytes": 5644288,
+    "schemaVersion": 17,
+    "integrityCheck": "ok",
+    "foreignKeyViolations": 0,
+    "tableCount": 28,
+    "rowCounts": {
+      "tabs": 2198,
+      "tab_instances": 1154,
+      "tags": 26,
+      "tab_tags": 2285
+    },
+    "supersedes": "backups/tabhub-2026-08-12T15-44-44.092Z.sqlite (stale, not used as the pre-rollout backup)"
+  },
+  "isolatedCopy": {
+    "note": "Throwaway copy of the fresh backup outside the repository; never the live file.",
+    "sha256BeforeMigration": "36d765af707cb16c7820b314858caebbab69104466f60d05ff4cc119a5cc9a12",
+    "sha256AfterMigration": "4e64d6c218e8e9748342ea77bd68615d4d38b370a4067fc577f042361eff0955",
+    "sha256AfterMigrationCaveat": "Taken with an uncheckpointed -wal beside the file after a forced stop of the smoke process; the reported state is read through that WAL.",
+    "bytesAfterMigration": 14065664,
+    "schemaVersionAfter": 26,
+    "integrityCheck": "ok",
+    "foreignKeyViolations": 0,
+    "tableCountBefore": 28,
+    "tableCountAfter": 167,
+    "tablesAdded": 139,
+    "tablesRemoved": [],
+    "rowCountsAfter": {
+      "tabs": 2198,
+      "tab_instances": 1154,
+      "tags": 26,
+      "tab_tags": 2285
+    },
+    "rowCountsUnchanged": true
+  },
+  "featureOffSmoke": {
+    "note": "Rollback (feature-off on schema 26) proven on the migrated copy before the live migration.",
+    "port": 7798,
+    "pid": 107020,
+    "environmentFile": "none present; every feature flag resolves to its fail-closed default false",
+    "health": {
+      "status": "ok",
+      "database": "ok",
+      "schemaVersion": 26
+    },
+    "features": {
+      "context": false,
+      "logicalImportance": false,
+      "liveAcquisition": false,
+      "resources": false,
+      "activityWindows": false,
+      "agentUserImportance": false,
+      "pageSummaryCapture": false,
+      "priorityAssessmentWriter": false,
+      "priorityPersonalization": false,
+      "priorityReaders": false,
+      "priorityShadow": false,
+      "privacyPurge": false,
+      "research": false
+    },
+    "libraryRead": {
+      "route": "GET /api/tabs?limit=1",
+      "statusCode": 200
+    }
+  },
+  "secretsRecorded": false,
+  "verdict": "PASS"
+}

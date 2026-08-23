@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "recordedAt": "2026-08-23T02:20:00Z",
+  "scope": "live_rollout_17_to_26_and_trial_week_runtime_start",
+  "issue": "https://github.com/WistRu/Hypomnema/issues/11",
+  "parentIssue": "https://github.com/WistRu/Hypomnema/issues/2",
+  "precedingReceipt": "docs/implementation-evidence/personal-attention-layer/rollout-fresh-backup-and-isolated-migration-receipt.json",
+  "repositoryHead": "d2579aaa71a1f5615a54a51d4e778f857e66864b",
+  "buildCommand": "corepack pnpm build",
+  "buildArtifact": "packages/server/dist/main.js",
+  "preRollout": {
+    "backupPath": "backups/tabhub-2026-08-23T02-16-12.227Z.sqlite",
+    "backupSha256": "36d765af707cb16c7820b314858caebbab69104466f60d05ff4cc119a5cc9a12",
+    "databaseSha256": "9077d22772098fbb35d046930e713e7800cf806fcefd52e7c7ad89f4ebb54830",
+    "databaseBytes": 5644288,
+    "schemaVersion": 17,
+    "integrityCheck": "ok",
+    "foreignKeyViolations": 0,
+    "tableCount": 28,
+    "rowCounts": { "tabs": 2198, "tab_instances": 1154, "tags": 26, "tab_tags": 2285 }
+  },
+  "processes": {
+    "oldPid": 581820,
+    "oldProcessStartedAt": "2026-08-12T12:22:02+03:00",
+    "oldProcessSchemaVersion": 17,
+    "oldProcessStopCommand": "taskkill /PID 581820",
+    "newPid": 1099148,
+    "port": 7717,
+    "host": "127.0.0.1",
+    "startCommand": "node packages/server/dist/main.js",
+    "stdoutLog": "data/rollout-2026-08-23.stdout.log",
+    "stderrLog": "data/rollout-2026-08-23.stderr.log",
+    "stderrEmpty": true
+  },
+  "postRollout": {
+    "databaseSha256": "554d2fa2b28b0eb5937dbacc1fa39cd5240ccc55f8a9ac004982d309edac3371",
+    "databaseSha256Caveat": "Taken while the Trial-week runtime is running and holding a WAL; a point-in-time hash of the main file, not a quiescent one.",
+    "databaseBytes": 15511552,
+    "schemaVersion": 26,
+    "integrityCheck": "ok",
+    "foreignKeyViolations": 0,
+    "tableCount": 167,
+    "rowCounts": { "tabs": 2198, "tab_instances": 1154, "tags": 26, "tab_tags": 2285 },
+    "rowCountsUnchangedByMigration": true
+  },
+  "health": {
+    "route": "GET /api/health",
+    "status": "ok",
+    "database": "ok",
+    "schemaVersion": 26
+  },
+  "features": {
+    "route": "GET /api/features",
+    "observedFromRuntime": true,
+    "context": true,
+    "logicalImportance": true,
+    "resources": true,
+    "activityWindows": true,
+    "agentUserImportance": true,
+    "priorityPersonalization": true,
+    "priorityReaders": true,
+    "priorityShadow": true,
+    "liveAcquisition": false,
+    "pageSummaryCapture": false,
+    "priorityAssessmentWriter": false,
+    "privacyPurge": false,
+    "research": false
+  },
+  "featureFlagNotes": {
+    "environmentFile": ".env (gitignored) written for the Trial-week profile",
+    "activityDailyWriter": "TABHUB_FEATURE_ACTIVITY_DAILY_WRITER=true in .env; GET /api/features does not project this flag, so it is observable only through the environment and through daily activity rows",
+    "agentUserImportance": "derived capability, true because schema >= 23 and logicalImportance/resources are on",
+    "providerCredential": "none configured; no ANTHROPIC_API_KEY or research pricing values are present, so no paid Provider call can happen"
+  },
+  "libraryRead": { "route": "GET /api/tabs?limit=1", "statusCode": 200 },
+  "mcpSmoke": {
+    "transport": "stdio",
+    "artifact": "packages/mcp/dist/main.js",
+    "initialize": "ok",
+    "serverInfo": { "name": "tabhub", "version": "0.1.0" },
+    "toolCount": 32,
+    "toolCalls": [
+      { "name": "get_stats", "isError": false, "observed": "total 2198 tabs, open 1111" },
+      { "name": "list_resources", "isError": false, "observed": "resources materialized on the live database at 2026-08-23T02:19:09Z" }
+    ]
+  },
+  "extension": {
+    "manualReloadPerformed": false,
+    "observedReconnection": true,
+    "note": "The already-installed extension reconnected to the new runtime on its own; three ESTABLISHED loopback connections to PID 1099148 were observed from the browser process. A deliberate manual reload and the live J1/J2/J4 journeys are owned by the user and are not claimed here."
+  },
+  "deploymentWaiver": {
+    "recordedAt": "2026-08-23",
+    "modules": ["research", "liveAcquisition", "privacyPurge"],
+    "alsoOffForTheTrialWeek": ["pageSummaryCapture", "priorityAssessmentWriter"],
+    "gateG9": "PENDING",
+    "finalGate": "not claimed"
+  },
+  "rollbackRecipe": "docs/personal-attention-layer-rollback-recipe.md",
+  "secretsRecorded": false,
+  "verdict": "PASS"
+}
