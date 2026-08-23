@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import Database from "better-sqlite3";
+import * as sqliteVec from "sqlite-vec";
 import { describe, expect, it } from "vitest";
 
 import { createApp } from "../src/app.js";
@@ -14,9 +15,53 @@ import { personalAttentionFeatureFlagsOff } from "../src/attention-feature-flags
 const livePath = fileURLToPath(new URL("../../../data/tabhub.sqlite", import.meta.url));
 const envExamplePath = fileURLToPath(new URL("../../../.env.example", import.meta.url));
 
+/**
+ * The runbook forbids the live database as a migration test target, so the ordinary
+ * test run must never open it. Proving the migration against real data is a deliberate
+ * act: set `TABHUB_PROVE_LIVE_MIGRATION=1` for that one run. Any other value is a typo
+ * and fails rather than quietly disabling the proof.
+ */
+const optIn = process.env.TABHUB_PROVE_LIVE_MIGRATION;
+const proveAgainstLiveDatabase = optIn === "1";
+
 async function sha256File(path: string): Promise<string> {
   return createHash("sha256").update(await readFile(path)).digest("hex");
 }
+
+function tableRowCounts(
+  connection: Database.Database,
+): ReadonlyMap<string, number> {
+  const tables = (connection.prepare(`
+    SELECT name FROM sqlite_master
+    WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+    ORDER BY name
+  `).pluck().all() as string[]);
+  return new Map(tables.map((table) => [
+    table,
+    Number(connection.prepare(`SELECT COUNT(*) FROM "${table}"`).pluck().get()),
+  ]));
+}
+
+describe("live database migration proof gate", () => {
+  it("stays opt-in and refuses to be enabled by a typo", () => {
+    expect(
+      optIn === undefined || optIn === "1",
+      `TABHUB_PROVE_LIVE_MIGRATION must be unset or "1", got ${String(optIn)}`,
+    ).toBe(true);
+  });
+
+  it("finds the live database whenever the proof is switched on", () => {
+    if (!proveAgainstLiveDatabase) {
+      // Nothing to look for: the proof below is skipped, and the skip is reported.
+      expect(proveAgainstLiveDatabase).toBe(false);
+      return;
+    }
+    expect(
+      existsSync(livePath),
+      `TABHUB_PROVE_LIVE_MIGRATION=1 but there is no live database at ${livePath}`,
+    ).toBe(true);
+  });
+});
 
 /**
  * Rollout gate: the migration that will run against the user's daily database is
@@ -26,24 +71,24 @@ async function sha256File(path: string): Promise<string> {
  * The copy is taken through SQLite's online backup API, so the running daily server
  * may keep writing to the live file while this test runs.
  */
-describe.skipIf(!existsSync(livePath))("live database migration 17 -> 26", () => {
+describe.skipIf(!proveAgainstLiveDatabase)("live database migration 17 -> 26", () => {
   it("migrates an isolated copy and keeps feature-off Library reads working", async () => {
     const liveHashBefore = await sha256File(livePath);
     const directory = await mkdtemp(join(tmpdir(), "tabhub-live-migration-"));
     const copyPath = join(directory, "live-copy.sqlite");
     try {
       const source = new Database(livePath, { readonly: true });
+      sqliteVec.load(source);
       let sourceVersion: number;
-      let sourceTabCount: number;
+      let sourceRowCounts: ReadonlyMap<string, number>;
       try {
         sourceVersion = source.pragma("user_version", { simple: true }) as number;
-        sourceTabCount = Number(
-          source.prepare("SELECT COUNT(*) FROM tabs").pluck().get(),
-        );
+        sourceRowCounts = tableRowCounts(source);
         await source.backup(copyPath);
       } finally {
         source.close();
       }
+      expect(sourceRowCounts.size).toBeGreaterThan(0);
 
       // Before Rollout this is 17; after Rollout the live file is already at 26 and
       // the copy simply has nothing left to migrate. Both must end at 26.
@@ -70,12 +115,18 @@ describe.skipIf(!existsSync(livePath))("live database migration 17 -> 26", () =>
       }
 
       const migrated = new Database(copyPath, { readonly: true });
+      sqliteVec.load(migrated);
       try {
         expect(migrated.pragma("user_version", { simple: true })).toBe(26);
         expect(migrated.pragma("integrity_check", { simple: true })).toBe("ok");
         expect(migrated.pragma("foreign_key_check")).toEqual([]);
-        expect(Number(migrated.prepare("SELECT COUNT(*) FROM tabs").pluck().get()))
-          .toBe(sourceTabCount);
+
+        // Every table that existed before the migration must still hold exactly the
+        // rows it held, not just the ones a sample happened to cover.
+        const migratedRowCounts = tableRowCounts(migrated);
+        for (const [table, count] of sourceRowCounts) {
+          expect(migratedRowCounts.get(table), `row count for ${table}`).toBe(count);
+        }
       } finally {
         migrated.close();
       }

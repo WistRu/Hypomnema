@@ -72,7 +72,7 @@ Checkpoint никогда не заменяет evidence manifest. Он нуже
 - G9 не имеет extension packet: bounded live acquisition выполняется закрытым server-only transport, поэтому любое G9-изменение quarantined path является drift и останавливает packet;
 - неизвестное изменение quarantined file немедленно останавливает затронутый packet.
 
-Live `data/tabhub.sqlite` не используется как migration test target. Сначала создаются backup и disposable copy. После успешного proof Final Gate включает отдельный real rollout step либо получает явный `deployment_waiver` пользователя. Rollout evidence фиксирует pre-rollout DB hash/backup, build path, старый/новый PID, schemaVersion/health, fresh logs, extension reload и четыре live journeys.
+Live `data/tabhub.sqlite` не используется как migration test target. Обычный прогон тестов его не открывает: доказательство миграции на реальных данных включается отдельно, `TABHUB_PROVE_LIVE_MIGRATION=1`, и любое другое значение переменной останавливает прогон, чтобы опечатка не выключала проверку молча. Сначала создаются backup и disposable copy. После успешного proof Final Gate включает отдельный real rollout step либо получает явный `deployment_waiver` пользователя. Rollout evidence фиксирует pre-rollout DB hash/backup, build path, старый/новый PID, schemaVersion/health, fresh logs, extension reload и четыре live journeys.
 
 Субагенты не stage/commit/push. Root также не делает git commit без явной авторизации пользователя; если commits разрешены, root добавляет файлы только явным списком, никогда через `git add -A`.
 
