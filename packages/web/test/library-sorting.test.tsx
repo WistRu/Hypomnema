@@ -475,9 +475,13 @@ describe("Library column sorting", () => {
     );
     await queryClient.refetchQueries({ queryKey: ["features"] });
 
-    await waitFor(() => expect(mocks.fetchFeatureFlags).toHaveBeenCalledTimes(2));
-    expect(screen.queryByText("AI: 78")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Review AI priorities" })).toBeNull();
+    // Waiting for the fetch says the data arrived, not that React rendered it, so the
+    // DOM assertions wait for the render rather than for the request.
+    await waitFor(() => {
+      expect(mocks.fetchFeatureFlags).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText("AI: 78")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Review AI priorities" })).toBeNull();
+    });
     expect(screen.getByLabelText("Importance 2 of 3")).toBeTruthy();
 
     let resolveFeatures: ((value: FeatureFlagsResponse) => void) | undefined;

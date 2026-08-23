@@ -190,10 +190,16 @@ describe("TabDrawer page-summary capture capability", () => {
       await client.refetchQueries({ queryKey: ["features"] });
     });
 
-    expect(screen.queryByTestId("page-research-entry")).toBeNull();
-    expect(screen.queryByTestId("resource-research-entry")).toBeNull();
-    expect(screen.getByTestId("resource-research-history").getAttribute("data-enabled"))
-      .toBe("false");
+    // Refetching resolves when the query has new data, not when React has rendered
+    // it: the client notifies its subscribers through a batched scheduler, so the
+    // re-render is a task away and asserting synchronously here is a race the test
+    // loses under load.
+    await waitFor(() => {
+      expect(screen.queryByTestId("page-research-entry")).toBeNull();
+      expect(screen.queryByTestId("resource-research-entry")).toBeNull();
+      expect(screen.getByTestId("resource-research-history").getAttribute("data-enabled"))
+        .toBe("false");
+    });
   });
 
   it("explains a resolved but ineligible Resource without mounting its entry", async () => {
