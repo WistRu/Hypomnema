@@ -1,0 +1,73 @@
+{
+ "version": 1,
+ "recordedAt": "2026-08-23T21:09:30Z",
+ "recordedAtLocal": "2026-08-24 00:09 +0300",
+ "scope": "trial_week_runtime_redeploy_no_schema_change",
+ "reason": "Carries the #33 fix. Deliberately taken at the very start of Trial-week day 1, eight minutes past local midnight and before any use that day, so the whole week runs on one build. Without it the user would have spent seven days with a disposition control that silently stores nothing — the same class of defect as #35, and on the control that marks a page not worth attention.",
+ "repositoryHead": "4a90291",
+ "previousRepositoryHead": "d9193d4",
+ "schemaChange": "none; database stayed at user_version 26 and no migration ran",
+ "trialWeekFreezeAmended": {
+  "previouslyRecordedFrozenHead": "d9193d4",
+  "frozenHeadNow": "4a90291",
+  "why": "The runbook had recorded d9193d4 as the frozen build for the week and 2026-08-24 as day 1. The local date rolled over before this deploy, so the amendment is stated rather than glossed: day 1 is today and it runs on 4a90291 from its first minutes. No day of real use happened on d9193d4, so no counted day is split across builds and the seven-day count is not restarted."
+ },
+ "preRedeploy": {
+  "backupPath": "backups/tabhub-2026-08-23T21-08-53.588Z.sqlite",
+  "backupSha256": "2d91abd9f7d14ff1505fa456908f384ea4be984ca52cf240762650c563a86551",
+  "backupSchemaVersion": 26,
+  "backupIntegrityCheck": "ok",
+  "backupForeignKeyViolations": 0,
+  "backupRowCounts": {
+   "tabs": 2280
+  },
+  "databaseSha256": "93deb87c3c5bded59e224a59b52ad5161accd424b72fcbb514bea32eb8dd0e0e"
+ },
+ "processes": {
+  "oldPid": 432436,
+  "newPid": 6364,
+  "port": "127.0.0.1:7717",
+  "listeningVerified": true
+ },
+ "postRedeploy": {
+  "health": {
+   "status": "ok",
+   "database": "ok",
+   "schemaVersion": 26
+  },
+  "libraryRead": 200
+ },
+ "featureProjectionUnchanged": true,
+ "servedBundleVerified": {
+  "asset": "/app/assets/index-CfZQhYAB.js",
+  "bytes": 969689,
+  "containsNewStagingHint": true,
+  "containsSupersededHint": false,
+  "note": "Fetched from the running server, not read from disk."
+ },
+ "extension": {
+  "reloadRequired": false,
+  "reloadNote": "The extension package is untouched. Both extensions reconnected unaided at 21:09:12Z at protocol 5.",
+  "scopes": [
+   {
+    "browser": "edge",
+    "protocolVersion": 5,
+    "connectedAt": "2026-08-23T21:09:12Z"
+   },
+   {
+    "browser": "yandex",
+    "protocolVersion": 5,
+    "connectedAt": "2026-08-23T21:09:12Z"
+   }
+  ]
+ },
+ "deploymentWaiver": "unchanged; research, live acquisition and privacy purge stay feature-off, G9 stays PENDING",
+ "rollbackRecipe": "unchanged; feature-off on schema 26. No restore performed and none authorised.",
+ "secretsRecorded": false,
+ "verdict": "PASS_WITH_UNPROVEN_ITEMS",
+ "unprovenAtRedeploy": [
+  "the new staging hint has not been seen by a user in a browser",
+  "browser detection on chrome, the residue branch",
+  "activityDailyWriter, which /api/features does not project"
+ ]
+}
