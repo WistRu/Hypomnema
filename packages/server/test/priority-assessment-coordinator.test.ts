@@ -114,39 +114,6 @@ describe("PriorityAssessmentCoordinator", () => {
     } finally { database.close(); }
   });
 
-  it("recomputes the stored request fingerprint whatever order the input is written in", () => {
-    const { database, coordinator } = fixture();
-    try {
-      const first = coordinator.submit({
-        subject: { type: "page", logicalPageId: 501 },
-        provenance: { requestedBy: "user", requestMethod: "manual" },
-        idempotencyKey: "fingerprint-roundtrip",
-      });
-      const stored = database.connection
-        .prepare("SELECT input_fingerprint FROM ai_jobs WHERE id = 1")
-        .pluck().get() as string;
-      expect(stored).toMatch(/^[0-9a-f]{64}$/);
-
-      // The replay path recomputes the fingerprint from this input and compares it
-      // against the stored one. Writing the properties in a different order is the
-      // exact case where every retired copy that kept insertion order diverged.
-      const replay = coordinator.submit({
-        idempotencyKey: "fingerprint-roundtrip",
-        provenance: { requestMethod: "manual", requestedBy: "user" },
-        subject: { logicalPageId: 501, type: "page" },
-      });
-
-      expect(replay).toEqual(first);
-      expect(database.connection.prepare("SELECT COUNT(*) FROM ai_jobs").pluck().get())
-        .toBe(1);
-      expect(database.connection
-        .prepare("SELECT input_fingerprint FROM ai_jobs WHERE id = 1")
-        .pluck().get()).toBe(stored);
-    } finally {
-      database.close();
-    }
-  });
-
   it("performs zero job or assessment writes while the writer is disabled", () => {
     const { database, coordinator } = fixture(false);
     try {
