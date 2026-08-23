@@ -33,10 +33,14 @@ describe("live database migration proof gate", () => {
     ).toBe(true);
   });
 
-  it("finds the live database whenever the proof is switched on", () => {
+  it("finds the live database whenever the proof is switched on", (context) => {
     if (!proveAgainstLiveDatabase) {
-      // Nothing to look for: the proof below is skipped, and the skip is reported.
-      expect(proveAgainstLiveDatabase).toBe(false);
+      // A test that asserts a value equals itself passes whatever happens, which is
+      // the opposite of reporting. Skipping with a reason puts the fact in the run's
+      // own summary, where a reader looking for the proof will notice its absence.
+      context.skip(
+        "live migration proof not run: set TABHUB_PROVE_LIVE_MIGRATION=1 to run it",
+      );
       return;
     }
     expect(

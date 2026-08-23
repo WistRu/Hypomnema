@@ -8,6 +8,8 @@ import { describe, expect, it } from "vitest";
 
 import { sqlJsonObjectMirrorV1 as sqlJsonMirror } from "@tabhub/shared";
 
+import { assertPrivacyPurgeDeletionManifestFrozen } from
+  "../src/live-acquisition-migration.js";
 import { openDatabase } from "../src/database.js";
 
 const sha256 = (value: string): string =>
@@ -76,6 +78,42 @@ describe("migration 025 digest agreement", () => {
       } finally {
         fresh.close();
         migrated.close();
+      }
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  }, 120_000);
+
+  it("recomputes each stored trigger digest from the schema it pins", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tabhub-stored-digest-"));
+    try {
+      const path = await migratedDatabase(directory, "stored-digest.sqlite");
+      const connection = new Database(path);
+      try {
+        const stored = connection.prepare(`
+          SELECT trigger_name, trigger_sql_digest
+          FROM privacy_purge_deletion_manifest ORDER BY trigger_name
+        `).all() as { trigger_name: string; trigger_sql_digest: string }[];
+        expect(stored.length).toBeGreaterThan(0);
+
+        // Production reads each stored digest and recomputes it from the trigger SQL
+        // the schema actually holds. Nothing here restates the formula.
+        expect(() => assertPrivacyPurgeDeletionManifestFrozen(connection)).not.toThrow();
+
+        // The manifest row itself is frozen by its own trigger, so the way to prove
+        // the check is live is to move the other side: drop the trigger the digest
+        // pins and the recomputation no longer has anything to agree with.
+        const target = stored[0]!;
+        expect(() => connection.prepare(`
+          UPDATE privacy_purge_deletion_manifest
+          SET trigger_sql_digest = ? WHERE trigger_name = ?
+        `).run("0".repeat(64), target.trigger_name)).toThrow(/frozen/);
+
+        connection.exec(`DROP TRIGGER "${target.trigger_name}"`);
+        expect(() => assertPrivacyPurgeDeletionManifestFrozen(connection))
+          .toThrow(/drifted/);
+      } finally {
+        connection.close();
       }
     } finally {
       await rm(directory, { force: true, recursive: true });

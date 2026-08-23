@@ -704,7 +704,14 @@ function assertPrivacyPurgeTargetCatalogFrozen(
   }
 }
 
-function assertPrivacyPurgeDeletionManifestFrozen(
+/**
+ * Every deletion trigger the purge relies on is pinned twice: the manifest row carries
+ * a digest of the trigger's SQL, and the schema carries the SQL itself. Recomputing the
+ * digest from what the schema holds is how a trigger edited out from under the manifest
+ * is caught. Exported so the agreement between stored digest and live schema can be
+ * asserted on its own, without staging a whole purge to reach it.
+ */
+export function assertPrivacyPurgeDeletionManifestFrozen(
   connection: Database.Database,
 ): void {
   const rows = connection.prepare(`
