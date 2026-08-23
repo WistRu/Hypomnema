@@ -49,7 +49,7 @@
  "verdict": "PASS_WITH_UNPROVEN_ITEMS",
  "unprovenAtRedeploy": [
   "browser detection on chrome, whose branch is the residue case and the one most likely to mislabel",
-  "the pairing banner, which has not yet been seen in a browser",
+  "the pairing banner on yandex and chrome; verified on edge only",
   "activityDailyWriter, which /api/features does not project"
  ],
  "detectionVerification": {
@@ -77,5 +77,16 @@
   },
   "notCovered": "Chrome has not been reloaded and is not connected, so the residue branch — the one that names Chrome by the absence of any other brand — is still unverified on this machine. It is the branch most likely to mislabel, because every Chromium browser that hides its own token falls into it.",
   "sideEffect": "Reinstalling regenerated both installation ids, so both browsers lost their personal-context pairing. Two capability rows are now orphaned: 56024a43 (created 12:28:10Z) and 0bcfb199 (created 16:12:48Z). They can never authenticate again, because no live install presents those ids, and their secrets were only ever held by the erased extension copies."
+ },
+ "pairingBannerVerification": {
+  "verifiedAt": "2026-08-23T17:19:48Z",
+  "result": "PASS on edge",
+  "method": "The user opened the Library in Edge, which was unpaired after the reinstall, and the banner offered pairing without them navigating to a tab drawer. One click produced a capability row for the connected installation 5507a07a-2f23-4174-9428-cd5fbbddd592 and left zero open challenges, so the challenge was created and consumed inside that single action.",
+  "whatItProvesBeyondTheUi": "The one-click handover works end to end against the live runtime, and it works the way the security argument in docs/decisions.md claims: the page created a challenge bound to the probed installation and extension origin, handed it over the bridge, and `consumePairingChallenge` accepted it only because the extension presented its own browser-set Origin. No code was displayed and none was typed.",
+  "notYetExercised": "`last_used_at` on the new row is still null: a credential that has been issued but not yet spent on a personal-context call. It populates the first time the extension reads or writes context, which is the next step of journey J1.",
+  "orphansStillPresent": [
+   "56024a43-d689-452d-b638-750d53a06154",
+   "0bcfb199-d734-4935-a33d-0322fed0c75f"
+  ]
  }
 }
