@@ -64,63 +64,110 @@ export function researchContentDigestPayloadV1(text: string): Uint8Array {
   return new TextEncoder().encode(text);
 }
 
-/** Raised when a value cannot be canonicalized without silently changing its meaning. */
-export class CanonicalizationError extends TypeError {
+/** A value that has no faithful JSON form, and the path where it was found. */
+class JsonWalkError extends TypeError {
   readonly path: string;
 
-  constructor(message: string, path: string) {
+  constructor(message: string, path: string, name: string) {
     super(`${message} at ${path}`);
-    this.name = "CanonicalizationError";
+    this.name = name;
     this.path = path;
   }
 }
 
+/** Raised when a value cannot be canonicalized without silently changing its meaning. */
+export class CanonicalizationError extends JsonWalkError {
+  constructor(message: string, path: string) {
+    super(message, path, "CanonicalizationError");
+  }
+}
+
+/** Raised when a value has no faithful SQLite `json_object(...)` byte mirror. */
+export class SqlJsonMirrorError extends JsonWalkError {
+  constructor(message: string, path: string) {
+    super(message, path, "SqlJsonMirrorError");
+  }
+}
+
+interface JsonWalkContract {
+  /** Sorted for a fingerprint only TypeScript produces; kept for a SQL byte mirror. */
+  readonly sortKeys: boolean;
+  /** Names the operation in every rejection: "canonicalize" or "mirror". */
+  readonly verb: string;
+  /** What the caller must do with a bigint instead. */
+  readonly bigintHint: string;
+  raise(message: string, path: string): never;
+}
+
 /**
- * Canonical UTF-8 bytes that every runtime hashes with SHA-256 (no runtime-specific
- * hash seam). This is the single canonicalization for the whole workspace: object keys
- * are sorted recursively, array order is kept, values carrying a `toJSON` (notably
- * `Date`) are canonicalized through it, and anything JSON would silently drop or
- * distort — `undefined`, `NaN`, `Infinity`, `bigint`, functions, symbols — throws.
- * Callers that need to hash a `bigint` convert it to a decimal string themselves so the
- * conversion is visible at the call site.
+ * The one JSON walk behind both byte contracts. They differ in exactly one decision —
+ * whether object keys are sorted — so keeping them as two copies meant a hardening
+ * applied to one could silently miss the other. Everything else is deliberately
+ * identical: array order is kept, a value carrying `toJSON` (notably `Date`) is walked
+ * through it, and anything JSON would silently drop or distort is refused with the path
+ * that offended.
  */
-export function researchCanonicalSha256PayloadV1(value: unknown): Uint8Array {
-  const canonicalize = (input: unknown, path: string): string => {
+function walkJson(value: unknown, contract: JsonWalkContract): string {
+  const visit = (input: unknown, path: string): string => {
     if (typeof input === "bigint") {
-      throw new CanonicalizationError(
-        "Cannot canonicalize bigint (convert it to a decimal string first)", path);
+      contract.raise(`Cannot ${contract.verb} bigint (${contract.bigintHint})`, path);
     }
     if (typeof input === "undefined") {
-      throw new CanonicalizationError("Cannot canonicalize undefined", path);
+      contract.raise(`Cannot ${contract.verb} undefined`, path);
     }
     if (typeof input === "function" || typeof input === "symbol") {
-      throw new CanonicalizationError(`Cannot canonicalize ${typeof input}`, path);
+      contract.raise(`Cannot ${contract.verb} ${typeof input}`, path);
     }
     if (typeof input === "number" && !Number.isFinite(input)) {
-      throw new CanonicalizationError("Cannot canonicalize non-finite number", path);
+      contract.raise(`Cannot ${contract.verb} non-finite number`, path);
     }
     if (Array.isArray(input)) {
       return `[${input.map((item, index) =>
-        canonicalize(item, `${path}[${index}]`)).join(",")}]`;
+        visit(item, `${path}[${index}]`)).join(",")}]`;
     }
     if (input !== null && typeof input === "object") {
       const candidate = input as { toJSON?: unknown };
       if (typeof candidate.toJSON === "function") {
-        return canonicalize(
-          (candidate.toJSON as (key?: string) => unknown).call(input), path);
+        return visit((candidate.toJSON as (key?: string) => unknown).call(input), path);
       }
       const record = input as Record<string, unknown>;
-      return `{${Object.keys(record).sort().map((key) =>
-        `${JSON.stringify(key)}:${canonicalize(record[key], `${path}.${key}`)}`)
-        .join(",")}}`;
+      const keys = Object.keys(record);
+      return `{${(contract.sortKeys ? keys.sort() : keys).map((key) =>
+        `${JSON.stringify(key)}:${visit(record[key], `${path}.${key}`)}`).join(",")}}`;
     }
     const encoded = JSON.stringify(input);
-    if (encoded === undefined) {
-      throw new CanonicalizationError("Cannot canonicalize value", path);
-    }
+    if (encoded === undefined) contract.raise(`Cannot ${contract.verb} value`, path);
     return encoded;
   };
-  return new TextEncoder().encode(canonicalize(value, "$"));
+  return visit(value, "$");
+}
+
+const canonicalContract: JsonWalkContract = {
+  sortKeys: true,
+  verb: "canonicalize",
+  bigintHint: "convert it to a decimal string first",
+  raise(message, path): never {
+    throw new CanonicalizationError(message, path);
+  },
+};
+
+const sqlMirrorContract: JsonWalkContract = {
+  sortKeys: false,
+  verb: "mirror",
+  bigintHint: "convert it to the exact SQL rendering first",
+  raise(message, path): never {
+    throw new SqlJsonMirrorError(message, path);
+  },
+};
+
+/**
+ * Canonical UTF-8 bytes that every runtime hashes with SHA-256 (no runtime-specific
+ * hash seam). This is the single canonicalization for the whole workspace: object keys
+ * are sorted recursively. Callers that need to hash a `bigint` convert it to a decimal
+ * string themselves so the conversion is visible at the call site.
+ */
+export function researchCanonicalSha256PayloadV1(value: unknown): Uint8Array {
+  return new TextEncoder().encode(walkJson(value, canonicalContract));
 }
 
 /**
@@ -129,73 +176,25 @@ export function researchCanonicalSha256PayloadV1(value: unknown): Uint8Array {
  * across the workspace; no module may keep a private copy.
  */
 export function canonicalJsonV1(value: unknown): string {
-  return new TextDecoder().decode(researchCanonicalSha256PayloadV1(value));
-}
-
-/** Raised when a value has no faithful SQLite `json_object(...)` byte mirror. */
-export class SqlJsonMirrorError extends TypeError {
-  readonly path: string;
-
-  constructor(message: string, path: string) {
-    super(`${message} at ${path}`);
-    this.name = "SqlJsonMirrorError";
-    this.path = path;
-  }
+  return walkJson(value, canonicalContract);
 }
 
 /**
  * Byte mirror of SQLite's `json_object(...)`: key insertion order is preserved and
  * never sorted, because the same bytes are produced inside SQL triggers and both sides
- * must hash identically. Worked example: migration 026
- * computes `execution_plan_digest` in SQL as
- * `tabhub_sha256_v1(json_group_array(json_object('tableName', ..., 'pkV1', ...)))`
- * (packages/server/migrations/026_privacy_purge_intents.sql:1813), and
+ * must hash identically. Worked example: migration 026 computes `execution_plan_digest`
+ * in SQL as `tabhub_sha256_v1(json_group_array(json_object('tableName', ..., 'pkV1',
+ * ...)))` (packages/server/migrations/026_privacy_purge_intents.sql:1813), and
  * `digestPrivacyPurgeExecutionTargets` must produce those exact bytes in TypeScript;
  * sorting the keys there makes the trigger reject every purge transition.
- * This is deliberately NOT a canonicalization — use
- * {@link canonicalJsonV1} for fingerprints that only TypeScript produces. Key order is
- * the only thing it relaxes: like {@link researchCanonicalSha256PayloadV1} it refuses
- * every value plain `JSON.stringify` would silently drop or distort — `undefined`,
- * `NaN`, `Infinity`, `bigint`, functions, symbols — because these bytes are persisted
- * as digests and a silent substitution here is undetectable afterwards. A caller that
- * must mirror a `bigint` renders it exactly as the SQL side does, at the call site,
- * where the choice is visible.
+ * This is deliberately NOT a canonicalization — use {@link canonicalJsonV1} for
+ * fingerprints that only TypeScript produces. Key order is the only thing it relaxes:
+ * its bytes are persisted as digests, so it refuses everything the canonical contract
+ * refuses. A caller that must mirror a `bigint` renders it exactly as the SQL side
+ * does, at the call site, where the choice is visible.
  */
 export function sqlJsonObjectMirrorV1(value: unknown): string {
-  const mirror = (input: unknown, path: string): string => {
-    if (typeof input === "bigint") {
-      throw new SqlJsonMirrorError(
-        "Cannot mirror bigint (convert it to the exact SQL rendering first)", path);
-    }
-    if (typeof input === "undefined") {
-      throw new SqlJsonMirrorError("Cannot mirror undefined", path);
-    }
-    if (typeof input === "function" || typeof input === "symbol") {
-      throw new SqlJsonMirrorError(`Cannot mirror ${typeof input}`, path);
-    }
-    if (typeof input === "number" && !Number.isFinite(input)) {
-      throw new SqlJsonMirrorError("Cannot mirror non-finite number", path);
-    }
-    if (Array.isArray(input)) {
-      return `[${input.map((item, index) =>
-        mirror(item, `${path}[${index}]`)).join(",")}]`;
-    }
-    if (input !== null && typeof input === "object") {
-      const candidate = input as { toJSON?: unknown };
-      if (typeof candidate.toJSON === "function") {
-        return mirror((candidate.toJSON as (key?: string) => unknown).call(input), path);
-      }
-      const record = input as Record<string, unknown>;
-      return `{${Object.keys(record).map((key) =>
-        `${JSON.stringify(key)}:${mirror(record[key], `${path}.${key}`)}`).join(",")}}`;
-    }
-    const encoded = JSON.stringify(input);
-    if (encoded === undefined) {
-      throw new SqlJsonMirrorError("Cannot mirror value", path);
-    }
-    return encoded;
-  };
-  return mirror(value, "$");
+  return walkJson(value, sqlMirrorContract);
 }
 
 export const researchCoverageSchema = z.strictObject({
