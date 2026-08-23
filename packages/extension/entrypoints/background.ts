@@ -1159,6 +1159,8 @@ function bridgeTypeForRequest(
       return "activate-tab";
     case "tabhub:app-tab-command":
       return "tab-command";
+    case "tabhub:app-pair":
+      return "pair";
     default:
       return undefined;
   }
@@ -1169,6 +1171,25 @@ async function handleAppRequest(
   sender: MessageSenderLike,
 ): Promise<AppExtensionResponse> {
   switch (request.type) {
+    case "tabhub:app-pair": {
+      await requireContextFeature();
+      const installationId = await getOrCreateInstallationId();
+      if (request.installationId !== installationId) {
+        // The page names the installation it asked the server to bind the
+        // challenge to. If that is not this one, refuse here instead of
+        // sending someone else's challenge to the server under our origin.
+        throw new Error(
+          "This pairing challenge was issued for a different browser.",
+        );
+      }
+      await consumePairingChallenge({
+        challengeId: request.challengeId,
+        code: request.code,
+        installationId,
+      });
+      await flushContextMutations();
+      return { data: { installationId, paired: true }, ok: true, type: "pair" };
+    }
     case "tabhub:app-probe": {
       const [browserIdentifier, installationId, browserSessionId] =
         await Promise.all([
@@ -1371,7 +1392,10 @@ export async function handleMessage(
 
   try {
     if (bridgeType !== undefined) {
-      return handleAppRequest(
+      // Awaited on purpose: returning the promise from inside `try` leaves the
+      // catch below unable to see a rejection, so the typed bridge error this
+      // function promises would never be produced here.
+      return await handleAppRequest(
         message as Extract<
           ExtensionRequest,
           { type: `tabhub:app-${string}` }

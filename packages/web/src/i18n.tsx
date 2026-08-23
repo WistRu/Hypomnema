@@ -383,8 +383,13 @@ const russianMessages: Record<string, Message> = {
   "No intent for this exact open tab.": "Для этой конкретной вкладки цели пока нет.",
   "Intent history": "История целей",
   "Pair this browser for personal context": "Подключить этот браузер к личному контексту",
-  "One-time step for this browser. Only the code below expires; the pairing itself does not.":
-    "Разовое действие для этого браузера. Истекает только код; само подключение — нет.",
+  "One-time step for this browser. Pairing does not expire.":
+    "Разовое действие для этого браузера. Подключение не истекает.",
+  "This browser is paired.": "Этот браузер подключён.",
+  "TabHub could not tell whether this browser was paired. Check the extension window, then reload this page.":
+    "TabHub не смог определить, подключился ли браузер. Проверьте окно расширения и обновите страницу.",
+  "This browser could not be paired automatically. Enter these in the extension window instead.":
+    "Не удалось подключить браузер автоматически. Введите эти значения в окне расширения.",
   "Pairing code": "Код подключения",
   "Pairing challenge": "Идентификатор подключения",
   "Expires {date}": "Истекает {date}",

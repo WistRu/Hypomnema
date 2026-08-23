@@ -6,6 +6,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ExtensionBridgeTimeoutError } from "../src/extension-bridge";
 import { I18nProvider, useI18n } from "../src/i18n";
 import { PersonalContextPanel } from "../src/PersonalContextPanel";
 
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   fetchFeatureFlags: vi.fn(),
   fetchLocalPageContext: vi.fn(),
   fetchLocalSessionIntents: vi.fn(),
+  pair: vi.fn(),
   probe: vi.fn(),
 }));
 
@@ -23,8 +25,10 @@ vi.mock("../src/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/api")>()),
   ...mocks,
 }));
-vi.mock("../src/extension-bridge", () => ({
+vi.mock("../src/extension-bridge", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/extension-bridge")>()),
   createWindowExtensionBridge: () => ({
+    pair: mocks.pair,
     probe: mocks.probe,
   }),
 }));
@@ -572,9 +576,10 @@ describe("PersonalContextPanel", () => {
       extensionOrigin: "chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef",
       installationId: scope.installationId,
     }));
-    expect(await screen.findByText(/PAIRING-CODE-DOES-NOT-ENTER-A-URL/)).toBeTruthy();
+    expect(await screen.findByText("This browser is paired.")).toBeTruthy();
+    expect(screen.queryByText(/PAIRING-CODE-DOES-NOT-ENTER-A-URL/)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "OK" }));
-    await waitFor(() => expect(screen.queryByText(/PAIRING-CODE-DOES-NOT-ENTER-A-URL/)).toBeNull());
+    await waitFor(() => expect(screen.queryByText("This browser is paired.")).toBeNull());
     expect(mocks.changeLocalPageContext).not.toHaveBeenCalled();
     expect(mocks.changeLocalSessionIntent).not.toHaveBeenCalled();
   });
@@ -622,7 +627,7 @@ describe("PersonalContextPanel", () => {
     renderPanel();
 
     expect(
-      await screen.findByText("One-time step for this browser. Only the code below expires; the pairing itself does not."),
+      await screen.findByText("One-time step for this browser. Pairing does not expire."),
     ).toBeTruthy();
   });
 
@@ -648,5 +653,70 @@ describe("PersonalContextPanel", () => {
       visibility: "share_with_ai",
     });
     expect(mocks.changeLocalPageContext.mock.calls[0]?.[1]).not.toHaveProperty("supersedesEntryId");
+  });
+});
+
+describe("PersonalContextPanel pairing handover", () => {
+  const probeAvailable = {
+    available: true,
+    browser: "chrome",
+    browserSessionId: scope.browserSessionId,
+    commandProtocolVersion: 5,
+    controlWindowId: 2,
+    extensionOrigin: "chrome-extension://abcdefghijklmnopqrstuvwxyzabcdef",
+    installationId: scope.installationId,
+    pendingUndos: [],
+    windows: [],
+  };
+  const challenge = {
+    challengeId: "322e4567-e89b-42d3-a456-426614174000",
+    code: "PAIRING-CODE-DOES-NOT-ENTER-A-URL-1234567890",
+    expiresAt: now,
+  };
+
+  beforeEach(() => {
+    mocks.probe.mockResolvedValue(probeAvailable);
+    mocks.createLocalPairingChallenge.mockResolvedValue(challenge);
+  });
+
+  it("pairs in one click and never puts the code on the page", async () => {
+    mocks.pair.mockResolvedValue({ installationId: scope.installationId, paired: true });
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pair this browser for personal context" }));
+
+    await waitFor(() => expect(mocks.pair).toHaveBeenCalledWith({
+      challengeId: challenge.challengeId,
+      code: challenge.code,
+      installationId: scope.installationId,
+    }));
+    expect(await screen.findByText("This browser is paired.")).toBeTruthy();
+    expect(screen.queryByText(new RegExp(challenge.code))).toBeNull();
+    expect(screen.queryByText(new RegExp(challenge.challengeId))).toBeNull();
+  });
+
+  it("says nothing about the code when the handover times out, because it may already be spent", async () => {
+    mocks.pair.mockRejectedValue(new ExtensionBridgeTimeoutError("pair"));
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pair this browser for personal context" }));
+
+    expect(await screen.findByText(
+      "TabHub could not tell whether this browser was paired. Check the extension window, then reload this page.",
+    )).toBeTruthy();
+    expect(screen.queryByText(new RegExp(challenge.code))).toBeNull();
+  });
+
+  it("falls back to the code when the extension cannot take the handover", async () => {
+    mocks.pair.mockRejectedValue(new Error("no bridge here"));
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pair this browser for personal context" }));
+
+    expect(await screen.findByText(
+      "This browser could not be paired automatically. Enter these in the extension window instead.",
+    )).toBeTruthy();
+    expect(screen.getByText(new RegExp(challenge.code))).toBeTruthy();
+    expect(screen.getByText(new RegExp(challenge.challengeId))).toBeTruthy();
   });
 });

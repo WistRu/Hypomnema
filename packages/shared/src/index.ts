@@ -1081,11 +1081,22 @@ export const localPairingChallengeResponseSchema = z
   })
   .strict();
 
+/**
+ * A pairing code is `randomBytes(32).toString("base64url")`. The bounds live
+ * here so a second validator cannot drift away from what the server accepts.
+ */
+export const localPairingCodeMinLength = 40 as const;
+export const localPairingCodeMaxLength = 128 as const;
+export const localPairingCodeSchema = z
+  .string()
+  .min(localPairingCodeMinLength)
+  .max(localPairingCodeMaxLength);
+
 export const localPairingConsumeRequestSchema = z
   .object({
     challengeId: z.string().uuid(),
     installationId: installationIdSchema,
-    code: z.string().min(40).max(128),
+    code: localPairingCodeSchema,
   })
   .strict();
 

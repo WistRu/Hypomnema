@@ -19,7 +19,10 @@ import {
   fetchLocalPageContext,
   fetchLocalSessionIntents,
 } from "./api";
-import { createWindowExtensionBridge } from "./extension-bridge";
+import {
+  createWindowExtensionBridge,
+  ExtensionBridgeTimeoutError,
+} from "./extension-bridge";
 import { type TranslationParams, useI18n } from "./i18n";
 
 interface PersonalContextPanelProps {
@@ -31,6 +34,15 @@ interface PersonalContextPanelProps {
 }
 
 type ScopeMode = "page" | "tab";
+type PairingChallenge = Awaited<ReturnType<typeof createLocalPairingChallenge>>;
+/**
+ * "unknown" is not a failure: the handover may have landed after the page gave
+ * up waiting, so the challenge cannot be shown as if it were still spendable.
+ */
+type PairingOutcome =
+  | { status: "paired" }
+  | { challenge: PairingChallenge; status: "manual" }
+  | { status: "unknown" };
 type LocalizedMessage = { key: string; params?: TranslationParams };
 type Receipt =
   | { message: LocalizedMessage; undo: null }
@@ -290,9 +302,39 @@ export function PersonalContextPanel({
     mutationFn: (command: Parameters<typeof changeLocalSessionIntent>[0]) =>
       changeLocalSessionIntent(command),
   });
+  // Pairing is one click (issue #31). The page asks the server for a challenge
+  // bound to the probed installation and extension origin, then hands it
+  // straight to that extension, which consumes it from its own origin. The
+  // human still authorises — the click is the authorisation — but is no longer
+  // the transport. The old manual path stays as the fallback for an extension
+  // too old to accept the handover, so a stale extension cannot strand pairing.
   const pairingMutation = useMutation({
-    mutationFn: (input: Parameters<typeof createLocalPairingChallenge>[0]) =>
-      createLocalPairingChallenge(input),
+    mutationFn: async (
+      input: Parameters<typeof createLocalPairingChallenge>[0],
+    ): Promise<PairingOutcome> => {
+      const challenge = await createLocalPairingChallenge(input);
+      if (bridge === null) return { challenge, status: "manual" };
+      try {
+        await bridge.pair({
+          challengeId: challenge.challengeId,
+          code: challenge.code,
+          installationId: input.installationId,
+        });
+      } catch (error) {
+        // A refusal is an answer: the extension did not consume the challenge,
+        // so it is still live and showing it is a real fallback. A timeout is
+        // not an answer — the extension may have consumed it after we stopped
+        // waiting, and a spent code would send the user to retype something
+        // that cannot work and would burn a failed attempt doing it.
+        return error instanceof ExtensionBridgeTimeoutError
+          ? { status: "unknown" }
+          : { challenge, status: "manual" };
+      }
+      return { status: "paired" };
+    },
+    onSuccess: async (outcome) => {
+      if (outcome.status === "paired") await refreshContext();
+    },
   });
 
   const resetEditor = () => {
@@ -840,9 +882,11 @@ export function PersonalContextPanel({
 
           {extensionProbe?.extensionOrigin ? (
             <div className="context-pairing">
-              <p className="muted-copy">
-                {t("One-time step for this browser. Only the code below expires; the pairing itself does not.")}
-              </p>
+              {pairingMutation.data ? null : (
+                <p className="muted-copy">
+                  {t("One-time step for this browser. Pairing does not expire.")}
+                </p>
+              )}
               <button
                 disabled={pairingMutation.isPending}
                 type="button"
@@ -853,14 +897,23 @@ export function PersonalContextPanel({
               >
                 {t("Pair this browser for personal context")}
               </button>
-              {pairingMutation.data ? (
+              {pairingMutation.data === undefined ? null : (
                 <div role="status">
-                  <p>{t("Pairing challenge")}: <code>{pairingMutation.data.challengeId}</code></p>
-                  <p>{t("Pairing code")}: <code>{pairingMutation.data.code}</code></p>
-                  <p>{t("Expires {date}", { date: formatDate(pairingMutation.data.expiresAt) })}</p>
+                  {pairingMutation.data.status === "paired" ? (
+                    <p>{t("This browser is paired.")}</p>
+                  ) : pairingMutation.data.status === "unknown" ? (
+                    <p>{t("TabHub could not tell whether this browser was paired. Check the extension window, then reload this page.")}</p>
+                  ) : (
+                    <>
+                      <p>{t("This browser could not be paired automatically. Enter these in the extension window instead.")}</p>
+                      <p>{t("Pairing challenge")}: <code>{pairingMutation.data.challenge.challengeId}</code></p>
+                      <p>{t("Pairing code")}: <code>{pairingMutation.data.challenge.code}</code></p>
+                      <p>{t("Expires {date}", { date: formatDate(pairingMutation.data.challenge.expiresAt) })}</p>
+                    </>
+                  )}
                   <button type="button" onClick={() => pairingMutation.reset()}>{t("OK")}</button>
                 </div>
-              ) : null}
+              )}
             </div>
           ) : null}
         </>

@@ -1197,3 +1197,93 @@ describe("background app tab command messages", () => {
     expect(stored["tabhub.pendingContextMutations"]).toEqual([]);
   });
 });
+
+describe("background app pairing handover", () => {
+  const installationId = "123e4567-e89b-42d3-a456-426614174000";
+  const challengeId = "322e4567-e89b-42d3-a456-426614174000";
+  const code = "PAIRING-CODE-DOES-NOT-ENTER-A-URL-1234567890";
+  const appSender = { tab: { id: 11, url: "http://127.0.0.1:7717/app/", windowId: 9 } };
+
+  function stubServer(): ReturnType<typeof vi.fn> {
+    const fetchMock = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      if (url.endsWith("/api/features")) {
+        return new Response(JSON.stringify({ context: true, logicalImportance: false }), {
+          headers: { "Content-Type": "application/json" },
+          status: 200,
+        });
+      }
+      if (url.endsWith("/api/local/pairing/consume")) {
+        return new Response(
+          JSON.stringify({ credential: "c".repeat(43), credentialVersion: 1 }),
+          { headers: { "Content-Type": "application/json" }, status: 200 },
+        );
+      }
+      return new Response(null, { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    extensionBrowser.__deleteLocal("tabhub.contextFeatures");
+    extensionBrowser.__deleteLocal("tabhub.localCapability");
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("consumes a handover addressed to this installation", async () => {
+    stubServer();
+
+    await expect(
+      handleMessage(
+        { challengeId, code, installationId, type: "tabhub:app-pair" },
+        appSender,
+      ),
+    ).resolves.toMatchObject({
+      data: { installationId, paired: true },
+      ok: true,
+      type: "pair",
+    });
+  });
+
+  it("refuses a handover addressed to a different installation without contacting the server", async () => {
+    const fetchMock = stubServer();
+
+    const response = await handleMessage(
+      {
+        challengeId,
+        code,
+        installationId: "999e4567-e89b-42d3-a456-426614174000",
+        type: "tabhub:app-pair",
+      },
+      appSender,
+    );
+
+    expect(response).toMatchObject({ ok: false, type: "pair" });
+    expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).endsWith("/api/local/pairing/consume"),
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("refuses a handover that did not come from the local TabHub app", async () => {
+    const fetchMock = stubServer();
+
+    const response = await handleMessage(
+      { challengeId, code, installationId, type: "tabhub:app-pair" },
+      { tab: { id: 11, url: "https://example.com/attack", windowId: 9 } },
+    );
+
+    expect(response).toMatchObject({ ok: false, type: "pair" });
+    expect(
+      fetchMock.mock.calls.filter(([input]) =>
+        String(input).endsWith("/api/local/pairing/consume"),
+      ),
+    ).toHaveLength(0);
+  });
+});

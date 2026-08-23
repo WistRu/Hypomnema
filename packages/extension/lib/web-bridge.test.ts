@@ -262,3 +262,53 @@ describe("createBridgeResponse", () => {
     });
   });
 });
+
+describe("pairing handover", () => {
+  const challengeId = "322e4567-e89b-42d3-a456-426614174000";
+  const installationId = "123e4567-e89b-42d3-a456-426614174000";
+  const code = "PAIRING-CODE-DOES-NOT-ENTER-A-URL-1234567890";
+
+  it("parses a pairing handover and forwards it to the background", () => {
+    const parsed = parseBridgeRequest({
+      ...baseRequest(),
+      challengeId,
+      code,
+      installationId,
+      type: "pair",
+    });
+
+    expect(parsed).toEqual({
+      ...baseRequest(),
+      challengeId,
+      code,
+      installationId,
+      type: "pair",
+    });
+    expect(toAppExtensionRequest(parsed!)).toEqual({
+      challengeId,
+      code,
+      installationId,
+      type: "tabhub:app-pair",
+    });
+  });
+
+  it("rejects a pairing handover carrying anything beyond the challenge it names", () => {
+    expect(parseBridgeRequest({
+      ...baseRequest(),
+      challengeId,
+      code,
+      installationId,
+      extensionOrigin: "chrome-extension://aaaaaaaaaaaaaaaa",
+      type: "pair",
+    })).toBeUndefined();
+  });
+
+  it("rejects a pairing handover with a malformed challenge, code or installation", () => {
+    expect(parseBridgeRequest({ ...baseRequest(), challengeId: "nope", code, installationId, type: "pair" }))
+      .toBeUndefined();
+    expect(parseBridgeRequest({ ...baseRequest(), challengeId, code: "", installationId, type: "pair" }))
+      .toBeUndefined();
+    expect(parseBridgeRequest({ ...baseRequest(), challengeId, code, installationId: "nope", type: "pair" }))
+      .toBeUndefined();
+  });
+});

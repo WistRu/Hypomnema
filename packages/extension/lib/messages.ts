@@ -4,6 +4,8 @@ import {
   exactTabScopeSchema,
   expectedTabPageSchema,
   knownBrowserOptions,
+  localPairingCodeMaxLength,
+  localPairingCodeMinLength,
   tabUrlSchema,
   tabCommandRelayProtocolVersion,
 } from "@tabhub/shared";
@@ -75,12 +77,39 @@ export type ExtensionRequest =
       command: PhysicalTabCommand;
       installationId: string;
       type: "tabhub:app-tab-command";
+    }
+  | {
+      challengeId: string;
+      code: string;
+      installationId: string;
+      type: "tabhub:app-pair";
     };
 
 export type BridgeRequestType =
   | "probe"
   | "activate-tab"
-  | "tab-command";
+  | "tab-command"
+  | "pair";
+
+/**
+ * Checking the shape here keeps a malformed page message from reaching the
+ * network at all. The length bounds come from the shared consume schema rather
+ * than being restated, so the two cannot drift; the base64url charset is an
+ * extra narrowing, because that is what the server actually generates.
+ */
+const pairingCodeCharset = /^[A-Za-z0-9_-]+$/;
+
+export function isPairingCode(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= localPairingCodeMinLength &&
+    value.length <= localPairingCodeMaxLength &&
+    pairingCodeCharset.test(value)
+  );
+}
+
+/** Challenge ids are UUIDs, the same shape as an installation id. */
+export const isPairingChallengeId = isInstallationId;
 
 export interface AppProbeData {
   available: true;
@@ -109,10 +138,16 @@ export interface AppTabCommandData {
   result: PhysicalTabCommandResult;
 }
 
+export interface AppPairData {
+  installationId: string;
+  paired: true;
+}
+
 export type AppExtensionResponse =
   | { data: AppProbeData; ok: true; type: "probe" }
   | { data: AppTabActivationData; ok: true; type: "activate-tab" }
   | { data: AppTabCommandData; ok: true; type: "tab-command" }
+  | { data: AppPairData; ok: true; type: "pair" }
   | { error: string; ok: false; type: BridgeRequestType };
 
 export interface CaptureSummary {
@@ -374,6 +409,15 @@ export function isExtensionRequest(value: unknown): value is ExtensionRequest {
         "installationId",
         "type",
       ])
+    );
+  }
+
+  if (type === "tabhub:app-pair") {
+    return (
+      isPairingChallengeId(value.challengeId) &&
+      isPairingCode(value.code) &&
+      isInstallationId(value.installationId) &&
+      hasOnlyKeys(value, ["challengeId", "code", "installationId", "type"])
     );
   }
 

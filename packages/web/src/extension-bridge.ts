@@ -10,7 +10,8 @@ const BRIDGE_VERSION = 4 as const;
 type BridgeRequestType =
   | "probe"
   | "activate-tab"
-  | "tab-command";
+  | "tab-command"
+  | "pair";
 
 interface BridgeWindow {
   addEventListener(
@@ -172,10 +173,22 @@ export interface TabActivationResult extends TabActivationTarget {
   windowId: number;
 }
 
+export interface PairingHandover {
+  challengeId: string;
+  code: string;
+  installationId: string;
+}
+
+export interface PairingResult {
+  installationId: string;
+  paired: true;
+}
+
 export interface ExtensionBridge {
   probe(): Promise<ExtensionProbe>;
   activate(target: TabActivationTarget): Promise<TabActivationResult>;
   command(request: TabCommandRequest): Promise<TabCommandResponse>;
+  pair(handover: PairingHandover): Promise<PairingResult>;
 }
 
 interface ExtensionBridgeOptions {
@@ -183,7 +196,10 @@ interface ExtensionBridgeOptions {
   origin: string;
   requestId?: () => string;
   timeouts?: Partial<
-    Record<"probe" | "activate" | "close" | "command" | "workspace", number>
+    Record<
+      "probe" | "activate" | "close" | "command" | "workspace" | "pair",
+      number
+    >
   >;
 }
 
@@ -250,6 +266,19 @@ function isWindowSummary(value: unknown): value is BrowserWindowSummary {
     isNonNegativeInteger(value.tabCount) &&
     isNonNegativeInteger(value.windowId)
   );
+}
+
+function parsePairing(value: unknown): PairingResult {
+  if (
+    !isRecord(value) ||
+    value.paired !== true ||
+    typeof value.installationId !== "string"
+  ) {
+    throw new ExtensionBridgeError(
+      "TabHub extension returned an unreadable pairing result.",
+    );
+  }
+  return { installationId: value.installationId, paired: true };
 }
 
 function parseProbe(value: unknown): ExtensionProbeAvailable {
@@ -619,6 +648,7 @@ export function createExtensionBridge(
   const makeRequestId = options.requestId ?? defaultRequestId;
   const timeouts = {
     probe: options.timeouts?.probe ?? 2_000,
+    pair: options.timeouts?.pair ?? 5_000,
     activate: options.timeouts?.activate ?? 5_000,
     close: options.timeouts?.close ?? 10 * 60_000,
     command: options.timeouts?.command ?? 2 * 60_000,
@@ -710,6 +740,18 @@ export function createExtensionBridge(
         }
         throw error;
       }
+    },
+    async pair(handover) {
+      return request(
+        "pair",
+        timeouts.pair,
+        parsePairing,
+        {
+          challengeId: handover.challengeId,
+          code: handover.code,
+          installationId: handover.installationId,
+        },
+      );
     },
     async activate(target) {
       return request(

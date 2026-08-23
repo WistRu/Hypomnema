@@ -3,6 +3,8 @@ import { tabCommandRelayCompatibleProtocolVersionSchema } from "@tabhub/shared";
 import {
   type AppExtensionResponse,
   type ExtensionRequest,
+  isPairingChallengeId,
+  isPairingCode,
   isValidBridgeRequestId,
 } from "./messages";
 import {
@@ -41,6 +43,12 @@ export type BridgeRequest = BridgeRequestBase &
         command: PhysicalTabCommand;
         installationId: string;
         type: "tab-command";
+      }
+    | {
+        challengeId: string;
+        code: string;
+        installationId: string;
+        type: "pair";
       }
   );
 
@@ -181,6 +189,34 @@ export function parseBridgeRequest(value: unknown): BridgeRequest | undefined {
     };
   }
 
+  if (value.type === "pair") {
+    if (
+      !isPairingChallengeId(value.challengeId) ||
+      !isPairingCode(value.code) ||
+      !isInstallationId(value.installationId) ||
+      !hasOnlyKeys(value, [
+        "challengeId",
+        "channel",
+        "code",
+        "installationId",
+        "requestId",
+        "source",
+        "type",
+        "version",
+      ])
+    ) {
+      return undefined;
+    }
+
+    return {
+      ...base,
+      challengeId: value.challengeId as string,
+      code: value.code as string,
+      installationId: value.installationId as string,
+      type: "pair",
+    };
+  }
+
   if (value.type === "tab-command") {
     const command = parsePhysicalTabCommand(value.command);
     if (
@@ -237,6 +273,13 @@ export function toAppExtensionRequest(
         command: request.command,
         installationId: request.installationId,
         type: "tabhub:app-tab-command",
+      };
+    case "pair":
+      return {
+        challengeId: request.challengeId,
+        code: request.code,
+        installationId: request.installationId,
+        type: "tabhub:app-pair",
       };
   }
 }
