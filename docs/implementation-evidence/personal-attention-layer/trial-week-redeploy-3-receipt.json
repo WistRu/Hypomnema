@@ -48,8 +48,34 @@
  "secretsRecorded": false,
  "verdict": "PASS_WITH_UNPROVEN_ITEMS",
  "unprovenAtRedeploy": [
-  "browser detection has NOT been compared against this machine's real installs; that comparison is the point of the deploy and needs the extensions reloaded first",
-  "the pairing banner has not been seen in any browser, since the installed extensions predate the probe field it keys on",
+  "browser detection on chrome, whose branch is the residue case and the one most likely to mislabel",
+  "the pairing banner, which has not yet been seen in a browser",
   "activityDailyWriter, which /api/features does not project"
- ]
+ ],
+ "detectionVerification": {
+  "verifiedAt": "2026-08-23T17:11-17:15Z",
+  "result": "PASS for edge and yandex on this machine; chrome not yet checked",
+  "method": "Not a contrived test. The user reinstalled both extensions rather than reloading them, which wiped `browser.storage.local` — the new installation ids prove it (edge 56024a43 -> 5507a07a, yandex 0bcfb199 -> f5c71c21). A wiped store holds no `tabhub.browser` and no `tabhub.browserConfigured`, so no explicit choice existed at that moment.",
+  "whyItIsConclusive": [
+   "`currentTabCommandScope` returns undefined without a browser identity, so the relay cannot register a scope at all. Before this change a freshly installed extension therefore could not connect until a human chose a browser.",
+   "Both extensions registered within seconds of reinstall (yandex 17:11:01Z, edge 17:11:22Z) and were already labelled correctly, so an identity existed without anyone choosing one. Detection is the only thing that could have supplied it.",
+   "The user then opened the extension's options in both and reports the browser shown was already correct. Opening options writes nothing: the save path is bound to the select's `change` event, so looking at a correct value neither creates nor confirms it."
+  ],
+  "observed": {
+   "edge": {
+    "installationId": "5507a07a",
+    "detected": "edge",
+    "expected": "edge",
+    "match": true
+   },
+   "yandex": {
+    "installationId": "f5c71c21",
+    "detected": "yandex",
+    "expected": "yandex",
+    "match": true
+   }
+  },
+  "notCovered": "Chrome has not been reloaded and is not connected, so the residue branch — the one that names Chrome by the absence of any other brand — is still unverified on this machine. It is the branch most likely to mislabel, because every Chromium browser that hides its own token falls into it.",
+  "sideEffect": "Reinstalling regenerated both installation ids, so both browsers lost their personal-context pairing. Two capability rows are now orphaned: 56024a43 (created 12:28:10Z) and 0bcfb199 (created 16:12:48Z). They can never authenticate again, because no live install presents those ids, and their secrets were only ever held by the erased extension copies."
+ }
 }
