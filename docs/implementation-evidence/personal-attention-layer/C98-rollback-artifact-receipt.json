@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "recordedAt": "2026-08-23T03:25:00Z",
+  "scope": "c98_rollback_artifact_profile_and_feature_off_smoke",
+  "issue": "https://github.com/WistRu/Hypomnema/issues/18",
+  "parentIssue": "https://github.com/WistRu/Hypomnema/issues/2",
+  "producedAfterTheRollout": true,
+  "producedAfterTheRolloutNote": "The runbook requires this artifact, its hash and this smoke BEFORE a live rollout. The rollout of 2026-08-23 went ahead without them; this receipt closes that gap after the fact and must not be read as compliance at the time of the rollout.",
+  "repositoryHead": "6a1afd7ef16f5b87c17fc3d14e33423a57097524",
+  "artifact": {
+    "profile": {
+      "path": "rollback/trial-week-feature-off.env",
+      "sha256": "d90347d4a0b53cd93e55413e2fbe86296fa48dabf6eafdf90ac99d192c4c1a82"
+    },
+    "build": {
+      "path": "packages/server/dist/main.js",
+      "sha256": "49d95c96061cee73e25ce407811cb89e6ad17fe70d8a5ffd79b6cdf6508c992b"
+    },
+    "reproduceWith": "node rollback/verify-rollback-profile.mjs --port 7799"
+  },
+  "smoke": {
+    "port": 7799,
+    "pid": 219592,
+    "target": "isolated online-backup copy of the live database; the live file is read only",
+    "portAndPathOverridden": "the profile pins port 7717 and data/tabhub.sqlite; the smoke overrode both so it could run beside the daily server",
+    "health": {
+      "status": "ok",
+      "database": "ok",
+      "schemaVersion": 26
+    },
+    "features": {
+      "context": false,
+      "logicalImportance": false,
+      "liveAcquisition": false,
+      "resources": false,
+      "activityWindows": false,
+      "agentUserImportance": false,
+      "pageSummaryCapture": false,
+      "priorityAssessmentWriter": false,
+      "priorityPersonalization": false,
+      "priorityReaders": false,
+      "priorityShadow": false,
+      "privacyPurge": false,
+      "research": false
+    },
+    "libraryRead": {
+      "route": "GET /api/tabs?limit=1",
+      "statusCode": 200
+    },
+    "schemaVersion": 26,
+    "integrityCheck": "ok",
+    "foreignKeyViolations": 0,
+    "tablesCounted": 166,
+    "rowCountsChangedWhileServing": [],
+    "noWriterRan": true,
+    "stderr": ""
+  },
+  "liveDatabase": {
+    "path": "./data/tabhub.sqlite",
+    "sha256Before": "e3f9d4f720fa86c2007e734c4c2496100d1525960558c55a61900980450c7219",
+    "sha256After": "e3f9d4f720fa86c2007e734c4c2496100d1525960558c55a61900980450c7219",
+    "unchanged": true
+  },
+  "rollbackRecipe": "docs/personal-attention-layer-rollback-recipe.md",
+  "secretsRecorded": false,
+  "verdict": "PASS"
+}

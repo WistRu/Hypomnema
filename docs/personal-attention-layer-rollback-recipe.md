@@ -47,6 +47,19 @@ TABHUB_FEATURE_PAGE_SUMMARY_CAPTURE=false
 TABHUB_FEATURE_PRIORITY_ASSESSMENT_WRITER=false
 ```
 
+Этот набор зафиксирован как именованный артефакт `rollback/trial-week-feature-off.env`;
+его SHA-256 и smoke записаны в
+`docs/implementation-evidence/personal-attention-layer/C98-rollback-artifact-receipt.json`.
+Проверить артефакт заново:
+
+```bash
+node rollback/verify-rollback-profile.mjs --port 7799
+```
+
+Скрипт снимает online-backup копию боевой базы, поднимает на ней ту же сборку с этим
+профилем, проверяет health/схему/чтение Library и сверяет число строк во всех таблицах
+до и после. Живой файл только читается.
+
 Полный список флагов с дефолтами — в `.env.example`. Флаги fail-closed: пустое
 или отсутствующее значение читается как `false`, а любое значение кроме
 `1/true/0/false` останавливает старт сервера с ошибкой.
