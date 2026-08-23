@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -9,6 +8,8 @@ import Database from "better-sqlite3";
 import * as sqliteVec from "sqlite-vec";
 import { describe, expect, it } from "vitest";
 
+import { changedRowCounts, sha256File, tableRowCounts } from
+  "../../../rollback/sqlite-facts.mjs";
 import { createApp } from "../src/app.js";
 import { personalAttentionFeatureFlagsOff } from "../src/attention-feature-flags.js";
 
@@ -23,24 +24,6 @@ const envExamplePath = fileURLToPath(new URL("../../../.env.example", import.met
  */
 const optIn = process.env.TABHUB_PROVE_LIVE_MIGRATION;
 const proveAgainstLiveDatabase = optIn === "1";
-
-async function sha256File(path: string): Promise<string> {
-  return createHash("sha256").update(await readFile(path)).digest("hex");
-}
-
-function tableRowCounts(
-  connection: Database.Database,
-): ReadonlyMap<string, number> {
-  const tables = (connection.prepare(`
-    SELECT name FROM sqlite_master
-    WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-    ORDER BY name
-  `).pluck().all() as string[]);
-  return new Map(tables.map((table) => [
-    table,
-    Number(connection.prepare(`SELECT COUNT(*) FROM "${table}"`).pluck().get()),
-  ]));
-}
 
 describe("live database migration proof gate", () => {
   it("stays opt-in and refuses to be enabled by a typo", () => {
@@ -123,10 +106,8 @@ describe.skipIf(!proveAgainstLiveDatabase)("live database migration 17 -> 26", (
 
         // Every table that existed before the migration must still hold exactly the
         // rows it held, not just the ones a sample happened to cover.
-        const migratedRowCounts = tableRowCounts(migrated);
-        for (const [table, count] of sourceRowCounts) {
-          expect(migratedRowCounts.get(table), `row count for ${table}`).toBe(count);
-        }
+        expect(changedRowCounts(sourceRowCounts, tableRowCounts(migrated)))
+          .toEqual([]);
       } finally {
         migrated.close();
       }

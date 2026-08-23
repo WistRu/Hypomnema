@@ -46,13 +46,44 @@
     "integrityCheck": "ok",
     "foreignKeyViolations": 0,
     "tableCount": 167,
-    "rowCounts": {
-      "tabs": 2198,
-      "tab_instances": 1154,
-      "tags": 26,
-      "tab_tags": 2285
-    },
-    "rowCountsUnchangedByMigration": true
+    "rowCountsUnchangedByMigration": true,
+    "rowCountComparison": {
+      "tablesCompared": 27,
+      "tableCountRule": "type = 'table' AND name NOT LIKE 'sqlite_%'",
+      "tableCountRuleNote": "The tableCount fields elsewhere in this receipt count every table in sqlite_master and therefore include sqlite_sequence, one more than this.",
+      "tablesWhoseCountChanged": [],
+      "unchanged": true,
+      "source": "backups/tabhub-2026-08-23T02-16-12.227Z.sqlite at schema 17 compared against the isolated copy after migration to schema 26",
+      "rowCountsBefore": {
+        "contents": 22,
+        "contents_fts": 2198,
+        "contents_fts_config": 1,
+        "contents_fts_data": 75,
+        "contents_fts_docsize": 2198,
+        "contents_fts_idx": 66,
+        "custom_fields": 0,
+        "embedding_metadata": 0,
+        "jobs": 0,
+        "knowledge_entities": 2224,
+        "page_retention": 0,
+        "relations": 0,
+        "saved_workspace_items": 1270,
+        "saved_workspaces": 1,
+        "summary_job_attempts": 0,
+        "tab_activity_stream_cursors": 14,
+        "tab_activity_totals": 464,
+        "tab_instances": 1154,
+        "tab_page_activity_totals": 818,
+        "tab_tags": 2285,
+        "tabs": 2198,
+        "tags": 26,
+        "vec_contents": 0,
+        "vec_contents_chunks": 0,
+        "vec_contents_info": 4,
+        "vec_contents_rowids": 0,
+        "vec_contents_vector_chunks00": 0
+      }
+    }
   },
   "health": {
     "route": "GET /api/health",
@@ -151,5 +182,8 @@
     "deliberate extension reload (issue #12)",
     "live journeys J1, J2 and J4 (issue #12)",
     "fresh log content (paths and empty stderr only)"
+  ],
+  "correctedBy": [
+    "https://github.com/WistRu/Hypomnema/issues/21"
   ]
 }

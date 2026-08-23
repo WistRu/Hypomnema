@@ -10,12 +10,13 @@
  * The result is printed as JSON on stdout, ready to be saved as a receipt.
  */
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+
+import { changedRowCounts, sha256File, tableRowCounts } from "./sqlite-facts.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -29,10 +30,6 @@ const buildArtifact = join(repositoryRoot, "packages", "server", "dist", "main.j
 const portFlagIndex = process.argv.indexOf("--port");
 const port = portFlagIndex === -1 ? 7799 : Number(process.argv[portFlagIndex + 1]);
 
-async function sha256File(path) {
-  return createHash("sha256").update(await readFile(path)).digest("hex");
-}
-
 function parseEnvProfile(text) {
   const values = {};
   for (const line of text.split(/\r?\n/)) {
@@ -42,18 +39,6 @@ function parseEnvProfile(text) {
     values[trimmed.slice(0, separator)] = trimmed.slice(separator + 1);
   }
   return values;
-}
-
-function tableRowCounts(connection) {
-  const tables = connection.prepare(`
-    SELECT name FROM sqlite_master
-    WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-    ORDER BY name
-  `).pluck().all();
-  return Object.fromEntries(tables.map((table) => [
-    table,
-    Number(connection.prepare(`SELECT COUNT(*) FROM "${table}"`).pluck().get()),
-  ]));
 }
 
 function readCounts(path) {
@@ -83,6 +68,13 @@ async function waitForHealth(baseUrl, deadlineMs = 60_000) {
     if (Date.now() - started > deadlineMs) throw new Error("server never became healthy");
     await new Promise((done) => setTimeout(done, 500));
   }
+}
+
+/** Healthy on schema 26, Library answering, and every projected flag off. */
+function featureOffSmokePassed(smoke) {
+  return smoke.health?.status === "ok" && smoke.health?.schemaVersion === 26 &&
+    smoke.libraryRead.statusCode === 200 &&
+    Object.values(smoke.features).every((flag) => flag === false);
 }
 
 const profileText = await readFile(profilePath, "utf8");
@@ -124,7 +116,7 @@ try {
       port,
       pid: child.pid,
       liveDatabase: { path: profile.TABHUB_DB_PATH, sha256Before: liveHashBefore },
-      copyBefore: before,
+      copyBefore: { ...before, rowCounts: Object.fromEntries(before.rowCounts) },
       health,
       features,
       libraryRead: { route: "GET /api/tabs?limit=1", statusCode: library.status },
@@ -136,27 +128,25 @@ try {
   }
 
   const after = readCounts(copyPath);
-  const changed = Object.entries(after.rowCounts)
-    .filter(([table, count]) => before.rowCounts[table] !== count)
-    .map(([table, count]) => ({ table, before: before.rowCounts[table] ?? null, after: count }));
-  receipt.copyAfter = after;
+  const changed = changedRowCounts(before.rowCounts, after.rowCounts);
+  receipt.copyAfter = { ...after, rowCounts: Object.fromEntries(after.rowCounts) };
+  receipt.tablesCounted = before.rowCounts.size;
+  receipt.tableCountRule = "type = 'table' AND name NOT LIKE 'sqlite_%'";
   receipt.rowCountsChangedWhileServing = changed;
+  // "No writer ran" has to mean something checkable: not one row moved in any table
+  // while the profile was serving. This is that check, not a hand-written assurance.
+  receipt.noWriterRan = changed.length === 0;
   receipt.liveDatabase.sha256After = await sha256File(livePath);
   receipt.liveDatabaseUnchanged =
     receipt.liveDatabase.sha256After === receipt.liveDatabase.sha256Before;
   receipt.verdict =
-    changed.length === 0 &&
+    receipt.noWriterRan &&
     receipt.liveDatabaseUnchanged &&
-    health_ok(receipt) ? "PASS" : "FAIL";
+    featureOffSmokePassed(receipt) ? "PASS" : "FAIL";
 } finally {
   await rm(directory, { force: true, recursive: true });
 }
 
-function health_ok(value) {
-  return value.health?.status === "ok" && value.health?.schemaVersion === 26 &&
-    value.libraryRead.statusCode === 200 &&
-    Object.values(value.features).every((flag) => flag === false);
-}
 
 console.log(JSON.stringify(receipt, null, 2));
 if (receipt.verdict !== "PASS") process.exitCode = 1;
