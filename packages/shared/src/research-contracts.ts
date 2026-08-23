@@ -140,8 +140,12 @@ export function canonicalJsonV1(value: unknown): string {
  * written as a decimal string, matching how SQLite renders an INTEGER in JSON.
  */
 export function sqlJsonObjectMirrorV1(value: unknown): string {
-  return JSON.stringify(value, (_key, item: unknown) =>
+  const encoded = JSON.stringify(value, (_key, item: unknown) =>
     typeof item === "bigint" ? item.toString(10) : item);
+  if (encoded === undefined) {
+    throw new CanonicalizationError("Cannot mirror value as SQL JSON", "$");
+  }
+  return encoded;
 }
 
 export const researchCoverageSchema = z.strictObject({

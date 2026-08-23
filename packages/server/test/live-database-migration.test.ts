@@ -45,7 +45,9 @@ describe.skipIf(!existsSync(livePath))("live database migration 17 -> 26", () =>
         source.close();
       }
 
-      expect(sourceVersion).toBe(17);
+      // Before Rollout this is 17; after Rollout the live file is already at 26 and
+      // the copy simply has nothing left to migrate. Both must end at 26.
+      expect(sourceVersion).toBeLessThanOrEqual(26);
 
       const app = createApp({
         databasePath: copyPath,
