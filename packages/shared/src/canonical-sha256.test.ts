@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CanonicalizationError,
   researchCanonicalSha256PayloadV1,
-} from "./index.ts";
+} from "./index.js";
 
 const canonical = (value: unknown): string =>
   new TextDecoder().decode(researchCanonicalSha256PayloadV1(value));

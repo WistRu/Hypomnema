@@ -132,10 +132,24 @@ export function canonicalJsonV1(value: unknown): string {
   return new TextDecoder().decode(researchCanonicalSha256PayloadV1(value));
 }
 
+/** Raised when a value has no faithful SQLite `json_object(...)` byte mirror. */
+export class SqlJsonMirrorError extends TypeError {
+  constructor(message: string) {
+    super(message);
+    this.name = "SqlJsonMirrorError";
+  }
+}
+
 /**
  * Byte mirror of SQLite's `json_object(...)`: key insertion order is preserved and
  * never sorted, because the same bytes are produced inside SQL triggers and both sides
- * must hash identically. This is deliberately NOT a canonicalization — use
+ * must hash identically. Worked example: migration 026
+ * computes `execution_plan_digest` in SQL as
+ * `tabhub_sha256_v1(json_group_array(json_object('tableName', ..., 'pkV1', ...)))`
+ * (packages/server/migrations/026_privacy_purge_intents.sql:1813), and
+ * `digestPrivacyPurgeExecutionTargets` must produce those exact bytes in TypeScript;
+ * sorting the keys there makes the trigger reject every purge transition.
+ * This is deliberately NOT a canonicalization — use
  * {@link canonicalJsonV1} for fingerprints that only TypeScript produces. `bigint` is
  * written as a decimal string, matching how SQLite renders an INTEGER in JSON.
  */
@@ -143,7 +157,7 @@ export function sqlJsonObjectMirrorV1(value: unknown): string {
   const encoded = JSON.stringify(value, (_key, item: unknown) =>
     typeof item === "bigint" ? item.toString(10) : item);
   if (encoded === undefined) {
-    throw new CanonicalizationError("Cannot mirror value as SQL JSON", "$");
+    throw new SqlJsonMirrorError("Cannot mirror value as SQL JSON");
   }
   return encoded;
 }

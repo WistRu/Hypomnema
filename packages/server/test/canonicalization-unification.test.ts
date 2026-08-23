@@ -8,18 +8,54 @@ import {
   CanonicalizationError,
   canonicalJsonV1,
   sqlJsonObjectMirrorV1,
+  SqlJsonMirrorError,
 } from "@tabhub/shared";
 
-const sourceDirectory = fileURLToPath(new URL("../src", import.meta.url));
+const packageRoot = fileURLToPath(new URL("..", import.meta.url));
+
+/**
+ * Files allowed to spell the algorithm out themselves. The baseline and independent
+ * acceptance tests are the oracle the production fingerprints are checked against, and
+ * an oracle that imports the code under test proves nothing; the divergence test
+ * reproduces the retired algorithms on purpose, to show what they used to produce.
+ */
+const independentOracles = [
+  "test/baseline-g6-acceptance.test.ts",
+  "test/baseline-g8.test.ts",
+  "test/durable-ai-jobs.test.ts",
+  "test/personal-priority-materialization-acceptance.test.ts",
+  "test/persisted-fingerprint-divergence.test.ts",
+];
+
+async function* typescriptFiles(
+  directory: string,
+  prefix: string,
+): AsyncGenerator<{ relativePath: string; absolutePath: string }> {
+  for (const entry of await readdir(join(packageRoot, directory), {
+    withFileTypes: true,
+  })) {
+    const relativePath = `${prefix}${entry.name}`;
+    if (entry.isDirectory()) {
+      yield* typescriptFiles(join(directory, entry.name), `${relativePath}/`);
+      continue;
+    }
+    if (!entry.name.endsWith(".ts") && !entry.name.endsWith(".tsx")) continue;
+    yield { relativePath, absolutePath: join(packageRoot, directory, entry.name) };
+  }
+}
 
 describe("canonicalization unification", () => {
-  it("keeps every server module on the shared canonicalization", async () => {
+  it("keeps every module and test on the shared canonicalization", async () => {
     const offenders: string[] = [];
-    for (const entry of await readdir(sourceDirectory)) {
-      if (!entry.endsWith(".ts")) continue;
-      const source = await readFile(join(sourceDirectory, entry), "utf8");
-      if (/^(?:export )?function canonicalJson\b/m.test(source)) {
-        offenders.push(entry);
+    for (const directory of ["src", "test"]) {
+      for await (const file of typescriptFiles(directory, `${directory}/`)) {
+        if (independentOracles.includes(file.relativePath)) continue;
+        const source = await readFile(file.absolutePath, "utf8");
+        // The copied shape itself: recursively sorting object keys and re-emitting
+        // JSON. A copy under a new name is exactly the drift this test exists for.
+        if (/Object\.keys\([^)]*\)\s*\.sort\(\)\s*\.map\(/.test(source)) {
+          offenders.push(file.relativePath);
+        }
       }
     }
     expect(offenders).toEqual([]);
@@ -27,12 +63,14 @@ describe("canonicalization unification", () => {
 
   it("separates the canonical fingerprint contract from the SQL byte mirror", () => {
     // The canonical contract sorts keys; the SQL mirror must not, because SQLite
-    // triggers build the same bytes with json_object() in declaration order.
+    // triggers build the same bytes with json_object() in declaration order. See
+    // packages/server/migrations/026_privacy_purge_intents.sql:1813.
     expect(canonicalJsonV1({ tableName: "research_runs", pkV1: "i:7" }))
       .toBe('{"pkV1":"i:7","tableName":"research_runs"}');
     expect(sqlJsonObjectMirrorV1({ tableName: "research_runs", pkV1: "i:7" }))
       .toBe('{"tableName":"research_runs","pkV1":"i:7"}');
     expect(sqlJsonObjectMirrorV1({ rows: 7n })).toBe('{"rows":"7"}');
+    expect(() => sqlJsonObjectMirrorV1(undefined)).toThrow(SqlJsonMirrorError);
   });
 
   it("fails loudly on the inputs the legacy copies silently accepted", () => {
