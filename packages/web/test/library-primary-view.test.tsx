@@ -577,11 +577,17 @@ describe("Library as the primary workspace", () => {
     fireEvent.click(within(rating).getByRole("button", {
       name: "Set importance to 3 of 3",
     }));
-    await waitFor(() => expect(mocks.setUserImportance).toHaveBeenCalledWith([18], 3));
+    // The mutation having been called says nothing about the view having re-rendered
+    // without the rating group; waiting for the disappearance is what the assertion
+    // means. The negative assertions below stay synchronous on purpose — waiting for
+    // something never to happen passes on the first tick and proves nothing.
+    await waitFor(() => {
+      expect(mocks.setUserImportance).toHaveBeenCalledWith([18], 3);
+      expect(screen.queryByRole("group", {
+        name: "Set importance for selected logical pages",
+      })).toBeNull();
+    });
     expect(mocks.setUserImportance).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("group", {
-      name: "Set importance for selected logical pages",
-    })).toBeNull();
     expect(mocks.runPhysical).not.toHaveBeenCalled();
     expect(mocks.closePhysical).not.toHaveBeenCalled();
     queryClient.clear();

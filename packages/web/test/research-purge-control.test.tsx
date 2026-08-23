@@ -203,8 +203,13 @@ describe("ResearchPurgeControl", () => {
     expect(screen.getByText("Created 2026-08-21T10:00:00.000Z")).toBeTruthy();
     expect(screen.getByText("Updated 2026-08-21T10:02:00.000Z")).toBeTruthy();
     expect(screen.getByText("Completed 2026-08-21T10:02:00.000Z")).toBeTruthy();
-    expect(onCompleted).toHaveBeenCalledWith(completed);
-    expect(localStorage.getItem(researchPurgeStorageKey(TARGET))).toBeNull();
+    // The completion text rendering and the completion callback firing are two
+    // consequences of the same poll, not one after the other, so the callback and the
+    // storage cleanup are awaited rather than assumed to have already happened.
+    await waitFor(() => {
+      expect(onCompleted).toHaveBeenCalledWith(completed);
+      expect(localStorage.getItem(researchPurgeStorageKey(TARGET))).toBeNull();
+    });
   });
 
   it("shows hold reasons, offers retry only when allowed, and renders failed/error states", async () => {
