@@ -333,7 +333,7 @@ describe("PersonalContextPanel", () => {
 
     const research = await screen.findByRole("button", { name: "Research" });
     fireEvent.click(research);
-    expect(screen.getByText("Selected preset: Research").getAttribute("role")).toBe(
+    expect(screen.getByText('Preset "Research" is filled in. Press Save to store it.').getAttribute("role")).toBe(
       "status",
     );
 
@@ -343,7 +343,9 @@ describe("PersonalContextPanel", () => {
     expect(
       screen.getByRole("button", { name: "Research" }).getAttribute("aria-pressed"),
     ).toBe("false");
-    expect(screen.queryByText("Selected preset: Research")).toBeNull();
+    expect(screen.queryByText(
+      'Preset "Research" is filled in. Press Save to store it.',
+    )).toBeNull();
   });
 
   it("requires an explicit exact-copy picker and supports set/archive/promote with Russian live UI", async () => {
@@ -718,5 +720,43 @@ describe("PersonalContextPanel pairing handover", () => {
     )).toBeTruthy();
     expect(screen.getByText(new RegExp(challenge.code))).toBeTruthy();
     expect(screen.getByText(new RegExp(challenge.challengeId))).toBeTruthy();
+  });
+});
+
+describe("PersonalContextPanel quick presets", () => {
+  it("says what is still required rather than looking finished", async () => {
+    // Issue #33: a chip fills the editor and latches, which a user read as
+    // "done". Staging is the right design — the body is meant to be editable —
+    // so the fix is that the staging step names the action it still needs.
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Not useful" }));
+
+    expect(mocks.changeLocalPageContext).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText('Preset "Not useful" is filled in. Press Save to store it.'),
+    ).toBeTruthy();
+  });
+
+  it("stops saying it once the entry is stored", async () => {
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "Not useful" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(mocks.changeLocalPageContext).toHaveBeenCalledOnce());
+    await waitFor(() => expect(
+      screen.queryByText('Preset "Not useful" is filled in. Press Save to store it.'),
+    ).toBeNull());
+  });
+  it("says it in Russian too, placeholder and all", async () => {
+    // Without this a broken {preset} placeholder or a missing entry would ship
+    // silently: the English path falls back to the key and looks fine.
+    renderPanel({ locale: "ru" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Не пригодится" }));
+
+    expect(await screen.findByText(
+      "Заготовка «Не пригодится» подставлена. Нажмите «Сохранить», чтобы записать.",
+    )).toBeTruthy();
   });
 });

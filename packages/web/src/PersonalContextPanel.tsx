@@ -704,8 +704,13 @@ export function PersonalContextPanel({
               </div>
             ) : null}
             {scopeMode === "page" && quickPreset !== null ? (
+              // Issue #33: a chip fills the editor and latches, which reads as
+              // "done". Staging is deliberate — the body is meant to be
+              // editable before it is stored — so the step has to name the
+              // action it still needs rather than look finished. Page scope
+              // only, which is the only scope that offers chips at all.
               <p className="context-preset-status" role="status">
-                {t("Selected preset: {preset}", {
+                {t('Preset "{preset}" is filled in. Press Save to store it.', {
                   preset: t(quickPreset.label),
                 })}
               </p>

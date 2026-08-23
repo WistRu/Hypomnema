@@ -376,7 +376,8 @@ const russianMessages: Record<string, Message> = {
   Reference: "Справка",
   Compare: "Сравнить",
   Temporary: "Временно",
-  "Selected preset: {preset}": "Выбран шаблон: {preset}",
+  "Preset \"{preset}\" is filled in. Press Save to store it.":
+    "Заготовка «{preset}» подставлена. Нажмите «Сохранить», чтобы записать.",
   "Not useful": "Не пригодится",
   "Already handled": "Уже обработано",
   "Local only": "Только локально",
