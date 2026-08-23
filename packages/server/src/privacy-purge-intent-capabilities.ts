@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { types as utilTypes } from "node:util";
 
+import { sqlJsonObjectMirrorV1 as sqlJsonMirror } from "@tabhub/shared";
 import type Database from "better-sqlite3";
 
 import {
@@ -656,19 +657,32 @@ function privacyPurgeCarryoverManifest(
   `).get({ intentKey }) as { count: number; digest: string };
 }
 
-function privacyPurgeCarryoverManifestFromRows(
+/**
+ * Exported so its bytes can be pinned by test. These are the exact bytes the
+ * database rebuilds with `json_group_array(json_object(...))`, so the mirror —
+ * which keeps key insertion order — is the only correct helper. Canonical
+ * JSON would sort the keys and disagree with SQL on every row.
+ */
+export function privacyPurgeCarryoverManifestFromRows(
   rows: readonly PrivacyPurgeBudgetCarryoverRow[],
 ): { readonly count: number; readonly digest: string } {
-  const ordered = [...rows].sort((left, right) =>
-    [left.utcDate, left.budgetClass, left.jobKind, left.workflowId,
-      left.workflowVersion].join("\0").localeCompare(
-      [right.utcDate, right.budgetClass, right.jobKind, right.workflowId,
-        right.workflowVersion].join("\0"),
-    )
-  );
+  // Must reproduce the SQL `ORDER BY utc_date, budget_class, job_kind,
+  // workflow_id, workflow_version`. The text columns compare as text, but
+  // `workflow_version` is an INTEGER and SQLite orders it numerically, so
+  // comparing it as text puts version 10 before version 2 and reorders the rows
+  // the digest is built from. Latent while every row is version 1, and silent
+  // when it stops being: the manifest would simply stop matching.
+  const ordered = [...rows].sort((left, right) => {
+    const text = [left.utcDate, left.budgetClass, left.jobKind, left.workflowId]
+      .join("\0").localeCompare(
+        [right.utcDate, right.budgetClass, right.jobKind, right.workflowId]
+          .join("\0"),
+      );
+    return text !== 0 ? text : left.workflowVersion - right.workflowVersion;
+  });
   return {
     count: ordered.length,
-    digest: sha256(JSON.stringify(ordered.map((row) => ({
+    digest: sha256(sqlJsonMirror(ordered.map((row) => ({
       intentKey: row.intentKey,
       utcDate: row.utcDate,
       budgetClass: row.budgetClass,

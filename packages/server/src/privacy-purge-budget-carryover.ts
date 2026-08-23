@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { sqlJsonObjectMirrorV1 as sqlJsonMirror } from "@tabhub/shared";
+
 import type Database from "better-sqlite3";
 
 const C90_WORKFLOW_ID = "research_acquisition:c90:v1";
@@ -47,10 +49,23 @@ export interface PrivacyPurgeBudgetCarryoverRow {
   readonly activatedAt: null;
 }
 
-function payloadDigest(value: Readonly<Record<string, unknown>>): string {
+/**
+ * Exported so its bytes can be pinned by test: they are persisted, and the
+ * value ends up inside the carryover manifest that SQL rebuilds with
+ * `json_object`, so key insertion order is part of this digest's contract even
+ * though nothing in SQL recomputes the digest itself.
+ *
+ * That is why the SQL byte mirror is the right helper and `canonicalJsonV1` is
+ * not: canonicalization sorts keys, which would put `activeExposureNanos`
+ * first and invalidate every stored digest. The mirror keeps the order and
+ * still refuses the values a raw `JSON.stringify` would silently drop.
+ */
+export function privacyPurgeBudgetCarryoverPayloadDigest(
+  value: Readonly<Record<string, unknown>>,
+): string {
   return createHash("sha256")
     .update("tabhub:privacy-purge-budget-carryover:v1\0", "utf8")
-    .update(JSON.stringify(value), "utf8")
+    .update(sqlJsonMirror(value), "utf8")
     .digest("hex");
 }
 
@@ -115,7 +130,7 @@ export function derivePrivacyPurgeBudgetCarryoverRows(
       activeExposureNanos: 0,
       legacy25DayBlock: 0,
       state: "frozen",
-      payloadDigest: payloadDigest(payload),
+      payloadDigest: privacyPurgeBudgetCarryoverPayloadDigest(payload),
       frozenAt,
       activatedAt: null,
     });
@@ -254,7 +269,7 @@ export function derivePrivacyPurgeBudgetCarryoverRows(
       activeExposureNanos: 0,
       legacy25DayBlock: 0,
       state: "frozen",
-      payloadDigest: payloadDigest(payload),
+      payloadDigest: privacyPurgeBudgetCarryoverPayloadDigest(payload),
       frozenAt,
       activatedAt: null,
     });
