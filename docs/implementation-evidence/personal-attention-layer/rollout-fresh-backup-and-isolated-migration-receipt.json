@@ -7,14 +7,15 @@
   "repositoryHead": "d2579aaa71a1f5615a54a51d4e778f857e66864b",
   "buildCommand": "corepack pnpm build",
   "buildArtifact": "packages/server/dist/main.js",
-  "liveDatabaseWritten": false,
+  "liveDatabaseWritten": true,
   "browserTouched": false,
   "quiescence": {
     "note": "The daily runtime was stopped before the backup so the backup and the hashes are taken against a quiescent database.",
     "stoppedPid": 581820,
     "stoppedProcessStartedAt": "2026-08-12T12:22:02+03:00",
     "stopCommand": "taskkill /PID 581820",
-    "walCheckpointedOnNextOpen": true
+    "walCheckpointedOnNextOpen": true,
+    "walCheckpointNote": "The daily runtime was stopped without a clean close, so the write-ahead log was still separate. Opening the database for the backup recovered and checkpointed it."
   },
   "liveDatabase": {
     "path": "data/tabhub.sqlite",
@@ -31,7 +32,8 @@
       "tab_instances": 1154,
       "tags": 26,
       "tab_tags": 2285
-    }
+    },
+    "sha256BeforeProofNote": "Taken after the backup had already checkpointed the write-ahead log, so it is the post-checkpoint state, not the state while the daily server was running."
   },
   "freshBackup": {
     "path": "backups/tabhub-2026-08-23T02-16-12.227Z.sqlite",
@@ -103,5 +105,6 @@
     }
   },
   "secretsRecorded": false,
-  "verdict": "PASS"
+  "verdict": "PASS",
+  "liveDatabaseWrittenNote": "Corrected 2026-08-23 (issue #20). The earlier value of false contradicted the write-ahead-log checkpoint recorded beside it: taking the backup opened the live database, which recovered and checkpointed its write-ahead log into the main file. That is the only write this proof caused, and it happened BEFORE the first hash was taken. The unchanged-hash claim below therefore covers the migration proof itself, not the backup step that preceded it."
 }

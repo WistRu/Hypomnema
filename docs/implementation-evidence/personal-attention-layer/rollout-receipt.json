@@ -17,7 +17,12 @@
     "integrityCheck": "ok",
     "foreignKeyViolations": 0,
     "tableCount": 28,
-    "rowCounts": { "tabs": 2198, "tab_instances": 1154, "tags": 26, "tab_tags": 2285 }
+    "rowCounts": {
+      "tabs": 2198,
+      "tab_instances": 1154,
+      "tags": 26,
+      "tab_tags": 2285
+    }
   },
   "processes": {
     "oldPid": 581820,
@@ -30,7 +35,8 @@
     "startCommand": "node packages/server/dist/main.js",
     "stdoutLog": "data/rollout-2026-08-23.stdout.log",
     "stderrLog": "data/rollout-2026-08-23.stderr.log",
-    "stderrEmpty": true
+    "stderrEmpty": true,
+    "logEvidence": "Paths and the fact that standard error was empty. No log content is attached, so the runbook's 'fresh logs' requirement is recorded as partially met."
   },
   "postRollout": {
     "databaseSha256": "554d2fa2b28b0eb5937dbacc1fa39cd5240ccc55f8a9ac004982d309edac3371",
@@ -40,7 +46,12 @@
     "integrityCheck": "ok",
     "foreignKeyViolations": 0,
     "tableCount": 167,
-    "rowCounts": { "tabs": 2198, "tab_instances": 1154, "tags": 26, "tab_tags": 2285 },
+    "rowCounts": {
+      "tabs": 2198,
+      "tab_instances": 1154,
+      "tags": 26,
+      "tab_tags": 2285
+    },
     "rowCountsUnchangedByMigration": true
   },
   "health": {
@@ -49,39 +60,36 @@
     "database": "ok",
     "schemaVersion": 26
   },
-  "features": {
-    "route": "GET /api/features",
-    "observedFromRuntime": true,
-    "context": true,
-    "logicalImportance": true,
-    "resources": true,
-    "activityWindows": true,
-    "agentUserImportance": true,
-    "priorityPersonalization": true,
-    "priorityReaders": true,
-    "priorityShadow": true,
-    "liveAcquisition": false,
-    "pageSummaryCapture": false,
-    "priorityAssessmentWriter": false,
-    "privacyPurge": false,
-    "research": false
-  },
   "featureFlagNotes": {
     "environmentFile": ".env (gitignored) written for the Trial-week profile",
     "activityDailyWriter": "TABHUB_FEATURE_ACTIVITY_DAILY_WRITER=true in .env; GET /api/features does not project this flag, so it is observable only through the environment and through daily activity rows",
     "agentUserImportance": "derived capability, true because schema >= 23 and logicalImportance/resources are on",
     "providerCredential": "none configured; no ANTHROPIC_API_KEY or research pricing values are present, so no paid Provider call can happen"
   },
-  "libraryRead": { "route": "GET /api/tabs?limit=1", "statusCode": 200 },
+  "libraryRead": {
+    "route": "GET /api/tabs?limit=1",
+    "statusCode": 200
+  },
   "mcpSmoke": {
     "transport": "stdio",
     "artifact": "packages/mcp/dist/main.js",
     "initialize": "ok",
-    "serverInfo": { "name": "tabhub", "version": "0.1.0" },
+    "serverInfo": {
+      "name": "tabhub",
+      "version": "0.1.0"
+    },
     "toolCount": 32,
     "toolCalls": [
-      { "name": "get_stats", "isError": false, "observed": "total 2198 tabs, open 1111" },
-      { "name": "list_resources", "isError": false, "observed": "resources materialized on the live database at 2026-08-23T02:19:09Z" }
+      {
+        "name": "get_stats",
+        "isError": false,
+        "observed": "total 2198 tabs, open 1111"
+      },
+      {
+        "name": "list_resources",
+        "isError": false,
+        "observed": "resources materialized on the live database at 2026-08-23T02:19:09Z"
+      }
     ]
   },
   "extension": {
@@ -91,12 +99,57 @@
   },
   "deploymentWaiver": {
     "recordedAt": "2026-08-23",
-    "modules": ["research", "liveAcquisition", "privacyPurge"],
-    "alsoOffForTheTrialWeek": ["pageSummaryCapture", "priorityAssessmentWriter"],
+    "modules": [
+      "research",
+      "liveAcquisition",
+      "privacyPurge"
+    ],
+    "alsoOffForTheTrialWeek": [
+      "pageSummaryCapture",
+      "priorityAssessmentWriter"
+    ],
     "gateG9": "PENDING",
     "finalGate": "not claimed"
   },
   "rollbackRecipe": "docs/personal-attention-layer-rollback-recipe.md",
   "secretsRecorded": false,
-  "verdict": "PASS"
+  "verdict": "PASS_WITH_UNPROVEN_ITEMS",
+  "features": {
+    "route": "GET /api/features",
+    "correctedAt": "2026-08-23 (issue #20)",
+    "observedFromRuntime": {
+      "context": true,
+      "logicalImportance": true,
+      "resources": true,
+      "activityWindows": true,
+      "priorityReaders": true,
+      "priorityShadow": true,
+      "priorityPersonalization": true,
+      "liveAcquisition": false,
+      "pageSummaryCapture": false,
+      "priorityAssessmentWriter": false,
+      "privacyPurge": false,
+      "research": false
+    },
+    "observedFromEnvironmentOnly": {
+      "activityDailyWriter": true
+    },
+    "derivedCapabilities": {
+      "agentUserImportance": true
+    },
+    "trialWeekFlagsOn": 8,
+    "trialWeekFlagsVerifiedFromRuntime": 7,
+    "note": "Seven of the eight Trial-week flags are observable through the route; activityDailyWriter is not projected and rests on the environment file alone. agentUserImportance is a capability the runtime derives from schema and other flags, not one of the eight, and was previously listed among them in a way that made the count look fully verified."
+  },
+  "rollbackArtifact": {
+    "receipt": "docs/implementation-evidence/personal-attention-layer/C98-rollback-artifact-receipt.json",
+    "producedAfterThisRollout": true
+  },
+  "verdictNote": "Corrected 2026-08-23 (issue #20). The migration, the runtime and the Library read are proven. Three of the runbook's rollout requirements were not met at the time: the rollback artifact and its hash did not exist until afterwards, the extension reload was never performed deliberately, and the four live journeys were not walked. The earlier flat PASS did not distinguish these.",
+  "unprovenAtRollout": [
+    "rollback artifact and profile hash (produced later, issue #18)",
+    "deliberate extension reload (issue #12)",
+    "live journeys J1, J2 and J4 (issue #12)",
+    "fresh log content (paths and empty stderr only)"
+  ]
 }
