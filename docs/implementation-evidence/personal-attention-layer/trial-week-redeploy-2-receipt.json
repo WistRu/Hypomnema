@@ -1,0 +1,92 @@
+{
+ "version": 1,
+ "recordedAt": "2026-08-23T15:28:00Z",
+ "scope": "trial_week_runtime_redeploy_no_schema_change",
+ "issue": "https://github.com/WistRu/Hypomnema/issues/31",
+ "parentIssue": "https://github.com/WistRu/Hypomnema/issues/2",
+ "precedingReceipt": "docs/implementation-evidence/personal-attention-layer/trial-week-redeploy-receipt.json",
+ "reason": "Second redeploy of the day, still before the Trial week began counting. It carries the one-click pairing handover from issue #31, the half deliberately deferred at the first redeploy. The Trial week remains gated on issue #12, so nothing was invalidated.",
+ "repositoryHead": "89e135efb112146202119ee7e472bb290b0d1440",
+ "previousRepositoryHead": "8a88bb730fc468ab42c699aa6bbcce06210ea709",
+ "buildCommand": "corepack pnpm build",
+ "schemaChange": "none; database stayed at user_version 26 and no migration ran",
+ "preRedeploy": {
+  "backupPath": "backups/tabhub-2026-08-23T15-27-11.304Z.sqlite",
+  "backupSha256": "1340049ed7d0fa1e71967045d1ad3d770816c5a014ff868098f850943aa8caa9",
+  "backupSchemaVersion": 26,
+  "backupIntegrityCheck": "ok",
+  "backupForeignKeyViolations": 0,
+  "backupTableCount": 167,
+  "backupRowCounts": {
+   "tabs": 2269
+  },
+  "databaseSha256": "0e71ef2b14d65e6d5eb7ae59b9ee09391e70feac4a15eca32492cc6b75bb9101",
+  "schemaVersion": 26
+ },
+ "processes": {
+  "oldPid": 1094604,
+  "oldProcessStopCommand": "Stop-Process -Id 1094604 -Force",
+  "newPid": 676880,
+  "port": "127.0.0.1:7717",
+  "listeningVerified": true
+ },
+ "postRedeploy": {
+  "health": {
+   "status": "ok",
+   "database": "ok",
+   "schemaVersion": 26
+  },
+  "databaseSha256": "0e71ef2b14d65e6d5eb7ae59b9ee09391e70feac4a15eca32492cc6b75bb9101",
+  "databaseSha256Unchanged": true,
+  "libraryRead": 200,
+  "tabsApiRead": 200,
+  "stats": {
+   "total": 2269,
+   "open": 1167
+  }
+ },
+ "featureProjectionUnchanged": true,
+ "featureFlagNotes": "Identical before and after, field for field. activityDailyWriter remains set in the environment file but is not projected by /api/features, as issue #20 corrected the original rollout receipt to say; still unobserved from the runtime rather than confirmed.",
+ "servedBundleVerified": {
+  "asset": "/app/assets/index-aa7Welfc.js",
+  "bytes": 964439,
+  "containsNewPairingOutcomeCopy": true,
+  "containsSupersededCopy": false,
+  "note": "Fetched from the running server, not read from disk."
+ },
+ "mcpSmoke": {
+  "transport": "stdio",
+  "toolCount": 32,
+  "toolsCalled": [
+   "get_stats",
+   "list_resources"
+  ],
+  "result": "both answered from the live runtime"
+ },
+ "extension": {
+  "relayReconnectedWithoutUserAction": true,
+  "scopes": [
+   {
+    "browser": "edge",
+    "protocolVersion": 5,
+    "connectedAt": "2026-08-23T15:27:24Z"
+   },
+   {
+    "browser": "yandex",
+    "protocolVersion": 5,
+    "connectedAt": "2026-08-23T15:27:24Z"
+   }
+  ],
+  "unproven": "The installed extensions still run the pre-change bundle. Until they are reloaded the one-click handover cannot succeed: an extension that does not know the `pair` bridge request refuses it, and the page falls back to the manual challenge and code. That degradation is the designed behaviour and is covered by tests, but it means #31 is deployed on the server and not yet exercised in any browser."
+ },
+ "deploymentWaiver": "unchanged; research, live acquisition and privacy purge stay feature-off, G9 stays PENDING, Final Gate not claimed",
+ "rollbackRecipe": "unchanged; feature-off on schema 26 via rollback/trial-week-feature-off.env. No restore performed and none authorised.",
+ "trialWeek": "not started; still gated on issue #12",
+ "knownUnfixed": "Issue #32 records two pre-existing gaps this change deliberately did not close: any script in the Library page can mint a pairing challenge for an arbitrary extension origin using the same-origin session cookie, and neither pairing endpoint is rate-limited.",
+ "secretsRecorded": false,
+ "verdict": "PASS_WITH_UNPROVEN_ITEMS",
+ "unprovenAtRedeploy": [
+  "extension reload, so the one-click pairing path has not run in any browser",
+  "activityDailyWriter, which /api/features does not project"
+ ]
+}
