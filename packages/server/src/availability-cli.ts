@@ -20,6 +20,11 @@ function duration(from: string | null, to: string | null): string {
   if (from === null || to === null) return "unknown";
   const ms = Date.parse(to) - Date.parse(from);
   if (!Number.isFinite(ms) || ms < 0) return "unknown";
+  // Seconds below a minute: an eleven-second outage rendered as "0m" reads as
+  // no outage at all, and understating one is the failure this tool exists to
+  // prevent.
+  const seconds = Math.round(ms / 1_000);
+  if (seconds < 60) return `${seconds}s`;
   const minutes = Math.round(ms / 60_000);
   if (minutes < 60) return `${minutes}m`;
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;

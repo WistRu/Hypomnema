@@ -396,9 +396,19 @@ powershell -ExecutionPolicy Bypass -File scripts/install-autostart.ps1
 The build comes first: the task launches `packages/server/dist/main.js`, and the
 installer refuses to register a task that would point at nothing.
 
-Registers a per-user scheduled task with two triggers: at logon, so a reboot is
+Autostart is configured by `pnpm install`, so there is normally nothing to run
+by hand. The command above is only for reconfiguring it.
+
+It prefers a per-user scheduled task with two triggers: at logon, so a reboot is
 survivable, and every five minutes, so a runtime that dies on its own comes back
-without waiting for one. Both call `scripts/tabhub-runtime.ps1`, which checks two
+without waiting for one. **On some machines that is refused outright** — security
+policy or protection software can deny scheduled tasks to an ordinary user, and
+this one does. When that happens it falls back to a Startup-folder entry running
+the launcher in `-Watch` mode, which needs no privileges and does both jobs:
+starts at logon, keeps checking while it runs.
+
+The fallback is weaker in one way worth knowing: if the watcher process is
+killed, nothing restores it until the next logon. Both call `scripts/tabhub-runtime.ps1`, which checks two
 things before starting anything: whether something is already serving on
 `127.0.0.1`, and whether a TabHub process is running at all. The second matters —
 a process that is alive but not yet listening still holds the database, and a port

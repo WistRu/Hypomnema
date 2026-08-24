@@ -14,8 +14,15 @@ Both call scripts/tabhub-runtime.ps1, which refuses to start a second server
 when one is already serving or is running but not yet listening, so the repeat
 is free and does not risk two processes on one database.
 
-Registered for the current user only, and runs with ordinary privileges. It
-needs none: the runtime binds loopback and writes inside the repository.
+If the scheduled task cannot be registered -- and on some machines it cannot,
+because security policy or protection software denies it to an ordinary user --
+this falls back to a Startup-folder entry running the launcher in -Watch mode.
+That needs no privileges at all and covers both jobs: it starts at logon and
+keeps checking while it runs. It is weaker in one way, and worth knowing: if the
+watcher itself is killed, nothing restores it until the next logon.
+
+Registered for the current user only either way. Neither form needs elevation:
+the runtime binds loopback and writes inside the repository.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts/install-autostart.ps1
@@ -38,12 +45,23 @@ $launcher = Join-Path $PSScriptRoot 'tabhub-runtime.ps1'
 $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 
 if ($Remove) {
-  if (-not $existing) {
-    Write-Output "No scheduled task named '$TaskName'. Nothing to remove."
-    exit 0
+  $removed = $false
+  if ($existing) {
+    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+    Write-Output "Removed the scheduled task '$TaskName'."
+    $removed = $true
   }
-  Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-  Write-Output "Removed the scheduled task '$TaskName'. TabHub will no longer start by itself."
+  $startupEntry = Join-Path ([Environment]::GetFolderPath('Startup')) 'TabHub runtime.cmd'
+  if (Test-Path $startupEntry) {
+    Remove-Item $startupEntry -Force
+    Write-Output "Removed $startupEntry."
+    $removed = $true
+  }
+  if (-not $removed) {
+    Write-Output 'Nothing to remove: TabHub was not set to start by itself.'
+  } else {
+    Write-Output 'TabHub will no longer start by itself. Any running watcher survives until it exits.'
+  }
   exit 0
 }
 
@@ -86,14 +104,42 @@ if ($existing) {
   Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
 }
 
-Register-ScheduledTask `
-  -TaskName $TaskName `
-  -Action $action `
-  -Trigger @($atLogon, $repeating) `
-  -Settings $settings `
-  -Description 'Starts the TabHub runtime at logon and brings it back if it dies (issue #37).' | Out-Null
+$startupFolder = [Environment]::GetFolderPath('Startup')
+$startupEntry = Join-Path $startupFolder 'TabHub runtime.cmd'
+$registered = $false
 
-Write-Output "Registered '$TaskName': starts at logon, and checks every 5 minutes."
+try {
+  Register-ScheduledTask `
+    -TaskName $TaskName `
+    -Action $action `
+    -Trigger @($atLogon, $repeating) `
+    -Settings $settings `
+    -Description 'Starts the TabHub runtime at logon and brings it back if it dies (issue #37).' `
+    -ErrorAction Stop | Out-Null
+  $registered = $true
+  Write-Output "Registered '$TaskName': starts at logon, and checks every 5 minutes."
+  if (Test-Path $startupEntry) {
+    Remove-Item $startupEntry -Force
+    Write-Output 'Removed the Startup-folder fallback: the scheduled task supersedes it.'
+  }
+} catch {
+  Write-Output "Scheduled task refused: $($_.Exception.Message)"
+  Write-Output 'Falling back to the Startup folder, which needs no privileges.'
+}
+
+if (-not $registered) {
+  # A .cmd rather than a shortcut: no COM, nothing to go stale, and the command
+  # it runs is readable by anyone who opens the file.
+  $command = @(
+    '@echo off',
+    ('start "" /min powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
+      $launcher + '" -Port ' + $Port + ' -Watch')
+  ) -join "`r`n"
+  Set-Content -Path $startupEntry -Value $command -Encoding ASCII
+  Write-Output "Wrote $startupEntry -- TabHub will be watched from the next logon."
+  Write-Output 'To start watching now without logging out, run:'
+  Write-Output ("  powershell -ExecutionPolicy Bypass -File `"$launcher`" -Watch")
+}
 if ($buildMissing) {
   Write-Output ''
   Write-Output "No server build at $entry yet, so the task will do nothing until you run:"

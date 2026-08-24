@@ -20,7 +20,11 @@ never stops or restarts a healthy runtime.
 [CmdletBinding()]
 param(
   [int] $Port = 7717,
-  [string] $RepositoryRoot
+  [string] $RepositoryRoot,
+  # Stay resident and keep checking. Used by the Startup-folder fallback, where
+  # nothing else will call this again until the next logon.
+  [switch] $Watch,
+  [int] $WatchIntervalSeconds = 60
 )
 
 $ErrorActionPreference = 'Stop'
@@ -34,6 +38,22 @@ if (-not $RepositoryRoot) {
 }
 
 $entry = Join-Path $RepositoryRoot 'packages/server/dist/main.js'
+
+if ($Watch) {
+  # The resident form. Deliberately tolerant: a missing build or an absent node
+  # is a reason to wait and look again, not to give up until the next logon.
+  Write-Output "Watching TabHub on 127.0.0.1:$Port every $WatchIntervalSeconds s."
+  while ($true) {
+    try {
+      & $PSCommandPath -Port $Port -RepositoryRoot $RepositoryRoot | Out-Null
+    } catch {
+      # Swallowed on purpose: the watcher outliving one bad attempt is the
+      # entire point of it existing.
+    }
+    Start-Sleep -Seconds $WatchIntervalSeconds
+  }
+}
+
 if (-not (Test-Path $entry)) {
   Write-Error "TabHub server build not found at $entry. Build it before enabling autostart."
   exit 1
@@ -70,7 +90,7 @@ if ($alreadyRunning) {
 
 $node = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not $node) {
-  Write-Error 'node was not found on PATH. The scheduled task cannot start TabHub without it.'
+  Write-Error 'node was not found on PATH. TabHub cannot be started without it.'
   exit 1
 }
 
