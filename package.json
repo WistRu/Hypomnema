@@ -15,7 +15,8 @@
     "build": "pnpm -r --if-present build",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --workspace-concurrency=1 --if-present test",
-    "backup": "pnpm --filter @tabhub/server backup"
+    "backup": "pnpm --filter @tabhub/server backup",
+    "postinstall": "node scripts/postinstall.mjs"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",

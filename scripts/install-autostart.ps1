@@ -52,11 +52,12 @@ if (-not (Test-Path $launcher)) {
   exit 1
 }
 
+# A missing build is not a reason to refuse. This runs from postinstall on a
+# fresh clone, where the build has not happened yet; the launcher checks for
+# the build every time it fires, so a task registered early simply does
+# nothing until there is something to start.
 $entry = Join-Path $repositoryRoot 'packages/server/dist/main.js'
-if (-not (Test-Path $entry)) {
-  Write-Error "No server build at $entry. Run: corepack pnpm --filter @tabhub/server build"
-  exit 1
-}
+$buildMissing = -not (Test-Path $entry)
 
 $action = New-ScheduledTaskAction `
   -Execute 'powershell.exe' `
@@ -66,10 +67,12 @@ $action = New-ScheduledTaskAction `
 $atLogon = New-ScheduledTaskTrigger -AtLogOn
 # -RepetitionDuration is not optional in practice: omitting it lets Task
 # Scheduler expire the repetition, and a restart task that quietly stops
-# repeating is the worst failure mode this could have.
+# repeating is the worst failure mode this could have. [TimeSpan]::MaxValue is
+# the obvious value and is rejected outright -- registration fails with an
+# unhelpful XML format error -- so this is a large finite duration instead.
 $repeating = New-ScheduledTaskTrigger -Once -At (Get-Date) `
   -RepetitionInterval (New-TimeSpan -Minutes 5) `
-  -RepetitionDuration ([TimeSpan]::MaxValue)
+  -RepetitionDuration (New-TimeSpan -Days 3650)
 
 $settings = New-ScheduledTaskSettingsSet `
   -AllowStartIfOnBatteries `
@@ -91,6 +94,11 @@ Register-ScheduledTask `
   -Description 'Starts the TabHub runtime at logon and brings it back if it dies (issue #37).' | Out-Null
 
 Write-Output "Registered '$TaskName': starts at logon, and checks every 5 minutes."
+if ($buildMissing) {
+  Write-Output ''
+  Write-Output "No server build at $entry yet, so the task will do nothing until you run:"
+  Write-Output '  corepack pnpm --filter @tabhub/server build'
+}
 Write-Output ''
 Write-Output 'This is not proven until the machine has actually been rebooted.'
 Write-Output 'After the next reboot, check that the runtime is serving, then read the'
