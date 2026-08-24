@@ -115,6 +115,7 @@ export function PersonalPriorityRulesDialog({
   const [previewedDraft, setPreviewedDraft] = useState<PersonalPriorityDraft | null>(null);
   const [saved, setSaved] = useState<LifecycleResponse | null>(null);
   const [confirmation, setConfirmation] = useState<LifecycleWithoutFingerprint | null>(null);
+  const [turnOnPending, setTurnOnPending] = useState(false);
   const [notice, setNotice] = useState<{
     readonly key: string;
     readonly params?: Record<string, number | string>;
@@ -218,6 +219,51 @@ export function PersonalPriorityRulesDialog({
       await queryClient.invalidateQueries({ queryKey: ["personal-priority-rules"] });
     },
   });
+  /**
+   * Issue #34: writing a rule and turning it on should not require
+   * understanding versions. Save and activate stay two server operations with
+   * their own compare-and-set — that is what keeps two sessions from silently
+   * overwriting each other — but the user performs one act, and is asked about
+   * its effect rather than about a version number.
+   */
+  const turnOnMutation = useMutation({
+    mutationFn: async (input: {
+      draft: PersonalPriorityDraft;
+      expectedLatestVersion: number | null;
+      expectedActiveRef: RulesetVersion["ref"];
+    }) => {
+      const savedVersion = await changePersonalPriorityRules({
+        kind: "save",
+        draft: input.draft,
+        expectedLatestVersion: input.expectedLatestVersion,
+        expectedActiveRef: input.expectedActiveRef,
+      });
+      if (savedVersion.operation !== "save") {
+        throw new Error("Saving the rule did not produce a version to activate.");
+      }
+      // Activating against the ref the save just returned, not the one read
+      // before it: anything else would race a concurrent change.
+      return changePersonalPriorityRules({
+        kind: "activate",
+        target: savedVersion.target,
+        expectedActiveRef: savedVersion.activeRef,
+      });
+    },
+    onSuccess: async () => {
+      setTurnOnPending(false);
+      setSaved(null);
+      setNotice({ key: "Priority rules activated." });
+      await queryClient.invalidateQueries({ queryKey: ["personal-priority-rules"] });
+    },
+    onError: async () => {
+      setTurnOnPending(false);
+      // The save may well have succeeded and only the activate failed. Refresh
+      // so the saved-but-inactive version is visible and the disclosure's
+      // "Activate saved version" can finish the job — otherwise the user sees a
+      // click that did nothing and a rule that quietly exists.
+      await queryClient.invalidateQueries({ queryKey: ["personal-priority-rules"] });
+    },
+  });
   const recomputeMutation = useMutation({
     mutationFn: () => submitPriorityRecompute({
       idempotencyKey: `priority-recompute:${Date.now()}`,
@@ -251,6 +297,9 @@ export function PersonalPriorityRulesDialog({
       return { result, request };
     },
     onSuccess: ({ result, request }) => {
+      // Replacing the preview under an open turn-on dialog would leave it
+      // quoting counts from a different rule entirely.
+      setTurnOnPending(false);
       setPreview(result);
       setConfirmation(request);
     },
@@ -262,7 +311,8 @@ export function PersonalPriorityRulesDialog({
   });
 
   const rulesState = stateQuery.data;
-  const mutationError = lifecycleMutation.error ??
+  const mutationError = turnOnMutation.error ??
+    lifecycleMutation.error ??
     lifecyclePreviewMutation.error ?? versionMutation.error ??
     recomputeMutation.error ?? jobQuery.error ?? localError;
   const mutationErrorSpan = errorSourceSpan(mutationError);
@@ -384,28 +434,88 @@ export function PersonalPriorityRulesDialog({
                   after: t(outcomeLabel(example.after)),
                 })}</span>
               </li>)}</ul>
-              <button disabled={!previewIsFresh || previewedDraft === null || lifecycleMutation.isPending} type="button"
-                onClick={() => lifecycleMutation.mutate({ kind: "save", draft: previewedDraft!,
-                  expectedLatestVersion: rulesState.latestVersion,
-                  expectedActiveRef: preview.comparedActiveRef })}>
-                {t("Save inactive version")}
+              {/* One action here, whichever the configuration allows. With the
+                  writer off there is no activation to offer, and leaving the
+                  section with no action at all would read as a dead end while
+                  the only save sat inside a collapsed audit disclosure. */}
+              <button
+                className="priority-rules-primary"
+                disabled={!previewIsFresh || previewedDraft === null ||
+                  turnOnMutation.isPending || lifecycleMutation.isPending}
+                type="button"
+                onClick={() => {
+                  if (canMutateAndRecompute) {
+                    setConfirmation(null);
+                    setTurnOnPending(true);
+                    return;
+                  }
+                  lifecycleMutation.mutate({ kind: "save", draft: previewedDraft!,
+                    expectedLatestVersion: rulesState.latestVersion,
+                    expectedActiveRef: preview.comparedActiveRef });
+                }}
+              >
+                {canMutateAndRecompute
+                  ? t("Turn this rule on")
+                  : t("Save inactive version")}
               </button>
             </section>
           ) : null}
-          {saved?.operation === "save" && canMutateAndRecompute ? (
-            <button type="button" onClick={() => setConfirmation({ kind: "activate",
-              target: saved.target, expectedActiveRef: saved.activeRef })}>
-              {t("Activate saved version")}
-            </button>
+          {turnOnPending && preview !== null && previewedDraft !== null ? (
+            <section role="alertdialog" aria-label={t("Confirm rule change")}>
+              {/* Asks about the effect, not about a version number. */}
+              <p>{t("Turn this rule on? It changes {changed} of {scanned} checked pages.", {
+                changed: formatNumber(preview.strataCounts.exclusionChanged +
+                  preview.strataCounts.bandChanged + preview.strataCounts.assessmentChanged),
+                scanned: formatNumber(preview.scannedCount),
+              })}</p>
+              <button type="button" onClick={() => turnOnMutation.mutate({
+                draft: previewedDraft,
+                expectedLatestVersion: rulesState.latestVersion,
+                expectedActiveRef: preview.comparedActiveRef,
+              })}>
+                {t("Turn it on")}
+              </button>
+              <button type="button" onClick={() => setTurnOnPending(false)}>{t("Cancel")}</button>
+            </section>
           ) : null}
           {canMutateAndRecompute ? <div className="priority-rules-lifecycle-actions">
-            <button type="button" onClick={() => lifecyclePreviewMutation.mutate({ kind: "disable" })}>{t("Disable")}</button>
-            <button type="button" onClick={() => lifecyclePreviewMutation.mutate({ kind: "reset" })}>{t("Reset")}</button>
-            <button type="button" onClick={() => recomputeMutation.mutate()}>
-              {t("Recompute priority")}
-            </button>
+            <button type="button" onClick={() => lifecyclePreviewMutation.mutate({ kind: "disable" })}>{t("Turn my rules off")}</button>
           </div> : null}
-          <section>
+          <details className="priority-rules-versions">
+            {/* Kept and reachable: this repository audits by version and hash.
+                Not in the path of someone who only wants their rule to work. */}
+            <summary>{t("Versions and history")}</summary>
+            {/* Gated by preview alone, as before: saving a version needs
+                `canPreviewAndSave`, not the writer. Requiring the writer here
+                would take the control away from exactly the configuration this
+                dialog is most often opened in. */}
+            {preview !== null && canMutateAndRecompute ? (
+              // Only where it is an alternative to turning the rule on. With
+              // the writer off the same control is the section's primary
+              // action above, and two buttons with one name is worse than one.
+              <button
+                disabled={!previewIsFresh || previewedDraft === null ||
+                  lifecycleMutation.isPending}
+                type="button"
+                onClick={() => lifecycleMutation.mutate({ kind: "save", draft: previewedDraft!,
+                  expectedLatestVersion: rulesState.latestVersion,
+                  expectedActiveRef: preview.comparedActiveRef })}
+              >
+                {t("Save inactive version")}
+              </button>
+            ) : null}
+            {saved?.operation === "save" && canMutateAndRecompute ? (
+              <button type="button" onClick={() => setConfirmation({ kind: "activate",
+                target: saved.target, expectedActiveRef: saved.activeRef })}>
+                {t("Activate saved version")}
+              </button>
+            ) : null}
+            {canMutateAndRecompute ? <div className="priority-rules-lifecycle-actions">
+              <button type="button" onClick={() => lifecyclePreviewMutation.mutate({ kind: "reset" })}>{t("Reset")}</button>
+              <button type="button" onClick={() => recomputeMutation.mutate()}>
+                {t("Recompute priority")}
+              </button>
+            </div> : null}
             <h3>{t("Version history")}</h3>
             {rulesState.historyTruncated ? <p>{t("Showing the latest versions only.")}</p> : null}
             <ul>{rulesState.versions.map((version) => <li key={`${version.ref.rulesetId}:${version.ref.version}`}>
@@ -421,7 +531,7 @@ export function PersonalPriorityRulesDialog({
                 {t("Preview rollback")}
               </button> : null}
             </div> : null}
-          </section>
+          </details>
           {confirmation !== null ? <section role="alertdialog" aria-label={t("Confirm rule change")}>
             <p>{t("This changes the active priority rules. Recompute remains a separate action.")}</p>
             <button type="button" onClick={() => lifecycleMutation.mutate(confirmation)}>

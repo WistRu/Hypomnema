@@ -76,6 +76,12 @@ const russianMessages: Record<string, Message> = {
   "My": "Моя",
   "My importance": "Моя важность",
   "Natural language": "Естественный язык",
+  "Turn this rule on": "Включить это правило",
+  "Turn it on": "Включить",
+  "Turn my rules off": "Выключить мои правила",
+  "Versions and history": "Версии и история",
+  "Turn this rule on? It changes {changed} of {scanned} checked pages.":
+    "Включить это правило? Оно изменит {changed} страниц из {scanned} проверенных.",
   "Personal priority rules": "Персональные правила приоритета",
   "Preview": "Предпросмотр",
   "{changed} of {scanned} checked pages change with this rule.":

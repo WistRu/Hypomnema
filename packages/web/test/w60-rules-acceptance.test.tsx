@@ -192,7 +192,7 @@ describe("W60 rules and durable recompute acceptance", () => {
       <PersonalPriorityRulesDialog canMutateAndRecompute onDismiss={vi.fn()} />
     </I18nProvider></QueryClientProvider>);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Disable" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Turn my rules off" }));
     expect(await screen.findByRole("alertdialog", { name: "Confirm rule change" }))
       .toBeTruthy();
     expect(mocks.changePersonalPriorityRules).not.toHaveBeenCalled();

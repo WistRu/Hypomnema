@@ -195,7 +195,7 @@ describe("PersonalPriorityRulesDialog", () => {
         span: { start: 11, end: 30 } },
     ));
     renderDialog();
-    fireEvent.click(await screen.findByRole("button", { name: "Disable" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Turn my rules off" }));
 
     expect((await screen.findByRole("alert")).textContent).toContain(
       "Error at characters 11-30: Active priority rules changed. Reload them and preview again.",
@@ -318,5 +318,99 @@ describe("PersonalPriorityRulesDialog preview, in words", () => {
     // compiled rule. Both are deliberate; assert the hashes rather than the count.
     expect((await screen.findAllByText("Technical detail")).length).toBeGreaterThan(0);
     expect(screen.getByText("b".repeat(64))).toBeTruthy();
+  });
+});
+
+describe("PersonalPriorityRulesDialog, turning a rule on", () => {
+  it("takes one action from preview to active, and says what it will change", async () => {
+    // Issue #34: writing a rule and turning it on should not require
+    // understanding versions. The version machinery is kept, but behind the
+    // common case rather than in front of it.
+    const saved = { operation: "save", target: { rulesetId: 2, version: 1 },
+      activeRef: baselineRef, latestVersion: 1, requestFingerprint: "d".repeat(64),
+      replayed: false, changed: true, recomputeRequired: false, staleOutcomeCount: 0 };
+    mocks.changePersonalPriorityRules
+      .mockResolvedValueOnce(saved)
+      .mockResolvedValueOnce({ ...saved, operation: "activate", activeRef: saved.target,
+        recomputeRequired: false });
+    renderDialog();
+    const source = await screen.findByRole("textbox", { name: "Rule source" });
+    fireEvent.change(source, { target: { value:
+      "pages when is open equals true then score add 10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview changes" }));
+    expect(await screen.findByText("1 of 1 checked pages change with this rule.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Turn this rule on" }));
+
+    // The confirmation restates the impact rather than asking about versions.
+    expect(await screen.findByText(
+      "Turn this rule on? It changes 1 of 1 checked pages.",
+    )).toBeTruthy();
+    expect(mocks.changePersonalPriorityRules).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Turn it on" }));
+
+    await waitFor(() => expect(mocks.changePersonalPriorityRules).toHaveBeenCalledTimes(2));
+    expect(mocks.changePersonalPriorityRules.mock.calls[0]?.[0]).toMatchObject({
+      kind: "save", expectedActiveRef: preview.comparedActiveRef,
+    });
+    expect(mocks.changePersonalPriorityRules.mock.calls[1]?.[0]).toMatchObject({
+      kind: "activate", target: saved.target, expectedActiveRef: baselineRef,
+    });
+    expect(await screen.findByText("Priority rules activated.")).toBeTruthy();
+  });
+
+  it("keeps the version vocabulary reachable, not removed", async () => {
+    renderDialog();
+    const source = await screen.findByRole("textbox", { name: "Rule source" });
+    fireEvent.change(source, { target: { value:
+      "pages when is open equals true then score add 10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview changes" }));
+    await screen.findByText("1 of 1 checked pages change with this rule.");
+
+    // jsdom does not collapse <details>, so finding the control proves nothing
+    // about reachability on its own. Open the disclosure the way a person would.
+    const summary = screen.getByText("Versions and history");
+    expect(summary.closest("details")?.open).toBe(false);
+    fireEvent.click(summary);
+    expect(summary.closest("details")?.open).toBe(true);
+    expect(screen.getByRole("button", { name: "Save inactive version" })).toBeTruthy();
+  });
+
+  it("shows the failure instead of a click that did nothing", async () => {
+    // The save can succeed and the activate fail. Without this the dialog
+    // closed silently and left a rule saved-but-inactive with nothing said.
+    mocks.changePersonalPriorityRules
+      .mockResolvedValueOnce({ operation: "save", target: { rulesetId: 2, version: 1 },
+        activeRef: baselineRef, latestVersion: 1, requestFingerprint: "d".repeat(64),
+        replayed: false, changed: true, recomputeRequired: false, staleOutcomeCount: 0 })
+      .mockRejectedValueOnce(new Error("Active priority rules changed; preview again."));
+    renderDialog();
+    const source = await screen.findByRole("textbox", { name: "Rule source" });
+    fireEvent.change(source, { target: { value:
+      "pages when is open equals true then score add 10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview changes" }));
+    await screen.findByText("1 of 1 checked pages change with this rule.");
+    fireEvent.click(screen.getByRole("button", { name: "Turn this rule on" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Turn it on" }));
+
+    expect(await screen.findByText("Active priority rules changed; preview again."))
+      .toBeTruthy();
+  });
+
+  it("never has two confirmation dialogs open at once", async () => {
+    renderDialog();
+    const source = await screen.findByRole("textbox", { name: "Rule source" });
+    fireEvent.change(source, { target: { value:
+      "pages when is open equals true then score add 10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview changes" }));
+    await screen.findByText("1 of 1 checked pages change with this rule.");
+    fireEvent.click(screen.getByRole("button", { name: "Turn this rule on" }));
+    expect(screen.getAllByRole("alertdialog")).toHaveLength(1);
+
+    // Starting the other flow must close this one, not stack on it — a stale
+    // dialog would go on quoting counts from a rule nobody is applying.
+    fireEvent.click(screen.getByRole("button", { name: "Turn my rules off" }));
+    await waitFor(() => expect(screen.getAllByRole("alertdialog")).toHaveLength(1));
   });
 });
