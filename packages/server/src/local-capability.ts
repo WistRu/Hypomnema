@@ -13,6 +13,24 @@ const sessionCookieName = "tabhub_local_session";
 const sessionLifetimeMs = 8 * 60 * 60 * 1_000;
 const challengeLifetimeMs = 5 * 60 * 1_000;
 const maxChallengeAttempts = 5;
+/**
+ * A person pairs a browser once. The loop this bounds is a script inside the
+ * app page minting challenges to rotate the legitimate extension's credential
+ * over and over — a nuisance rather than a theft, but an unbounded one. Ten a
+ * minute is far beyond any human use and ends the loop immediately.
+ *
+ * Held per installation and in memory: the server is single-process and local,
+ * and a restart forgiving the counter is the right trade for a nuisance limit.
+ */
+const maxChallengesPerWindow = 10;
+const challengeWindowMs = 60 * 1_000;
+
+export class PairingRateLimitedError extends Error {
+  constructor() {
+    super("PAIRING_RATE_LIMITED");
+    this.name = "PairingRateLimitedError";
+  }
+}
 
 export const localAuthError = Object.freeze({
   error: "LOCAL_CAPABILITY_REQUIRED",
@@ -96,6 +114,7 @@ export function createLocalCapabilityService(
 ): LocalCapabilityService {
   const now = options.now ?? (() => new Date());
   const sessions = new Map<string, number>();
+  const challengeMints = new Map<string, number[]>();
   const selectCapabilityByInstallation = connection.prepare(`
     SELECT installation_id, extension_origin, credential_hash,
       credential_version, revoked_at
@@ -183,6 +202,14 @@ export function createLocalCapabilityService(
       const extensionOrigin = input.extensionOrigin.toLowerCase();
       if (!isExtensionOrigin(extensionOrigin)) throw new Error("PAIRING_FAILED");
       const timestamp = now();
+      const windowStart = timestamp.getTime() - challengeWindowMs;
+      const recent = (challengeMints.get(input.installationId) ?? [])
+        .filter((mintedAt) => mintedAt > windowStart);
+      if (recent.length >= maxChallengesPerWindow) {
+        challengeMints.set(input.installationId, recent);
+        throw new PairingRateLimitedError();
+      }
+      challengeMints.set(input.installationId, [...recent, timestamp.getTime()]);
       const at = timestamp.toISOString();
       const existing = selectCapabilityByInstallation.get(
         input.installationId,

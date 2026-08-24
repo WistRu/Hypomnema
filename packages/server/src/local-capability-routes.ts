@@ -9,6 +9,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 import {
   localAuthError,
+  PairingRateLimitedError,
   safeEqualSecret,
   type LocalCapabilityService,
 } from "./local-capability.js";
@@ -53,7 +54,14 @@ export function registerLocalCapabilityRoutes(
       return localPairingChallengeResponseSchema.parse(
         options.capabilities.createPairingChallenge(parsed.data),
       );
-    } catch {
+    } catch (error) {
+      // Distinguished from a refusal on purpose: 409 says "this pairing cannot
+      // happen", 429 says "not this fast". Collapsing them would tell a looping
+      // script it had hit a wall it could not wait out, and tell a person the
+      // opposite of the truth.
+      if (error instanceof PairingRateLimitedError) {
+        return reply.code(429).send({ error: "PAIRING_RATE_LIMITED" });
+      }
       return reply.code(409).send(localAuthError);
     }
   });

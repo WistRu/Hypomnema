@@ -554,3 +554,65 @@ describe("local UI capability", () => {
     }
   });
 });
+
+describe("pairing challenge rate limit", () => {
+  async function mint(
+    app: Awaited<ReturnType<typeof fixture>>["app"],
+    webCookie: string,
+    installationId: string,
+  ) {
+    return app.inject({
+      method: "POST",
+      url: "/api/local/pairing/challenges",
+      headers: { cookie: webCookie, "sec-fetch-site": "same-origin" },
+      payload: { installationId, extensionOrigin: origin },
+    });
+  }
+
+  it("refuses an unbounded mint loop without blocking a person pairing once", async () => {
+    // The threat is not a person: it is a script in the app page looping
+    // challenge/consume to rotate the legitimate extension's credential
+    // forever. A human pairs once, so a generous per-minute cap costs them
+    // nothing and ends the loop.
+    const { app, directory, cookie: webCookie } = await fixture();
+    try {
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        expect((await mint(app, webCookie, install1)).statusCode, `mint ${attempt}`)
+          .toBe(200);
+      }
+      expect((await mint(app, webCookie, install1)).statusCode).toBe(429);
+    } finally {
+      await app.close();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("does not let one installation exhaust another's allowance", async () => {
+    const { app, directory, cookie: webCookie } = await fixture();
+    try {
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        expect((await mint(app, webCookie, install1)).statusCode).toBe(200);
+      }
+      expect((await mint(app, webCookie, install1)).statusCode).toBe(429);
+      expect((await mint(app, webCookie, install2)).statusCode).toBe(200);
+    } finally {
+      await app.close();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("forgives the allowance once the window has passed", async () => {
+    const { app, directory, cookie: webCookie, setNow } = await fixture();
+    try {
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        expect((await mint(app, webCookie, install1)).statusCode).toBe(200);
+      }
+      expect((await mint(app, webCookie, install1)).statusCode).toBe(429);
+      setNow("2026-08-12T10:02:00.000Z");
+      expect((await mint(app, webCookie, install1)).statusCode).toBe(200);
+    } finally {
+      await app.close();
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+});
