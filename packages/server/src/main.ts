@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +12,7 @@ import { createAnthropicSummaryProvider } from "./summary-provider.js";
 import { createAnthropicResearchProvider } from "./research-provider.js";
 import { createEmbeddingProviderFromEnv } from "./embedding-provider.js";
 import { resolveServerHost } from "./runtime-config.js";
+import { createRuntimeAvailabilityRecorder } from "./runtime-availability.js";
 import { listenWithCleanup } from "./server-lifecycle.js";
 
 const workspaceRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -172,11 +174,53 @@ const app = createApp({
   ),
 });
 
+/**
+ * Issue #37: the host lost power, the runtime died with it, and eight hours
+ * passed before anyone noticed. The Trial week counts days of real use, so
+ * "not running" has to be tellable from "not used" afterwards. A hard kill
+ * writes nothing on its way out, so availability is recorded as it happens and
+ * the gaps are read back later.
+ */
 try {
   await listenWithCleanup(app, { host, port }, (closeError) => {
     app.log.error(closeError, "Failed to close TabHub after startup failure");
   });
+
+  // Only past this line is this process the runtime. Recording a start before
+  // the port is held would let a losing duplicate — exactly what a repeating
+  // restart task risks — declare the live server dead and invent an outage.
+  const availability = createRuntimeAvailabilityRecorder({
+    logPath: resolve(workspaceRoot, "data/runtime-availability.jsonl"),
+    heartbeatPath: resolve(workspaceRoot, "data/runtime-heartbeat.json"),
+    sessionId: randomUUID(),
+    pid: process.pid,
+    at: new Date().toISOString(),
+  });
+  const heartbeat = setInterval(
+    () => availability.beat(new Date().toISOString()),
+    30_000,
+  );
+  // Unref'd so the record never keeps alive a process that is trying to exit.
+  heartbeat.unref();
+
+  let shuttingDown = false;
+  const recordStop = (): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    clearInterval(heartbeat);
+    availability.stop(new Date().toISOString());
+  };
+  process.once("exit", recordStop);
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+    process.once(signal, () => {
+      recordStop();
+      // Close before leaving: an abrupt exit here would leave the database
+      // handle open, which is the very shape of shutdown this issue is about.
+      void app.close().finally(() => process.exit(0));
+    });
+  }
 } catch (error) {
   app.log.error(error);
   process.exitCode = 1;
 }
+

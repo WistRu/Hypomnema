@@ -87,6 +87,12 @@ afterEach(() => {
 
 beforeEach(() => {
   mocks.fetchPrivacyPurgeStatus.mockReset();
+  // The control polls on a timer. A bare mockReset leaves it returning
+  // undefined, so any test whose timing lets that timer fire crashes on
+  // `.then` of undefined — an uncaught exception from a timer callback, which
+  // fails the whole run while every test still reports green. Individual tests
+  // override this; the default only has to be a promise.
+  mocks.fetchPrivacyPurgeStatus.mockResolvedValue(undefined);
   mocks.retryPrivacyPurge.mockReset();
   mocks.startPrivacyPurge.mockReset();
 });

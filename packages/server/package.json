@@ -13,7 +13,8 @@
     "baseline:g0": "tsx src/baseline-cli.ts",
     "baseline:g3": "tsx src/baseline-g3-cli.ts",
     "baseline:g6": "tsx src/baseline-g6-cli.ts",
-    "baseline:g8": "tsx src/baseline-g8-cli.ts"
+    "baseline:g8": "tsx src/baseline-g8-cli.ts",
+    "availability": "tsx src/availability-cli.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

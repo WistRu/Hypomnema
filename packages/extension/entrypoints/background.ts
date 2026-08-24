@@ -1094,6 +1094,36 @@ function scheduleTabEventSnapshot(): void {
   }, TAB_EVENT_DEBOUNCE_MS);
 }
 
+/**
+ * Issue #37: the runtime died with the host and eight hours passed before
+ * anyone noticed, because the only way to learn TabHub is down was to try to
+ * use it. The extension already knows — it cannot reach the server — so the
+ * cheapest honest signal is the one place the user is already looking.
+ *
+ * Failures are swallowed: a browser that does not support the badge must not
+ * turn a status check into an error, and a missing badge is the state we are
+ * already in.
+ */
+async function showServerReachability(reachable: boolean): Promise<void> {
+  try {
+    await browser.action.setBadgeText({ text: reachable ? "" : "!" });
+    if (!reachable) {
+      await browser.action.setBadgeBackgroundColor({ color: "#b3261e" });
+    }
+    await browser.action.setTitle({
+      title: browser.i18n.getMessage(
+        reachable ? "extensionName" : "badgeServerUnreachable",
+      ),
+    });
+  } catch {
+    // Nothing to do: the badge is a courtesy, not a mechanism.
+  }
+}
+
+async function refreshServerReachabilityBadge(): Promise<void> {
+  await showServerReachability(await isServerReachable());
+}
+
 async function getStatus(retryPending = false): Promise<ExtensionStatus> {
   if (retryPending) {
     await flushPending();
@@ -1133,6 +1163,8 @@ async function getStatus(retryPending = false): Promise<ExtensionStatus> {
   if (latestError !== undefined) {
     status.lastError = latestError;
   }
+
+  void showServerReachability(serverReachable);
 
   return status;
 }
@@ -1708,11 +1740,15 @@ export default defineBackground(() => {
         console.error("TabHub periodic snapshot failed", error);
       });
     } else if (alarm.name === RETRY_ALARM_NAME) {
-      void Promise.all([flushPending(), flushContextMutations()]).catch(
-        (error: unknown) => {
-          console.error("TabHub pending item retry failed", error);
-        },
-      );
+      void Promise.all([
+        flushPending(),
+        flushContextMutations(),
+        // Without this the badge would only ever be as fresh as the last time
+        // someone opened the popup, which is precisely the check this replaces.
+        refreshServerReachabilityBadge(),
+      ]).catch((error: unknown) => {
+        console.error("TabHub pending item retry failed", error);
+      });
     }
   });
 

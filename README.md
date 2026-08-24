@@ -373,3 +373,59 @@ corepack pnpm backup
 - Этап 5: дерево тем, карточка вкладки, связи, важность, custom fields и массовые операции в UI/MCP — готово.
 - Этап 6: `sqlite-vec`, явное индексирование через Ollama/Voyage, семантический поиск, похожие вкладки и именованные кластеры inbox в REST/MCP — готово.
 - Этап 7: типизированный 3D-граф вкладок и тем с WebGL-навигацией, произвольными перекрёстными связями, инспектором и фокусом на окружении глубиной 1–5 шагов — готово.
+
+## Keeping the runtime up
+
+The server is an ordinary process: started by hand, it dies with the machine and
+does not come back. On 2026-08-24 the host lost power at 04:32 and the runtime
+stayed down for eight hours before anyone noticed, which cost a day of the Trial
+week (issue #37).
+
+Two things address that, and they are separate concerns.
+
+### Start it, and keep it started
+
+```bash
+corepack pnpm --filter @tabhub/server build
+```
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/install-autostart.ps1
+```
+
+The build comes first: the task launches `packages/server/dist/main.js`, and the
+installer refuses to register a task that would point at nothing.
+
+Registers a per-user scheduled task with two triggers: at logon, so a reboot is
+survivable, and every five minutes, so a runtime that dies on its own comes back
+without waiting for one. Both call `scripts/tabhub-runtime.ps1`, which checks two
+things before starting anything: whether something is already serving on
+`127.0.0.1`, and whether a TabHub process is running at all. The second matters —
+a process that is alive but not yet listening still holds the database, and a port
+check alone would happily start a second one alongside it.
+
+It needs no elevated privileges. Remove it with `-Remove`.
+
+**It is not proven until the machine has actually been rebooted.** These are shell
+scripts, outside the test suite; reasoning that they should work is not the same as
+watching them work.
+
+### Tell an outage from an idle stretch
+
+```bash
+corepack pnpm --filter @tabhub/server availability
+```
+
+The runtime records when it is available, to `data/runtime-availability.jsonl`,
+and heartbeats to `data/runtime-heartbeat.json` while it lives. A hard kill writes
+nothing on its way out, so a session that never recorded a clean stop is closed by
+the next start, bounded by the last heartbeat it managed to write.
+
+The extension also marks its own icon when it cannot reach the server, so an outage
+is visible without opening anything — which is how eight hours passed unnoticed the
+first time.
+
+This record exists because "TabHub was down" and "nobody used TabHub" are
+indistinguishable in the data and mean opposite things. Where no heartbeat survived, the boundary is
+reported as unknown rather than guessed, so a reader is never handed a confident
+wrong duration.

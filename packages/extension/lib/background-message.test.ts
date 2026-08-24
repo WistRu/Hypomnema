@@ -121,6 +121,12 @@ const extensionBrowser = vi.hoisted(() => {
         },
       ]),
     },
+    action: {
+      setBadgeText: vi.fn(async () => undefined),
+      setBadgeBackgroundColor: vi.fn(async () => undefined),
+      setTitle: vi.fn(async () => undefined),
+    },
+    i18n: { getMessage: (key: string) => key },
   };
 });
 
@@ -1285,5 +1291,50 @@ describe("background app pairing handover", () => {
         String(input).endsWith("/api/local/pairing/consume"),
       ),
     ).toHaveLength(0);
+  });
+});
+
+describe("server-unreachable badge", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("marks the icon when the server cannot be reached", async () => {
+    // Issue #37: the only way to learn TabHub was down was to try to use it.
+    // The extension already knows, so it says so where the user is looking.
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("connection refused");
+    }));
+
+    await handleMessage({ type: "tabhub:get-status" }, {});
+
+    // The badge update is fire-and-forget on purpose — a courtesy must not add
+    // latency to a status call — so wait for it rather than assume ordering.
+    await vi.waitFor(() => {
+      expect(extensionBrowser.action.setBadgeText).toHaveBeenCalledWith({ text: "!" });
+    });
+    expect(extensionBrowser.action.setTitle).toHaveBeenCalledWith({
+      title: "badgeServerUnreachable",
+    });
+  });
+
+  it("clears the mark once the server answers again", async () => {
+    // Reachable means a readable health answer, not merely a 200: an empty
+    // body is exactly what an unhealthy server returns.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(
+      JSON.stringify({ status: "ok", database: "ok", schemaVersion: 26 }),
+      { headers: { "Content-Type": "application/json" }, status: 200 },
+    )));
+
+    await handleMessage({ type: "tabhub:get-status" }, {});
+
+    await vi.waitFor(() => {
+      expect(extensionBrowser.action.setBadgeText).toHaveBeenCalledWith({ text: "" });
+    });
+    expect(extensionBrowser.action.setBadgeBackgroundColor).not.toHaveBeenCalled();
   });
 });

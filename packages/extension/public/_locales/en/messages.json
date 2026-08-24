@@ -1,4 +1,7 @@
 {
+  "badgeServerUnreachable": {
+    "message": "TabHub — the local server is not responding"
+  },
   "extensionName": {
     "message": "TabHub"
   },
