@@ -8,7 +8,7 @@
     "start": "node dist/main.js",
     "build": "tsup src/main.ts --format esm --platform node --target node22 --clean && node scripts/build-foreground-helper.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --maxWorkers=2",
+    "test": "node -e \"require('fs').rmSync('.vitest-report.json',{force:true})\" && vitest run --reporter=default --reporter=json --outputFile.json=.vitest-report.json --maxWorkers=2 && node ../../scripts/check-test-completeness.mjs . test",
     "backup": "tsx src/backup.ts",
     "baseline:g0": "tsx src/baseline-cli.ts",
     "baseline:g3": "tsx src/baseline-g3-cli.ts",

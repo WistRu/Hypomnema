@@ -11,3 +11,6 @@ backups/
 packages/server/data/
 packages/server/backups/
 packages/server/native/bin/
+
+# Written by the test run and read by scripts/check-test-completeness.mjs
+.vitest-report.json

@@ -8,7 +8,7 @@
     "./limits": "./src/limits.ts"
   },
   "scripts": {
-    "test": "vitest run --maxWorkers=4",
+    "test": "node -e \"require('fs').rmSync('.vitest-report.json',{force:true})\" && vitest run --reporter=default --reporter=json --outputFile.json=.vitest-report.json --maxWorkers=4 && node ../../scripts/check-test-completeness.mjs . src",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
